@@ -1,29 +1,30 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { setAuthTokenGetter } from "@workspace/api-client-react/custom-fetch";
-import { useGetMe, User } from "@workspace/api-client-react";
+import { useGetMe, getGetMeQueryKey, User } from "@workspace/api-client-react";
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (token: string, user: User) => void;
+  login: (token: string) => void;
   logout: () => void;
   isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Initial token setup for api client
-const initialToken = localStorage.getItem("ti_support_token");
-if (initialToken) {
-  setAuthTokenGetter(() => initialToken);
-}
+// Inicialização imediata — garante que o getter está configurado antes de qualquer requisição
+setAuthTokenGetter(() => localStorage.getItem("ti_support_token"));
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(initialToken);
+  const [token, setTokenState] = useState<string | null>(
+    () => localStorage.getItem("ti_support_token")
+  );
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
 
-  const { data: user, isLoading, isError, error } = useGetMe({
+  const { data: user, isLoading, isError } = useGetMe({
     query: {
       enabled: !!token,
       retry: false,
@@ -31,27 +32,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    setAuthTokenGetter(() => token);
-    if (token) {
-      localStorage.setItem("ti_support_token", token);
-    } else {
-      localStorage.removeItem("ti_support_token");
-    }
-  }, [token]);
-
-  useEffect(() => {
     if (isError) {
+      // Token inválido ou expirado — limpa tudo
+      localStorage.removeItem("ti_support_token");
+      setAuthTokenGetter(() => null);
       setTokenState(null);
       setLocation("/");
     }
   }, [isError, setLocation]);
 
   const login = (newToken: string) => {
+    // Configura o getter IMEDIATAMENTE antes de qualquer requisição
+    localStorage.setItem("ti_support_token", newToken);
+    setAuthTokenGetter(() => newToken);
     setTokenState(newToken);
+    // Invalida o cache do /me para buscar com o novo token
+    queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
   };
 
   const logout = () => {
+    localStorage.removeItem("ti_support_token");
+    setAuthTokenGetter(() => null);
     setTokenState(null);
+    queryClient.clear();
     setLocation("/");
   };
 
