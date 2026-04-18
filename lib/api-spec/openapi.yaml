@@ -1,29 +1,571 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API do Sistema de Suporte TI
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+    description: Saúde do servidor
+  - name: auth
+    description: Autenticação e autorização
+  - name: users
+    description: Gerenciamento de usuários
+  - name: tickets
+    description: Gerenciamento de chamados
+  - name: messages
+    description: Mensagens dos chamados
+  - name: ratings
+    description: Avaliações dos chamados
+  - name: reports
+    description: Relatórios
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
-      summary: Health check
-      description: Returns server health status
+      summary: Verificação de saúde
+      description: Retorna o status de saúde do servidor
       responses:
         "200":
-          description: Healthy
+          description: Saudável
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ───────── AUTH ─────────
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Registrar novo usuário
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterBody"
+      responses:
+        "201":
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: E-mail já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Autenticar usuário
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Autenticado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Credenciais inválidas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Encerrar sessão
+      responses:
+        "200":
+          description: Sessão encerrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Perfil do usuário autenticado
+      responses:
+        "200":
+          description: Dados do usuário autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ───────── USERS ─────────
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: Listar usuários (ADMIN)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, ACTIVE, INACTIVE]
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [USER, COORDINATOR, ANALYST, ADMIN]
+      responses:
+        "200":
+          description: Lista de usuários
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Obter usuário por ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Usuário encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Atualizar usuário
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: Usuário atualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /users/{id}/approve:
+    post:
+      operationId: approveUser
+      tags: [users]
+      summary: Aprovar usuário pendente (ADMIN)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveUserBody"
+      responses:
+        "200":
+          description: Usuário aprovado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ───────── TICKETS ─────────
+  /tickets:
+    get:
+      operationId: listTickets
+      tags: [tickets]
+      summary: Listar chamados
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [SOFTWARE, HARDWARE]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+        - name: uf
+          in: query
+          schema:
+            type: string
+        - name: municipality
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista de chamados
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ticket"
+    post:
+      operationId: createTicket
+      tags: [tickets]
+      summary: Abrir novo chamado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketBody"
+      responses:
+        "201":
+          description: Chamado criado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tickets/{id}:
+    get:
+      operationId: getTicket
+      tags: [tickets]
+      summary: Obter chamado por ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Chamado encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketDetail"
+        "404":
+          description: Chamado não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateTicket
+      tags: [tickets]
+      summary: Atualizar chamado
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketBody"
+      responses:
+        "200":
+          description: Chamado atualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "404":
+          description: Chamado não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tickets/{id}/assign:
+    post:
+      operationId: assignTicket
+      tags: [tickets]
+      summary: Atribuir chamado a analista
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignTicketBody"
+      responses:
+        "200":
+          description: Chamado atribuído
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "404":
+          description: Chamado não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ───────── MESSAGES ─────────
+  /tickets/{ticketId}/messages:
+    get:
+      operationId: listMessages
+      tags: [messages]
+      summary: Listar mensagens de um chamado
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Lista de mensagens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+    post:
+      operationId: createMessage
+      tags: [messages]
+      summary: Enviar mensagem em um chamado
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMessageBody"
+      responses:
+        "201":
+          description: Mensagem enviada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ───────── RATINGS ─────────
+  /tickets/{ticketId}/rating:
+    get:
+      operationId: getTicketRating
+      tags: [ratings]
+      summary: Obter avaliação de um chamado
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Avaliação encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rating"
+        "404":
+          description: Avaliação não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: rateTicket
+      tags: [ratings]
+      summary: Avaliar chamado resolvido
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRatingBody"
+      responses:
+        "201":
+          description: Avaliação registrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rating"
+        "400":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ───────── REPORTS / WOW ─────────
+  /reports/summary:
+    get:
+      operationId: getReportSummary
+      tags: [reports]
+      summary: Resumo geral do sistema
+      responses:
+        "200":
+          description: Resumo com totais e indicadores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportSummary"
+
+  /reports/by-status:
+    get:
+      operationId: getTicketsByStatus
+      tags: [reports]
+      summary: Chamados agrupados por status
+      responses:
+        "200":
+          description: Contagem por status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StatusCount"
+
+  /reports/by-region:
+    get:
+      operationId: getTicketsByRegion
+      tags: [reports]
+      summary: Chamados agrupados por UF
+      responses:
+        "200":
+          description: Contagem por UF
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RegionCount"
+
+  /reports/by-type:
+    get:
+      operationId: getTicketsByType
+      tags: [reports]
+      summary: Chamados agrupados por tipo
+      responses:
+        "200":
+          description: Contagem por tipo
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TypeCount"
+
+  /reports/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [reports]
+      summary: Atividade recente do sistema
+      responses:
+        "200":
+          description: Últimas atividades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +576,401 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    # ─── Auth ───
+    RegisterBody:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        uf:
+          type: string
+        municipality:
+          type: string
+      required:
+        - name
+        - email
+        - password
+        - uf
+        - municipality
+
+    LoginBody:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+      required:
+        - token
+        - user
+
+    # ─── User ───
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [USER, COORDINATOR, ANALYST, ADMIN]
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, INACTIVE]
+        uf:
+          type: string
+        municipality:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+        - role
+        - status
+        - uf
+        - municipality
+        - createdAt
+
+    UpdateUserBody:
+      type: object
+      properties:
+        name:
+          type: string
+        uf:
+          type: string
+        municipality:
+          type: string
+
+    ApproveUserBody:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [USER, COORDINATOR, ANALYST, ADMIN]
+      required:
+        - role
+
+    # ─── Ticket ───
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [SOFTWARE, HARDWARE]
+        status:
+          type: string
+          enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+        priority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        uf:
+          type: string
+        municipality:
+          type: string
+        createdById:
+          type: integer
+        assignedToId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          $ref: "#/components/schemas/UserRef"
+        assignedTo:
+          oneOf:
+            - $ref: "#/components/schemas/UserRef"
+            - type: "null"
+      required:
+        - id
+        - title
+        - description
+        - type
+        - status
+        - priority
+        - uf
+        - municipality
+        - createdById
+        - assignedToId
+        - createdAt
+        - updatedAt
+        - createdBy
+
+    TicketDetail:
+      allOf:
+        - $ref: "#/components/schemas/Ticket"
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: "#/components/schemas/Message"
+            rating:
+              oneOf:
+                - $ref: "#/components/schemas/Rating"
+                - type: "null"
+
+    UserRef:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [USER, COORDINATOR, ANALYST, ADMIN]
+      required:
+        - id
+        - name
+        - email
+        - role
+
+    CreateTicketBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [SOFTWARE, HARDWARE]
+        priority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+      required:
+        - title
+        - description
+        - type
+        - priority
+
+    UpdateTicketBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+        priority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+
+    AssignTicketBody:
+      type: object
+      properties:
+        assignedToId:
+          type: integer
+      required:
+        - assignedToId
+
+    # ─── Message ───
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        ticketId:
+          type: integer
+        senderId:
+          type: integer
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        sender:
+          $ref: "#/components/schemas/UserRef"
+      required:
+        - id
+        - ticketId
+        - senderId
+        - message
+        - createdAt
+        - sender
+
+    CreateMessageBody:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    # ─── Rating ───
+    Rating:
+      type: object
+      properties:
+        id:
+          type: integer
+        ticketId:
+          type: integer
+        userId:
+          type: integer
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+        feedback:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - ticketId
+        - userId
+        - score
+        - createdAt
+
+    CreateRatingBody:
+      type: object
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+        feedback:
+          type: string
+      required:
+        - score
+
+    # ─── Reports ───
+    ReportSummary:
+      type: object
+      properties:
+        totalTickets:
+          type: integer
+        openTickets:
+          type: integer
+        inProgressTickets:
+          type: integer
+        resolvedTickets:
+          type: integer
+        closedTickets:
+          type: integer
+        totalUsers:
+          type: integer
+        pendingUsers:
+          type: integer
+        avgResolutionHours:
+          type: ["number", "null"]
+        avgRating:
+          type: ["number", "null"]
+      required:
+        - totalTickets
+        - openTickets
+        - inProgressTickets
+        - resolvedTickets
+        - closedTickets
+        - totalUsers
+        - pendingUsers
+        - avgResolutionHours
+        - avgRating
+
+    StatusCount:
+      type: object
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+      required:
+        - status
+        - count
+
+    RegionCount:
+      type: object
+      properties:
+        uf:
+          type: string
+        count:
+          type: integer
+      required:
+        - uf
+        - count
+
+    TypeCount:
+      type: object
+      properties:
+        type:
+          type: string
+        count:
+          type: integer
+      required:
+        - type
+        - count
+
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        action:
+          type: string
+        ticketId:
+          type: integer
+        ticketTitle:
+          type: string
+        userName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - action
+        - ticketId
+        - ticketTitle
+        - userName
+        - createdAt

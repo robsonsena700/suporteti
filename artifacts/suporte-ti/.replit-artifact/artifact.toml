@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Sistema de Suporte TI"
+version = "1.0.0"
+id = "artifacts/suporte-ti"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23005
+
+[services.development]
+run = "pnpm --filter @workspace/suporte-ti run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/suporte-ti", "run", "build" ]
+publicDir = "artifacts/suporte-ti/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23005"
+BASE_PATH = "/"

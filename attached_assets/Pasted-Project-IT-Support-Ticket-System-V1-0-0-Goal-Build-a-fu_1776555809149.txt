@@ -1,0 +1,123 @@
+Project: IT Support Ticket System (V1.0.0)
+
+Goal:
+Build a full-stack web application for managing IT support requests (software and hardware), with role-based access control and ticket workflow.
+
+🧩 Core Requirements
+
+1. Authentication & Authorization
+
+Users must register and remain in pending status until approved.
+Roles:
+USER
+COORDINATOR
+ANALYST
+ADMIN
+Access control must be strictly enforced via RBAC.
+
+2. Ticket Management
+
+Ticket types:
+SOFTWARE (password reset, bugs, questions, etc.)
+HARDWARE (repair, replacement, printers, network, etc.)
+Ticket fields:
+id (UUID)
+title
+description
+type (SOFTWARE | HARDWARE)
+status (OPEN, IN_PROGRESS, RESOLVED, CLOSED)
+priority (LOW, MEDIUM, HIGH)
+created_by (user_id)
+assigned_to (optional)
+state (UF)
+municipality
+created_at / updated_at
+
+3. Permissions
+
+USER:
+Create tickets
+View/interact only with own tickets
+Send messages and rate tickets
+COORDINATOR:
+View tickets from users in same UF + municipality
+Manage and respond to those tickets
+ANALYST:
+Access all tickets
+Update status and respond
+ADMIN:
+Full access
+Approve users and assign roles
+
+4. Ticket Routing Logic
+
+Tickets must be automatically associated with:
+User's state (UF)
+municipality
+Coordinators only see tickets within their region.
+
+5. Messaging System
+
+Each ticket must support threaded messages (chat-like).
+Messages:
+id
+ticket_id
+sender_id
+message
+timestamp
+
+6. Rating System
+
+Users can rate tickets after resolution:
+score (1–5)
+optional feedback
+🖥️ Frontend
+Stack:
+React + Vite
+Material UI (MUI)
+Features:
+Responsive design
+Light/Dark mode
+SEO-friendly structure
+UI Structure:
+Dashboard (summary + "Open Ticket" button)
+Tickets (list + filters)
+Profile
+Reports
+Settings (ADMIN + ANALYST only)
+Design tokens:
+Font: Poppins
+Primary color: #1B3B6E
+Background: #F6FCFE
+⚙️ Backend
+Stack:
+Node.js (preferably with Express or Fastify)
+Features:
+RESTful API
+JWT authentication
+Role-based middleware
+Input validation
+🗄️ Database
+PostgreSQL schema:
+users
+roles
+tickets
+messages
+ratings
+Use proper indexing and foreign keys.
+🐳 DevOps
+Dockerized environment:
+frontend
+backend
+database
+Use docker-compose
+Version control:
+Git (GitLab workflow)
+📊 Reports
+Generate reports based on:
+Ticket volume
+Status
+Region (UF / municipality)
+Performance (resolution time)
+🔮 Future Scope (V2.0.0)
+Hybrid mobile app (Android/iOS) using React Native or similar.
