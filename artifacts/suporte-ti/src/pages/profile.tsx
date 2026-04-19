@@ -18,6 +18,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { UserCircle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useEffect, useMemo, useState } from "react";
+import { customFetch } from "@workspace/api-client-react/custom-fetch";
+import { formatBrazilPhone, formatCpf, isValidBrazilMobile, isValidCpf, onlyDigits } from "@/lib/validators";
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
@@ -26,6 +30,11 @@ const UFS = [
 
 const profileSchema = z.object({
   name: z.string().min(2, "Nome é obrigatório"),
+  cpf: z.string().refine(isValidCpf, "CPF inválido"),
+  establishment: z.string().min(2, "Estabelecimento/Unidade de Saúde é obrigatório"),
+  contactPhone: z.string().refine(isValidBrazilMobile, "Contato inválido"),
+  prefersWhatsapp: z.boolean().default(false),
+  prefersTelegram: z.boolean().default(false),
   uf: z.string().min(2, "UF é obrigatória"),
   municipality: z.string().min(2, "Município é obrigatório"),
 });
@@ -37,20 +46,71 @@ export default function Profile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateMutation = useUpdateUser();
+  const [municipalities, setMunicipalities] = useState<string[]>([]);
+  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
 
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
       name: user?.name || "",
+      cpf: user?.cpf ? formatCpf(user.cpf) : "",
+      establishment: user?.establishment || "",
+      contactPhone: user?.contactPhone ? formatBrazilPhone(user.contactPhone) : "+55 ",
+      prefersWhatsapp: user?.prefersWhatsapp ?? false,
+      prefersTelegram: user?.prefersTelegram ?? false,
       uf: user?.uf || "",
       municipality: user?.municipality || "",
     },
   });
 
+  const uf = form.watch("uf");
+
+  useEffect(() => {
+    if (!uf) {
+      setMunicipalities([]);
+      form.setValue("municipality", "");
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingMunicipalities(true);
+
+    customFetch<string[]>(`/api/ibge/ufs/${encodeURIComponent(uf)}/municipalities`)
+      .then((data) => {
+        if (cancelled) return;
+        setMunicipalities(Array.isArray(data) ? data : []);
+        const current = form.getValues("municipality");
+        if (current && !data.includes(current)) {
+          form.setValue("municipality", "");
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMunicipalities([]);
+        form.setValue("municipality", "");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingMunicipalities(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uf, form]);
+
+  const municipalityOptions = useMemo(() => municipalities, [municipalities]);
+
   const onSubmit = (data: ProfileForm) => {
     if (!user) return;
     updateMutation.mutate(
-      { id: user.id, data },
+      {
+        id: user.id,
+        data: {
+          ...data,
+          cpf: onlyDigits(data.cpf),
+        },
+      },
       {
         onSuccess: (updatedUser) => {
           queryClient.setQueryData(getGetMeQueryKey(), updatedUser);
@@ -109,6 +169,79 @@ export default function Profile() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="cpf"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>CPF</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="000.000.000-00"
+                          value={field.value}
+                          onChange={(e) => field.onChange(formatCpf(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="establishment"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Estabelecimento / Unidade de Saúde</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="contactPhone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Contato</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder='+55 (XX) X XXXX-XXXX'
+                          value={field.value}
+                          onChange={(e) => field.onChange(formatBrazilPhone(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="prefersWhatsapp"
+                    render={({ field }) => (
+                      <FormItem className="flex items-center gap-2 space-y-0 rounded-md border p-3">
+                        <FormControl>
+                          <Checkbox checked={field.value} onCheckedChange={(v) => field.onChange(Boolean(v))} />
+                        </FormControl>
+                        <FormLabel className="mb-0">WhatsApp</FormLabel>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="prefersTelegram"
+                    render={({ field }) => (
+                      <FormItem className="flex items-center gap-2 space-y-0 rounded-md border p-3">
+                        <FormControl>
+                          <Checkbox checked={field.value} onCheckedChange={(v) => field.onChange(Boolean(v))} />
+                        </FormControl>
+                        <FormLabel className="mb-0">Telegram</FormLabel>
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
@@ -138,9 +271,32 @@ export default function Profile() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Município</FormLabel>
-                        <FormControl>
-                          <Input {...field} />
-                        </FormControl>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                          disabled={!uf || isLoadingMunicipalities || municipalityOptions.length === 0}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue
+                                placeholder={
+                                  !uf
+                                    ? "Selecione a UF"
+                                    : isLoadingMunicipalities
+                                      ? "Carregando..."
+                                      : "Selecione"
+                                }
+                              />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {municipalityOptions.map((name) => (
+                              <SelectItem key={name} value={name}>
+                                {name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}

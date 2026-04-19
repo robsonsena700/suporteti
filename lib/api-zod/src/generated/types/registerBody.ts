@@ -10,6 +10,12 @@ export interface RegisterBody {
   name: string;
   email: string;
   password: string;
+  cpf: string;
+  establishment: string;
+  contactPhone: string;
+  prefersWhatsapp?: boolean;
+  prefersTelegram?: boolean;
+  termsAccepted: boolean;
   uf: string;
   municipality: string;
 }

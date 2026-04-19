@@ -8,6 +8,11 @@
 
 export interface UpdateUserBody {
   name?: string;
+  cpf?: string;
+  establishment?: string;
+  contactPhone?: string;
+  prefersWhatsapp?: boolean;
+  prefersTelegram?: boolean;
   uf?: string;
   municipality?: string;
 }

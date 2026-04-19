@@ -138,7 +138,7 @@ export default function Settings() {
                       <Badge variant="outline">{user.role}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.status === UserStatus.ACTIVE ? "success" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
+                      <Badge variant={user.status === UserStatus.ACTIVE ? "default" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
                         {user.status}
                       </Badge>
                     </TableCell>

@@ -31,4 +31,21 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
 
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  const code = (err as any)?.code;
+  let message = "Erro interno do servidor";
+
+  if (code === "42703" || code === "42P01") {
+    message = "Banco desatualizado. Rode: pnpm --filter @workspace/db run push";
+  }
+
+  logger.error({ err }, "Unhandled error");
+  res.status(500).json({ error: message });
+});
+
 export default app;

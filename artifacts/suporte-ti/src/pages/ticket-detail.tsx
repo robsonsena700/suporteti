@@ -95,7 +95,7 @@ export default function TicketDetail() {
   const handleSendMessage = () => {
     if (!message.trim()) return;
     messageMutation.mutate(
-      { id: ticketId, data: { message: message.trim() } },
+      { ticketId, data: { message: message.trim() } },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
@@ -108,7 +108,7 @@ export default function TicketDetail() {
   const handleRate = () => {
     if (!rating) return;
     rateMutation.mutate(
-      { id: ticketId, data: { score: rating, feedback } },
+      { ticketId, data: { score: rating, feedback } },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetTicketRatingQueryKey(ticketId) });

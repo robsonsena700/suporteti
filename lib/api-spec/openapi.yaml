@@ -602,6 +602,18 @@ components:
           type: string
         password:
           type: string
+        cpf:
+          type: string
+        establishment:
+          type: string
+        contactPhone:
+          type: string
+        prefersWhatsapp:
+          type: boolean
+        prefersTelegram:
+          type: boolean
+        termsAccepted:
+          type: boolean
         uf:
           type: string
         municipality:
@@ -610,6 +622,10 @@ components:
         - name
         - email
         - password
+        - cpf
+        - establishment
+        - contactPhone
+        - termsAccepted
         - uf
         - municipality
 
@@ -651,6 +667,21 @@ components:
         status:
           type: string
           enum: [PENDING, ACTIVE, INACTIVE]
+        cpf:
+          type: ["string", "null"]
+        establishment:
+          type: ["string", "null"]
+        contactPhone:
+          type: ["string", "null"]
+        prefersWhatsapp:
+          type: boolean
+        prefersTelegram:
+          type: boolean
+        termsAccepted:
+          type: boolean
+        termsAcceptedAt:
+          type: ["string", "null"]
+          format: date-time
         uf:
           type: string
         municipality:
@@ -664,6 +695,9 @@ components:
         - email
         - role
         - status
+        - prefersWhatsapp
+        - prefersTelegram
+        - termsAccepted
         - uf
         - municipality
         - createdAt
@@ -673,6 +707,16 @@ components:
       properties:
         name:
           type: string
+        cpf:
+          type: string
+        establishment:
+          type: string
+        contactPhone:
+          type: string
+        prefersWhatsapp:
+          type: boolean
+        prefersTelegram:
+          type: boolean
         uf:
           type: string
         municipality:

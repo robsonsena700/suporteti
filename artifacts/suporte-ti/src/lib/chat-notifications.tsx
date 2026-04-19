@@ -110,7 +110,6 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
       body: body.length > 80 ? body.slice(0, 80) + "…" : body,
       icon: "/favicon.ico",
       tag: "chat-message",
-      renotify: true,
     });
     notif.onclick = () => { window.focus(); notif.close(); };
   }, []);
@@ -215,7 +214,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   // ── Update page title ─────────────────────────────────────────────────────
 
   useEffect(() => {
-    const base = "SuporteGov";
+    const base = "SuporteTI";
     document.title = unreadCount > 0 ? `(${unreadCount}) ${base}` : base;
   }, [unreadCount]);
 

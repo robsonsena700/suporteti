@@ -14,6 +14,17 @@ export interface User {
   email: string;
   role: UserRole;
   status: UserStatus;
+  /** @nullable */
+  cpf?: string | null;
+  /** @nullable */
+  establishment?: string | null;
+  /** @nullable */
+  contactPhone?: string | null;
+  prefersWhatsapp: boolean;
+  prefersTelegram: boolean;
+  termsAccepted: boolean;
+  /** @nullable */
+  termsAcceptedAt?: Date | null;
   uf: string;
   municipality: string;
   createdAt: Date;

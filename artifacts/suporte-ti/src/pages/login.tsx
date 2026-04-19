@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Eye, EyeOff } from "lucide-react";
 
 const loginSchema = z.object({
   email: z.string().email("E-mail inválido"),
@@ -30,6 +31,7 @@ export default function Login() {
   const { login } = useAuth();
   const { toast } = useToast();
   const loginMutation = useLogin();
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -69,7 +71,7 @@ export default function Login() {
           <div className="mx-auto w-12 h-12 bg-primary rounded-lg flex items-center justify-center mb-4">
             <span className="text-primary-foreground font-bold text-xl">TI</span>
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight text-primary">SuporteGov</CardTitle>
+          <CardTitle className="text-2xl font-bold tracking-tight text-primary">SuporteTI</CardTitle>
           <CardDescription>
             Acesse o sistema de gestão de chamados
           </CardDescription>
@@ -97,7 +99,21 @@ export default function Login() {
                   <FormItem>
                     <FormLabel>Senha</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} />
+                      <div className="relative">
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="••••••••"
+                          {...field}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setShowPassword((v) => !v)}
+                          aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

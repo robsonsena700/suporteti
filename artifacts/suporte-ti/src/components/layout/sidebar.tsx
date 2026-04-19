@@ -47,7 +47,7 @@ export function Sidebar() {
           <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-primary-foreground">
             TI
           </div>
-          SuporteGov
+          SuporteTI
         </span>
       </div>
       <div className="flex flex-1 flex-col overflow-y-auto">

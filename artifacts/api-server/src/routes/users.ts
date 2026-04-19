@@ -4,6 +4,9 @@ import { eq, and } from "drizzle-orm";
 import { UpdateUserBody, ApproveUserBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { signToken } from "../middlewares/auth";
+import { isValidCpf, normalizeCpf } from "../lib/cpf";
+import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
+import { validateMunicipalityForUf } from "../lib/ibge";
 
 const router: IRouter = Router();
 
@@ -16,6 +19,13 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
     email: usersTable.email,
     role: usersTable.role,
     status: usersTable.status,
+    cpf: usersTable.cpf,
+    establishment: usersTable.establishment,
+    contactPhone: usersTable.contactPhone,
+    prefersWhatsapp: usersTable.prefersWhatsapp,
+    prefersTelegram: usersTable.prefersTelegram,
+    termsAccepted: usersTable.termsAccepted,
+    termsAcceptedAt: usersTable.termsAcceptedAt,
     uf: usersTable.uf,
     municipality: usersTable.municipality,
     createdAt: usersTable.createdAt,
@@ -47,6 +57,13 @@ router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<v
     email: usersTable.email,
     role: usersTable.role,
     status: usersTable.status,
+    cpf: usersTable.cpf,
+    establishment: usersTable.establishment,
+    contactPhone: usersTable.contactPhone,
+    prefersWhatsapp: usersTable.prefersWhatsapp,
+    prefersTelegram: usersTable.prefersTelegram,
+    termsAccepted: usersTable.termsAccepted,
+    termsAcceptedAt: usersTable.termsAcceptedAt,
     uf: usersTable.uf,
     municipality: usersTable.municipality,
     createdAt: usersTable.createdAt,
@@ -81,8 +98,77 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
     return;
   }
 
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const isSelfUpdate = currentUser.userId === id;
+  const nextCpf = parsed.data.cpf ?? existing.cpf ?? "";
+  const nextEstablishment = parsed.data.establishment ?? existing.establishment ?? "";
+  const nextContactPhone = parsed.data.contactPhone ?? existing.contactPhone ?? "";
+  const nextUf = parsed.data.uf ?? existing.uf;
+  const nextMunicipality = parsed.data.municipality ?? existing.municipality;
+
+  if (isSelfUpdate) {
+    if (!nextCpf || !isValidCpf(nextCpf)) {
+      res.status(400).json({ error: "CPF inválido" });
+      return;
+    }
+    if (!nextEstablishment || nextEstablishment.trim().length < 2) {
+      res.status(400).json({ error: "Estabelecimento/Unidade de Saúde é obrigatório" });
+      return;
+    }
+    if (!nextContactPhone || !isValidBrazilMobile(nextContactPhone)) {
+      res.status(400).json({ error: "Contato inválido" });
+      return;
+    }
+  } else {
+    if (parsed.data.cpf && !isValidCpf(parsed.data.cpf)) {
+      res.status(400).json({ error: "CPF inválido" });
+      return;
+    }
+    if (parsed.data.contactPhone && !isValidBrazilMobile(parsed.data.contactPhone)) {
+      res.status(400).json({ error: "Contato inválido" });
+      return;
+    }
+  }
+
+  if ((parsed.data.uf || parsed.data.municipality) && nextUf && nextMunicipality) {
+    try {
+      const ok = await validateMunicipalityForUf(nextUf, nextMunicipality);
+      if (!ok) {
+        res.status(400).json({ error: "Município não pertence à UF informada" });
+        return;
+      }
+    } catch {
+      res.status(503).json({ error: "Serviço do IBGE indisponível no momento" });
+      return;
+    }
+  }
+
+  const patch: Record<string, unknown> = { ...parsed.data };
+
+  if (parsed.data.cpf) {
+    const normalizedCpf = normalizeCpf(parsed.data.cpf);
+    const [cpfExisting] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.cpf, normalizedCpf));
+    if (cpfExisting && cpfExisting.id !== id) {
+      res.status(409).json({ error: "CPF já cadastrado" });
+      return;
+    }
+    patch.cpf = normalizedCpf;
+  }
+
+  if (parsed.data.contactPhone) {
+    patch.contactPhone = normalizePhoneE164Brazil(parsed.data.contactPhone);
+  }
+
   const [user] = await db.update(usersTable)
-    .set(parsed.data)
+    .set(patch as any)
     .where(eq(usersTable.id, id))
     .returning({
       id: usersTable.id,
@@ -90,6 +176,13 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
       email: usersTable.email,
       role: usersTable.role,
       status: usersTable.status,
+      cpf: usersTable.cpf,
+      establishment: usersTable.establishment,
+      contactPhone: usersTable.contactPhone,
+      prefersWhatsapp: usersTable.prefersWhatsapp,
+      prefersTelegram: usersTable.prefersTelegram,
+      termsAccepted: usersTable.termsAccepted,
+      termsAcceptedAt: usersTable.termsAcceptedAt,
       uf: usersTable.uf,
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
@@ -127,6 +220,13 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
       email: usersTable.email,
       role: usersTable.role,
       status: usersTable.status,
+      cpf: usersTable.cpf,
+      establishment: usersTable.establishment,
+      contactPhone: usersTable.contactPhone,
+      prefersWhatsapp: usersTable.prefersWhatsapp,
+      prefersTelegram: usersTable.prefersTelegram,
+      termsAccepted: usersTable.termsAccepted,
+      termsAcceptedAt: usersTable.termsAcceptedAt,
       uf: usersTable.uf,
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,

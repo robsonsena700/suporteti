@@ -21,6 +21,12 @@ export interface RegisterBody {
   name: string;
   email: string;
   password: string;
+  cpf: string;
+  establishment: string;
+  contactPhone: string;
+  prefersWhatsapp?: boolean;
+  prefersTelegram?: boolean;
+  termsAccepted: boolean;
   uf: string;
   municipality: string;
 }
@@ -53,6 +59,17 @@ export interface User {
   email: string;
   role: UserRole;
   status: UserStatus;
+  /** @nullable */
+  cpf?: string | null;
+  /** @nullable */
+  establishment?: string | null;
+  /** @nullable */
+  contactPhone?: string | null;
+  prefersWhatsapp: boolean;
+  prefersTelegram: boolean;
+  termsAccepted: boolean;
+  /** @nullable */
+  termsAcceptedAt?: string | null;
   uf: string;
   municipality: string;
   createdAt: string;
@@ -65,6 +82,11 @@ export interface AuthResponse {
 
 export interface UpdateUserBody {
   name?: string;
+  cpf?: string;
+  establishment?: string;
+  contactPhone?: string;
+  prefersWhatsapp?: boolean;
+  prefersTelegram?: boolean;
   uf?: string;
   municipality?: string;
 }
