@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, ticketAttachmentsTable } from "@workspace/db";
+import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable } from "@workspace/db";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
+import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 
 const router: IRouter = Router();
 
@@ -230,6 +231,25 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     return;
   }
 
+  const requestedStatus = parsed.data.status;
+  const isReopenAction =
+    typeof requestedStatus === "string"
+    && existing.status === "CLOSED"
+    && requestedStatus !== "CLOSED";
+
+  if (isReopenAction) {
+    const allowed = canReopenClosedTicket({
+      role: user.role,
+      closedAt: existing.updatedAt,
+    });
+    if (!allowed) {
+      res.status(403).json({
+        error: `Reabertura permitida apenas para Admin e Analista em até ${REOPEN_WINDOW_HOURS}h após o fechamento.`,
+      });
+      return;
+    }
+  }
+
   const [ticket] = await db.update(ticketsTable)
     .set(parsed.data)
     .where(eq(ticketsTable.id, id))
@@ -283,6 +303,8 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
     return;
   }
 
+  const previousAssignedToId = existing.assignedToId ?? null;
+
   const [ticket] = await db.update(ticketsTable)
     .set({ assignedToId: parsed.data.assignedToId, status: "IN_PROGRESS" })
     .where(eq(ticketsTable.id, id))
@@ -297,6 +319,15 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
   const assignedTo = ticket.assignedToId
     ? (await db.select().from(usersTable).where(eq(usersTable.id, ticket.assignedToId)))[0]
     : null;
+
+  await db.insert(ticketAuditLogsTable).values({
+    ticketId: id,
+    actorUserId: user.userId,
+    type: "MANUAL_ASSIGN",
+    fromAssignedToId: previousAssignedToId,
+    toAssignedToId: ticket.assignedToId ?? null,
+    detail: "Atribuição manual",
+  });
 
   res.json({
     ...ticket,

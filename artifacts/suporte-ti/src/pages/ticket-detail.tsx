@@ -29,6 +29,8 @@ import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { customFetch } from "@workspace/api-client-react/custom-fetch";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -44,12 +46,25 @@ interface Attachment {
   createdAt: string;
 }
 
+type AuditUserRef = { id: number; name: string; email: string; role: string } | null;
+type TicketAuditLog = {
+  id: number;
+  ticketId: number;
+  type: string;
+  createdAt: string;
+  detail: string | null;
+  actor: AuditUserRef;
+  fromAssignedTo: AuditUserRef;
+  toAssignedTo: AuditUserRef;
+};
+
 export default function TicketDetail() {
   const [, params] = useRoute("/chamados/:id");
   const ticketId = Number(params?.id);
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
   
   const [message, setMessage] = useState("");
   const [rating, setRating] = useState(0);
@@ -58,6 +73,9 @@ export default function TicketDetail() {
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [textPreview, setTextPreview] = useState<string>("");
   const [previewUrl, setPreviewUrl] = useState<string>("");
+  const [auditLogs, setAuditLogs] = useState<TicketAuditLog[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   useEffect(() => {
     if (previewOpen) return;
@@ -68,6 +86,31 @@ export default function TicketDetail() {
       setPreviewUrl("");
     }
   }, [previewOpen, previewUrl]);
+
+  useEffect(() => {
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return;
+    if (!canManageRole) return;
+    let cancelled = false;
+    setAuditLoading(true);
+    setAuditError(null);
+    customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+      .then((data) => {
+        if (cancelled) return;
+        setAuditLogs(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuditError("Não foi possível carregar a auditoria.");
+        setAuditLogs([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setAuditLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketId, canManageRole]);
 
   const {
     data: ticket,
@@ -119,6 +162,12 @@ export default function TicketDetail() {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
+          queryClient.invalidateQueries({ queryKey: getGetTicketQueryKey(ticketId) });
+          if (canManageRole) {
+            customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+              .then((data) => setAuditLogs(Array.isArray(data) ? data : []))
+              .catch(() => null);
+          }
           setMessage("");
         }
       }
@@ -214,9 +263,13 @@ export default function TicketDetail() {
     );
   }
 
-  const canManage = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
+  const canManage = canManageRole;
   const isCreator = ticket.createdById === user?.id;
   const attachmentApiUrl = (att: Attachment) => `/api/tickets/${ticket.id}/attachments/${att.id}`;
+  const isAdminOrAnalyst = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
+  const closedAt = new Date(ticket.updatedAt).getTime();
+  const withinReopenWindow = Number.isFinite(closedAt) && (Date.now() - closedAt) <= 24 * 60 * 60 * 1000;
+  const canReopenClosed = ticket.status !== TicketStatus.CLOSED || (isAdminOrAnalyst && withinReopenWindow);
 
   const fetchAttachmentBlob = async (att: Attachment) => {
     const resp = await fetch(attachmentApiUrl(att), {
@@ -293,23 +346,25 @@ export default function TicketDetail() {
                  Atribuir a mim
                </Button>
             )}
-            <Select 
-              value={ticket.status} 
-              onValueChange={(v) => handleUpdateStatus(v as TicketStatus)}
-            >
+            <Select value={ticket.status} onValueChange={(v) => handleUpdateStatus(v as TicketStatus)}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Atualizar status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>
-                <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
-                <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
+                {canReopenClosed ? <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem> : null}
+                {canReopenClosed ? <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem> : null}
+                {canReopenClosed ? <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem> : null}
                 <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
               </SelectContent>
             </Select>
           </div>
         )}
       </div>
+      {ticket.status === TicketStatus.CLOSED && !canReopenClosed && canManage ? (
+        <p className="text-xs text-muted-foreground">
+          Reabertura permitida apenas para Admin/Analista em até 24h após o fechamento.
+        </p>
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -471,6 +526,63 @@ export default function TicketDetail() {
               </CardContent>
             </Card>
           )}
+
+          {canManage ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Auditoria</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Accordion type="single" collapsible className="w-full">
+                  <AccordionItem value="audit" className="border-b-0">
+                    <AccordionTrigger className="py-2 hover:no-underline">
+                      <div className="text-left">
+                        <p className="text-sm font-semibold">Histórico de interações e mudanças</p>
+                        <p className="text-xs text-muted-foreground">Mensagens, atribuições e reatribuições</p>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                      {auditLoading ? (
+                        <div className="flex justify-center py-6">
+                          <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+                        </div>
+                      ) : auditError ? (
+                        <p className="text-sm text-muted-foreground">{auditError}</p>
+                      ) : auditLogs.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Nenhum registro de auditoria.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {auditLogs.map((l) => (
+                            <div key={l.id} className="rounded-lg border p-3 text-sm">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="font-medium">{l.type}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {format(new Date(l.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                                </p>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {l.actor ? `${l.actor.name} (${l.actor.role})` : "—"}
+                              </p>
+                              {l.fromAssignedTo || l.toAssignedTo ? (
+                                <p className="text-xs mt-2">
+                                  Atribuição: {l.fromAssignedTo ? l.fromAssignedTo.name : "—"} → {l.toAssignedTo ? l.toAssignedTo.name : "—"}
+                                </p>
+                              ) : null}
+                              {l.detail ? (
+                                <p className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap break-words">
+                                  {l.detail}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {ticket.status === TicketStatus.RESOLVED && isCreator && (
             <Card>

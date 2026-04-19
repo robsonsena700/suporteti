@@ -6,12 +6,14 @@ import { ratingsTable } from "./ratings";
 import { chatMessagesTable } from "./chat";
 import { directMessagesTable } from "./direct-messages";
 import { userCoordinatorsTable } from "./user-coordinators";
+import { ticketAuditLogsTable } from "./ticket-audit";
 
 export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
   assignedTickets: many(ticketsTable, { relationName: "assignedTo" }),
   messages: many(messagesTable),
   ratings: many(ratingsTable),
+  ticketAuditLogs: many(ticketAuditLogsTable),
   chatMessages: many(chatMessagesTable),
   sentDirectMessages: many(directMessagesTable, { relationName: "dmSender" }),
   receivedDirectMessages: many(directMessagesTable, { relationName: "dmReceiver" }),
@@ -69,6 +71,7 @@ export const ticketsRelations = relations(ticketsTable, ({ one, many }) => ({
     references: [ratingsTable.ticketId],
   }),
   attachments: many(ticketAttachmentsTable),
+  auditLogs: many(ticketAuditLogsTable),
 }));
 
 export const ticketAttachmentsRelations = relations(ticketAttachmentsTable, ({ one }) => ({

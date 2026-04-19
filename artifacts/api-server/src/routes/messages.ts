@@ -4,6 +4,7 @@ import { eq, asc } from "drizzle-orm";
 import { CreateMessageBody } from "@workspace/api-zod";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { enforceTicketAccess } from "../lib/access";
+import { autoAssignTicketOnMessageInteraction } from "../lib/ticket-auto-assign";
 
 const router: IRouter = Router();
 
@@ -74,11 +75,19 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, async (re
     return;
   }
 
+  const preview = parsed.data.message.trim().slice(0, 140);
   const [msg] = await db.insert(messagesTable).values({
     ticketId,
     senderId: user.userId,
     message: parsed.data.message,
   }).returning();
+
+  await autoAssignTicketOnMessageInteraction({
+    actor: user,
+    ticketId,
+    messageId: msg.id,
+    messagePreview: preview,
+  });
 
   const [sender] = await db.select().from(usersTable).where(eq(usersTable.id, user.userId));
 

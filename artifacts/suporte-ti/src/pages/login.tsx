@@ -134,6 +134,11 @@ export default function Login() {
               Solicite acesso
             </Link>
           </div>
+          <div className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <span>Versão {__APP_VERSION__}</span>
+            <span>•</span>
+            <span>{__APP_ENV__ === "production" ? "Produção" : "Desenvolvimento"}</span>
+          </div>
         </CardContent>
       </Card>
     </div>
