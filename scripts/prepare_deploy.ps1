@@ -3,7 +3,8 @@ param(
   [string]$Remote = "origin",
   [string]$MainBranch = "main",
   [string]$DevelopBranch = "",
-  [ValidateSet("merge", "rebase")][string]$SyncMode = "merge"
+  [ValidateSet("merge", "rebase")][string]$SyncMode = "merge",
+  [switch]$AllowDirty
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,10 @@ function Exec {
 }
 
 function EnsureCleanWorkingTree {
+  if ($AllowDirty) {
+    Write-Host "Aviso: AllowDirty ativo — ignorando working tree sujo." -ForegroundColor Yellow
+    return
+  }
   $status = ((& git status --porcelain 2>&1) | ForEach-Object { "$_" }) -join "`n"
   $status = $status.Trim()
   if ($status.Length -gt 0) {
@@ -202,6 +207,16 @@ ExecGit @("fetch", $Remote, "--prune") | Out-Null
 if ([string]::IsNullOrWhiteSpace($DevelopBranch)) {
   $DevelopBranch = (ExecGit @("branch", "--show-current")).Trim()
 }
+if ($DevelopBranch -eq $MainBranch) {
+  $localBranchesRaw = ExecGit @("branch", "--format=%(refname:short)")
+  $candidates = $localBranchesRaw.Split("`n", [System.StringSplitOptions]::RemoveEmptyEntries) | Where-Object { $_ -and $_.Trim() -ne $MainBranch }
+  $suggested = ($candidates | Select-Object -First 1)
+  $prompt = if ($suggested) { "Informe a branch de desenvolvimento (ex: $suggested)" } else { "Informe a branch de desenvolvimento (ex: develop ou V1.0.0)" }
+  $picked = Read-Host $prompt
+  if (![string]::IsNullOrWhiteSpace($picked)) {
+    $DevelopBranch = $picked.Trim()
+  }
+}
 EnsureBranchExists -Branch $MainBranch
 EnsureBranchExists -Branch $DevelopBranch
 
@@ -210,7 +225,7 @@ $commit = ResolveCommitRef -Input $inputCommit
 
 ValidateCommitOnRemoteBranch -Commit $commit -RemoteBranch "$Remote/$DevelopBranch"
 
-$confirm = Read-Host "Confirmar publicação do commit $commit? (S/N)"
+$confirm = Read-Host "Confirmar publicação do commit ${commit}? (S/N)"
 if ($confirm.Trim().ToUpper() -ne "S") {
   throw "Operação cancelada pelo usuário."
 }
@@ -227,8 +242,11 @@ if ($SyncMode -eq "merge") {
   ExecGit @("rebase", "$Remote/$MainBranch") | Out-Null
 }
 
-Exec "pnpm run typecheck" | Out-Null
-Exec "pnpm run build" | Out-Null
+Exec "pnpm run typecheck:libs" | Out-Null
+Exec "pnpm --filter @workspace/api-server --if-present run typecheck" | Out-Null
+Exec "pnpm --filter @workspace/suporte-ti --if-present run typecheck" | Out-Null
+Exec "pnpm --filter @workspace/api-server --if-present run build" | Out-Null
+Exec "pnpm --filter @workspace/suporte-ti --if-present run build" | Out-Null
 
 $appPackagePath = Join-Path (Get-Location) "artifacts\suporte-ti\package.json"
 $appPkg = ReadJsonFile -Path $appPackagePath
@@ -266,4 +284,3 @@ ExecGit @("push", $Remote, $tag) | Out-Null
 
 Write-Host "OK: versão atualizada para v$newVersion, changelog gerado e tag criada."
 Write-Host "Próximo passo: abrir PR/MR de $DevelopBranch -> $MainBranch e executar deploy_prod.ps1"
-

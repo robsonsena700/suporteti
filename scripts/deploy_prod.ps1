@@ -5,7 +5,8 @@ param(
   [string]$KeyPath = "",
   [string]$RemoteBaseDir = "/opt/suporte-ti",
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$AllowDirty
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,8 +113,11 @@ Write-Host "Deploy produção - alvo: ${User}@${HostName}:$Port"
 $KeyPath = ResolveKeyPath -InputKeyPath $KeyPath
 
 $dirty = ((& git status --porcelain 2>&1) | ForEach-Object { "$_" }) -join "`n"
-if ($dirty.Trim().Length -gt 0) {
+if (!$AllowDirty -and $dirty.Trim().Length -gt 0) {
   throw "Existem alterações locais pendentes. Faça commit antes do deploy."
+}
+if ($AllowDirty -and $dirty.Trim().Length -gt 0) {
+  Write-Host "Aviso: AllowDirty ativo — deploy com working tree sujo." -ForegroundColor Yellow
 }
 
 $appPkgPath = Join-Path (Get-Location) "artifacts\suporte-ti\package.json"
@@ -164,4 +168,3 @@ Ssh "set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart sup
 Ssh "set -e; if command -v curl >/dev/null 2>&1; then curl -fsS $ApiHealthUrl >/dev/null; fi"
 
 Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os serviços."
-
