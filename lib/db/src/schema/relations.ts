@@ -4,6 +4,7 @@ import { ticketsTable } from "./tickets";
 import { messagesTable } from "./messages";
 import { ratingsTable } from "./ratings";
 import { chatMessagesTable } from "./chat";
+import { directMessagesTable } from "./direct-messages";
 
 export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
@@ -11,6 +12,21 @@ export const usersRelations = relations(usersTable, ({ many }) => ({
   messages: many(messagesTable),
   ratings: many(ratingsTable),
   chatMessages: many(chatMessagesTable),
+  sentDirectMessages: many(directMessagesTable, { relationName: "dmSender" }),
+  receivedDirectMessages: many(directMessagesTable, { relationName: "dmReceiver" }),
+}));
+
+export const directMessagesRelations = relations(directMessagesTable, ({ one }) => ({
+  sender: one(usersTable, {
+    fields: [directMessagesTable.senderId],
+    references: [usersTable.id],
+    relationName: "dmSender",
+  }),
+  receiver: one(usersTable, {
+    fields: [directMessagesTable.receiverId],
+    references: [usersTable.id],
+    relationName: "dmReceiver",
+  }),
 }));
 
 export const chatMessagesRelations = relations(chatMessagesTable, ({ one }) => ({

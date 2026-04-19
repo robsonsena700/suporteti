@@ -7,6 +7,7 @@ import messagesRouter from "./messages";
 import ratingsRouter from "./ratings";
 import reportsRouter from "./reports";
 import chatRouter from "./chat";
+import directMessagesRouter from "./direct-messages";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(messagesRouter);
 router.use(ratingsRouter);
 router.use(reportsRouter);
 router.use(chatRouter);
+router.use(directMessagesRouter);
 
 export default router;
