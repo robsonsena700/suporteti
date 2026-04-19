@@ -53,15 +53,15 @@ function Exec {
 
 function EnsureCleanWorkingTree {
   if ($AllowDirty) {
-    Write-Host "Aviso: AllowDirty ativo — ignorando working tree sujo." -ForegroundColor Yellow
+    Write-Host "Aviso: AllowDirty ativo - ignorando working tree sujo." -ForegroundColor Yellow
     return
   }
   $status = ((& git status --porcelain 2>&1) | ForEach-Object { "$_" }) -join "`n"
   $status = $status.Trim()
   if ($status.Length -gt 0) {
-    Write-Host "Alterações detectadas:" -ForegroundColor Yellow
+    Write-Host "Alteracoes detectadas:" -ForegroundColor Yellow
     Write-Host $status -ForegroundColor Yellow
-    throw "Existem alterações locais pendentes. Faça commit/stash antes de preparar deploy."
+    throw "Existem alteracoes locais pendentes. Faca commit/stash antes de preparar deploy."
   }
 }
 
@@ -77,7 +77,7 @@ function EnsureBranchExists {
     return
   }
 
-  throw "Branch não encontrada: $Branch (nem local, nem em $Remote)."
+  throw "Branch nao encontrada: $Branch (nem local, nem em $Remote)."
 }
 
 function EnsureBranch {
@@ -97,7 +97,7 @@ function ParseSemver {
       patch = [int]$Matches[3]
     }
   }
-  throw "Versão inválida: '$Version'. Esperado MAJOR.MINOR.PATCH (opcional prefixo v)."
+  throw "Versao invalida: '$Version'. Esperado MAJOR.MINOR.PATCH (opcional prefixo v)."
 }
 
 function BumpSemver {
@@ -116,7 +116,7 @@ function BumpSemver {
 
 function ReadJsonFile {
   param([Parameter(Mandatory)][string]$Path)
-  if (!(Test-Path $Path)) { throw "Arquivo não encontrado: $Path" }
+  if (!(Test-Path $Path)) { throw "Arquivo nao encontrado: $Path" }
   return (Get-Content -Raw -Path $Path) | ConvertFrom-Json
 }
 
@@ -152,7 +152,7 @@ function ResolveCommitRef {
   $matchesRaw = & git log --all --max-count 20 --pretty=format:"%H`t%s" --grep $candidate -i 2>&1
   $lines = ($matchesRaw | ForEach-Object { "$_" }) | Where-Object { $_.Trim().Length -gt 0 }
   if (!$lines -or $lines.Count -eq 0) {
-    throw "Commit inválido: '$candidate'. Informe hash, tag, branch ou um trecho da mensagem do commit."
+    throw "Commit invalido: '$candidate'. Informe hash, tag, branch ou um trecho da mensagem do commit."
   }
 
   if ($lines.Count -eq 1) {
@@ -168,10 +168,10 @@ function ResolveCommitRef {
     Write-Host "[$n] $($parts[0].Substring(0, 7)) - $($parts[1])"
   }
 
-  $choice = Read-Host "Escolha o número (1-$($lines.Count))"
+  $choice = Read-Host "Escolha o numero (1-$($lines.Count))"
   $num = 0
   if (![int]::TryParse($choice, [ref]$num) -or $num -lt 1 -or $num -gt $lines.Count) {
-    throw "Seleção inválida."
+    throw "Selecao invalida."
   }
   return $lines[$num - 1].Split("`t", 2)[0]
 }
@@ -180,7 +180,7 @@ function ValidateCommitOnRemoteBranch {
   param([Parameter(Mandatory)][string]$Commit, [Parameter(Mandatory)][string]$RemoteBranch)
   $branches = ExecGit @("branch", "-r", "--contains", $Commit)
   if ($branches -notmatch [regex]::Escape($RemoteBranch)) {
-    throw "Commit $Commit não está presente em $RemoteBranch."
+    throw "Commit $Commit nao esta presente em $RemoteBranch."
   }
 }
 
@@ -199,7 +199,7 @@ function GenerateChangelogSection {
   return "## v$NewVersion ($date)`n$body`n"
 }
 
-Write-Host "Preparação de deploy - repositório: $(Get-Location)"
+Write-Host "Preparacao de deploy - repositorio: $(Get-Location)"
 EnsureCleanWorkingTree
 
 ExecGit @("fetch", $Remote, "--prune") | Out-Null

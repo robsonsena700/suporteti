@@ -43,7 +43,7 @@ $prTitle = if (![string]::IsNullOrWhiteSpace($Title)) { $Title } else { "Deploy:
 $prBody = if (![string]::IsNullOrWhiteSpace($Body)) { $Body } else { "Pull Request gerado automaticamente para publicação." }
 
 if (!(HasGhCli)) {
-  Write-Host "GitHub CLI (gh) não encontrado."
+  Write-Host "GitHub CLI (gh) nao encontrado."
   Write-Host "Crie o PR manualmente no GitHub:"
   Write-Host "Base: $Base"
   Write-Host "Head: $Head"
@@ -56,4 +56,3 @@ Write-Host ">> gh pr create --base $Base --head $Head"
 if ($LASTEXITCODE -ne 0) {
   throw "Falha ao criar PR via gh."
 }
-

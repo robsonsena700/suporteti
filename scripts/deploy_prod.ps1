@@ -109,12 +109,12 @@ function ScpToRemote {
   }
 }
 
-Write-Host "Deploy produção - alvo: ${User}@${HostName}:$Port"
+Write-Host "Deploy producao - alvo: ${User}@${HostName}:$Port"
 $KeyPath = ResolveKeyPath -InputKeyPath $KeyPath
 
 $dirty = ((& git status --porcelain 2>&1) | ForEach-Object { "$_" }) -join "`n"
 if (!$AllowDirty -and $dirty.Trim().Length -gt 0) {
-  throw "Existem alterações locais pendentes. Faça commit antes do deploy."
+  throw "Existem alteracoes locais pendentes. Faca commit antes do deploy."
 }
 if ($AllowDirty -and $dirty.Trim().Length -gt 0) {
   Write-Host "Aviso: AllowDirty ativo — deploy com working tree sujo." -ForegroundColor Yellow
@@ -127,7 +127,7 @@ if (!(Test-Path $appPkgPath)) {
 $appPkg = Get-Content -Raw -Path $appPkgPath | ConvertFrom-Json
 $version = [string]$appPkg.version
 if ($version -notmatch "^\d+\.\d+\.\d+$") {
-  throw "Versão inválida para deploy: '$version' (esperado MAJOR.MINOR.PATCH)."
+  throw "Versao invalida para deploy: '$version' (esperado MAJOR.MINOR.PATCH)."
 }
 
 if (!$SkipBuild) {
@@ -167,4 +167,4 @@ Ssh "set -e; if [ -L $currentLink ]; then rm -f $previousLink; ln -s \$(readlink
 Ssh "set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi"
 Ssh "set -e; if command -v curl >/dev/null 2>&1; then curl -fsS $ApiHealthUrl >/dev/null; fi"
 
-Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os serviços."
+Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os servicos."
