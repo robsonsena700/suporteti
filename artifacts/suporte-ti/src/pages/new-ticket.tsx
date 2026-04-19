@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation, Link } from "wouter";
 import { useCreateTicket, TicketType, TicketPriority } from "@workspace/api-client-react";
-import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -25,10 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Paperclip, X, FileText, Upload, ChevronsUpDown, Check } from "lucide-react";
+import { ArrowLeft, Paperclip, X, FileText, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Hardware subtype options ──────────────────────────────────────────────────
@@ -62,7 +59,11 @@ const ticketSchema = z.object({
   type: z.nativeEnum(TicketType),
   title: z.string().min(5, "Título muito curto (mínimo 5 caracteres)"),
   description: z.string().min(10, "Descrição muito curta (mínimo 10 caracteres)"),
-  establishment: z.string().min(1, "Estabelecimento / Unidade de saúde é obrigatório"),
+  establishment: z
+    .string()
+    .trim()
+    .min(1, "Estabelecimento / Unidade de saúde é obrigatório")
+    .max(255, "Máximo de 255 caracteres"),
   priority: z.nativeEnum(TicketPriority),
   hardwareSubtype: z.string().optional(),
 });
@@ -108,10 +109,6 @@ export default function NewTicket() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [estOpen, setEstOpen] = useState(false);
-  const [estQuery, setEstQuery] = useState("");
-  const [establishments, setEstablishments] = useState<string[]>([]);
-  const [estLoading, setEstLoading] = useState(false);
 
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
@@ -133,23 +130,6 @@ export default function NewTicket() {
       form.setValue("establishment", user.establishment, { shouldValidate: true });
     }
   }, [user?.establishment, form]);
-
-  useEffect(() => {
-    if (!estOpen) return;
-    const handle = setTimeout(async () => {
-      setEstLoading(true);
-      try {
-        const q = estQuery.trim();
-        const data = await customFetch<string[]>(`/api/establishments${q ? `?query=${encodeURIComponent(q)}` : ""}`);
-        setEstablishments(Array.isArray(data) ? data : []);
-      } catch {
-        setEstablishments([]);
-      } finally {
-        setEstLoading(false);
-      }
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [estOpen, estQuery]);
 
   // ── File handling ─────────────────────────────────────────────────────────
 
@@ -437,47 +417,19 @@ export default function NewTicket() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>5. Estabelecimento / Unidade de saúde</FormLabel>
-                    <Popover open={estOpen} onOpenChange={(o) => { setEstOpen(o); if (o) setEstQuery(""); }}>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={estOpen}
-                            className={cn("w-full justify-between", !field.value && "text-muted-foreground")}
-                          >
-                            <span className="truncate">{field.value || "Selecione o estabelecimento..."}</span>
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder="Buscar estabelecimento..." value={estQuery} onValueChange={setEstQuery} />
-                          <CommandList>
-                            <CommandEmpty>
-                              {estLoading ? "Carregando..." : "Nenhum estabelecimento encontrado."}
-                            </CommandEmpty>
-                            <CommandGroup>
-                              {establishments.map((e) => (
-                                <CommandItem
-                                  key={e}
-                                  value={e}
-                                  onSelect={() => {
-                                    form.setValue("establishment", e, { shouldValidate: true });
-                                    setEstOpen(false);
-                                  }}
-                                >
-                                  <Check className={cn("mr-2 h-4 w-4", field.value === e ? "opacity-100" : "opacity-0")} />
-                                  <span className="truncate">{e}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        maxLength={255}
+                        placeholder="Digite o estabelecimento / unidade de saúde"
+                        {...field}
+                        onChange={(e) => field.onChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <div className="text-xs text-muted-foreground flex justify-between">
+                      <span>Obrigatório</span>
+                      <span>{(field.value?.length ?? 0)}/255</span>
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}

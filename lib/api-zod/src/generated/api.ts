@@ -228,6 +228,7 @@ export const ListTicketsResponseItem = zod.object({
   uf: zod.string(),
   municipality: zod.string(),
   establishment: zod.string().nullable(),
+  imageAttachmentsCount: zod.number(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
   createdAt: zod.coerce.date(),
@@ -258,7 +259,7 @@ export const ListTicketsResponse = zod.array(ListTicketsResponseItem);
 export const CreateTicketBody = zod.object({
   title: zod.string(),
   description: zod.string(),
-  establishment: zod.string().min(1),
+  establishment: zod.string().trim().min(1).max(255),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   hardwareSubtype: zod.string().optional(),

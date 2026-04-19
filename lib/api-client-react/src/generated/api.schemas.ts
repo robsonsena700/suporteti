@@ -159,6 +159,7 @@ export interface Ticket {
   municipality: string;
   /** @nullable */
   establishment?: string | null;
+  imageAttachmentsCount?: number;
   createdById: number;
   /** @nullable */
   assignedToId: number | null;

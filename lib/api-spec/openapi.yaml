@@ -758,6 +758,8 @@ components:
           type: string
         establishment:
           type: ["string", "null"]
+        imageAttachmentsCount:
+          type: integer
         createdById:
           type: integer
         assignedToId:
@@ -830,6 +832,7 @@ components:
           type: string
         establishment:
           type: string
+          maxLength: 255
         type:
           type: string
           enum: [SOFTWARE, HARDWARE]

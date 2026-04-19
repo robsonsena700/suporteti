@@ -24,7 +24,7 @@
 ### Campo obrigatório: Estabelecimento / Unidade de saúde
 
 - O campo `Estabelecimento / Unidade de saúde` passou a ser obrigatório.
-- O sistema disponibiliza uma lista com busca para facilitar a seleção.
+- O campo permite digitação livre (texto) e possui limite máximo de caracteres.
 
 ### Anexo obrigatório
 

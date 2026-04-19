@@ -37,6 +37,9 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     with: {
       createdBy: true,
       assignedTo: true,
+      attachments: {
+        columns: { id: true, mimeType: true },
+      },
     },
     orderBy: [desc(ticketsTable.createdAt)],
   });
@@ -60,6 +63,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     uf: t.uf,
     municipality: t.municipality,
     establishment: t.establishment ?? null,
+    imageAttachmentsCount: (t.attachments ?? []).filter(a => a.mimeType.startsWith("image/")).length,
     createdById: t.createdById,
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
