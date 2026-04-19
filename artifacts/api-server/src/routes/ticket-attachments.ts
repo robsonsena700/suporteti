@@ -149,8 +149,16 @@ router.get("/tickets/:id/attachments/:aid", requireAuth, requireActive, async (r
   }
 
   const buf = Buffer.from(att.data, "base64");
+  const wantsDownload = req.query.download === "1" || req.query.download === "true";
+  const canInline = att.mimeType.startsWith("image/")
+    || att.mimeType === "application/pdf"
+    || att.mimeType === "text/plain";
+
   res.setHeader("Content-Type", att.mimeType);
-  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(att.filename)}"`);
+  res.setHeader(
+    "Content-Disposition",
+    `${!wantsDownload && canInline ? "inline" : "attachment"}; filename="${encodeURIComponent(att.filename)}"`,
+  );
   res.setHeader("Content-Length", String(buf.length));
   res.send(buf);
 });

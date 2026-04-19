@@ -222,10 +222,12 @@ export const ListTicketsResponseItem = zod.object({
   title: zod.string(),
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
+  hardwareSubtype: zod.string().nullable(),
   status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
+  establishment: zod.string().nullable(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
   createdAt: zod.coerce.date(),
@@ -256,8 +258,10 @@ export const ListTicketsResponse = zod.array(ListTicketsResponseItem);
 export const CreateTicketBody = zod.object({
   title: zod.string(),
   description: zod.string(),
+  establishment: zod.string().min(1),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
+  hardwareSubtype: zod.string().optional(),
 });
 
 /**
@@ -275,10 +279,12 @@ export const GetTicketResponse = zod
     title: zod.string(),
     description: zod.string(),
     type: zod.enum(["SOFTWARE", "HARDWARE"]),
+    hardwareSubtype: zod.string().nullable(),
     status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
     priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
     uf: zod.string(),
     municipality: zod.string(),
+    establishment: zod.string().nullable(),
     createdById: zod.number(),
     assignedToId: zod.number().nullable(),
     createdAt: zod.coerce.date(),

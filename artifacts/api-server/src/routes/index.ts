@@ -10,6 +10,7 @@ import chatRouter from "./chat";
 import directMessagesRouter from "./direct-messages";
 import ticketAttachmentsRouter from "./ticket-attachments";
 import ibgeRouter from "./ibge";
+import establishmentsRouter from "./establishments";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(reportsRouter);
 router.use(chatRouter);
 router.use(directMessagesRouter);
 router.use(ibgeRouter);
+router.use(establishmentsRouter);
 
 export default router;

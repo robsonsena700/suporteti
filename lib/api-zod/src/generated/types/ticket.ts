@@ -15,10 +15,14 @@ export interface Ticket {
   title: string;
   description: string;
   type: TicketType;
+  /** @nullable */
+  hardwareSubtype?: string | null;
   status: TicketStatus;
   priority: TicketPriority;
   uf: string;
   municipality: string;
+  /** @nullable */
+  establishment?: string | null;
   createdById: number;
   /** @nullable */
   assignedToId: number | null;

@@ -744,6 +744,8 @@ components:
         type:
           type: string
           enum: [SOFTWARE, HARDWARE]
+        hardwareSubtype:
+          type: ["string", "null"]
         status:
           type: string
           enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
@@ -754,6 +756,8 @@ components:
           type: string
         municipality:
           type: string
+        establishment:
+          type: ["string", "null"]
         createdById:
           type: integer
         assignedToId:
@@ -824,15 +828,20 @@ components:
           type: string
         description:
           type: string
+        establishment:
+          type: string
         type:
           type: string
           enum: [SOFTWARE, HARDWARE]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]
+        hardwareSubtype:
+          type: string
       required:
         - title
         - description
+        - establishment
         - type
         - priority
 

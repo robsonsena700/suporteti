@@ -23,11 +23,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Star, UserCircle2, FileText, Paperclip, Download } from "lucide-react";
+import { ArrowLeft, Send, Star, UserCircle2, FileText, Paperclip, Download, Eye } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -53,10 +54,29 @@ export default function TicketDetail() {
   const [message, setMessage] = useState("");
   const [rating, setRating] = useState(0);
   const [feedback, setFeedback] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
+  const [textPreview, setTextPreview] = useState<string>("");
+  const [previewUrl, setPreviewUrl] = useState<string>("");
 
-  const { data: ticket, isLoading } = useGetTicket(ticketId, {
+  useEffect(() => {
+    if (previewOpen) return;
+    setPreviewAtt(null);
+    setTextPreview("");
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl("");
+    }
+  }, [previewOpen, previewUrl]);
+
+  const {
+    data: ticket,
+    isLoading,
+    isError,
+    error,
+  } = useGetTicket(ticketId, {
     query: {
-      enabled: !!ticketId,
+      enabled: Number.isFinite(ticketId) && ticketId > 0,
       queryKey: getGetTicketQueryKey(ticketId),
     }
   });
@@ -131,6 +151,61 @@ export default function TicketDetail() {
     );
   };
 
+  if (!Number.isFinite(ticketId) || ticketId <= 0) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild>
+            <Link href="/chamados">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Chamado inválido</h1>
+            <p className="text-muted-foreground text-sm mt-1">O ID do chamado não é válido.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    const message = (error as any)?.message || "Não foi possível carregar o chamado.";
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild>
+            <Link href="/chamados">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold tracking-tight">Erro ao carregar chamado</h1>
+            <p className="text-muted-foreground text-sm mt-1">{message}</p>
+          </div>
+        </div>
+        <Card>
+          <CardContent className="pt-6 space-y-3">
+            <p className="text-sm">
+              Possíveis causas: API fora do ar, falta de permissão, ou banco desatualizado (migrations pendentes).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline">
+                <Link href="/chamados">Voltar</Link>
+              </Button>
+              <Button
+                type="button"
+                onClick={() => queryClient.invalidateQueries({ queryKey: getGetTicketQueryKey(ticketId) })}
+              >
+                Tentar novamente
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (isLoading || !ticket) {
     return (
       <div className="flex justify-center py-12">
@@ -141,6 +216,58 @@ export default function TicketDetail() {
 
   const canManage = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
   const isCreator = ticket.createdById === user?.id;
+  const attachmentApiUrl = (att: Attachment) => `/api/tickets/${ticket.id}/attachments/${att.id}`;
+
+  const fetchAttachmentBlob = async (att: Attachment) => {
+    const resp = await fetch(attachmentApiUrl(att), {
+      headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
+    });
+    if (!resp.ok) throw new Error("Falha ao baixar anexo");
+    return resp.blob();
+  };
+
+  const downloadAttachment = async (att: Attachment) => {
+    try {
+      const blob = await fetchAttachmentBlob(att);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({
+        title: "Erro ao baixar anexo",
+        description: "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openPreview = async (att: Attachment) => {
+    setPreviewAtt(att);
+    setTextPreview("");
+    setPreviewOpen(true);
+    try {
+      if (att.mimeType === "text/plain") {
+        const resp = await fetch(attachmentApiUrl(att), {
+          headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
+        });
+        setTextPreview(resp.ok ? await resp.text() : "Não foi possível carregar a prévia do arquivo.");
+        return;
+      }
+
+      if (att.mimeType.startsWith("image/") || att.mimeType === "application/pdf") {
+        const blob = await fetchAttachmentBlob(att);
+        const url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
+      }
+    } catch {
+      setTextPreview("Não foi possível carregar a prévia do arquivo.");
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -285,6 +412,12 @@ export default function TicketDetail() {
                 <span className="text-muted-foreground block mb-1">Localidade</span>
                 <p className="font-medium">{ticket.municipality} - {ticket.uf}</p>
               </div>
+              {ticket.establishment ? (
+                <div>
+                  <span className="text-muted-foreground block mb-1">Estabelecimento / Unidade</span>
+                  <p className="font-medium">{ticket.establishment}</p>
+                </div>
+              ) : null}
               <div>
                 <span className="text-muted-foreground block mb-1">Responsável</span>
                 <p className="font-medium">
@@ -305,11 +438,8 @@ export default function TicketDetail() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {(ticket as any).attachments.map((att: Attachment) => (
-                  <a
+                  <div
                     key={att.id}
-                    href={`/api/tickets/${ticket.id}/attachments/${att.id}`}
-                    target="_blank"
-                    rel="noreferrer"
                     className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/60 transition-colors group"
                   >
                     <div className="h-10 w-10 rounded bg-primary/10 flex items-center justify-center shrink-0">
@@ -323,8 +453,20 @@ export default function TicketDetail() {
                       <p className="text-sm font-medium truncate">{att.filename}</p>
                       <p className="text-xs text-muted-foreground">{formatBytes(att.size)}</p>
                     </div>
-                    <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
-                  </a>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button type="button" variant="outline" size="icon" onClick={() => openPreview(att)} aria-label="Visualizar anexo">
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => downloadAttachment(att)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background shadow-sm hover:bg-muted/50 tap-target"
+                        aria-label="Baixar anexo"
+                      >
+                        <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </CardContent>
             </Card>
@@ -380,6 +522,52 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl w-[95vw] p-0 overflow-hidden">
+          <div className="p-4 border-b">
+            <DialogHeader>
+              <DialogTitle className="text-base">{previewAtt?.filename ?? "Pré-visualização"}</DialogTitle>
+            </DialogHeader>
+          </div>
+          <div className="bg-muted/20 p-4">
+            {previewAtt ? (
+              previewAtt.mimeType.startsWith("image/") ? (
+                <img
+                  src={previewUrl}
+                  alt={previewAtt.filename}
+                  className="max-h-[70vh] w-full object-contain rounded-md bg-background"
+                />
+              ) : previewAtt.mimeType === "application/pdf" ? (
+                <iframe
+                  title={previewAtt.filename}
+                  src={previewUrl}
+                  className="w-full h-[70vh] rounded-md bg-background"
+                />
+              ) : previewAtt.mimeType === "text/plain" ? (
+                <pre className="whitespace-pre-wrap break-words text-sm rounded-md bg-background p-4 max-h-[70vh] overflow-auto">
+                  {textPreview || "Carregando..."}
+                </pre>
+              ) : (
+                <div className="rounded-md bg-background p-4 text-sm">
+                  <p className="text-muted-foreground">
+                    Pré-visualização não disponível para este tipo de arquivo. Faça o download para abrir no seu dispositivo.
+                  </p>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => previewAtt && downloadAttachment(previewAtt)}
+                      className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-muted/50 tap-target"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Baixar arquivo
+                    </button>
+                  </div>
+                </div>
+              )
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

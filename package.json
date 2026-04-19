@@ -11,6 +11,7 @@
     "test:coordinator-access": "node ./scripts/test-coordinator-access.cjs",
     "test:chat:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-chat-permissions-unit.ts",
     "test:chat:integration": "node ./scripts/test-chat-permissions-integration.cjs",
+    "test:tickets:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-tickets-unit.ts",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"

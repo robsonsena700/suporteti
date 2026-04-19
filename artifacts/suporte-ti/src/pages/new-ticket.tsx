@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation, Link } from "wouter";
 import { useCreateTicket, TicketType, TicketPriority } from "@workspace/api-client-react";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
+import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,8 +25,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Paperclip, X, FileText, Image, Upload } from "lucide-react";
+import { ArrowLeft, Paperclip, X, FileText, Upload, ChevronsUpDown, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Hardware subtype options ──────────────────────────────────────────────────
@@ -59,6 +62,7 @@ const ticketSchema = z.object({
   type: z.nativeEnum(TicketType),
   title: z.string().min(5, "Título muito curto (mínimo 5 caracteres)"),
   description: z.string().min(10, "Descrição muito curta (mínimo 10 caracteres)"),
+  establishment: z.string().min(1, "Estabelecimento / Unidade de saúde é obrigatório"),
   priority: z.nativeEnum(TicketPriority),
   hardwareSubtype: z.string().optional(),
 });
@@ -94,6 +98,7 @@ function isImage(mime: string) {
 
 export default function NewTicket() {
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
   const { toast } = useToast();
   const createMutation = useCreateTicket();
 
@@ -103,19 +108,48 @@ export default function NewTicket() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [estOpen, setEstOpen] = useState(false);
+  const [estQuery, setEstQuery] = useState("");
+  const [establishments, setEstablishments] = useState<string[]>([]);
+  const [estLoading, setEstLoading] = useState(false);
 
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
+    mode: "onChange",
     defaultValues: {
       type: TicketType.SOFTWARE,
       title: "",
       description: "",
+      establishment: user?.establishment ?? "",
       priority: TicketPriority.LOW,
       hardwareSubtype: undefined,
     },
   });
 
   const selectedType = form.watch("type");
+
+  useEffect(() => {
+    if (user?.establishment) {
+      form.setValue("establishment", user.establishment, { shouldValidate: true });
+    }
+  }, [user?.establishment, form]);
+
+  useEffect(() => {
+    if (!estOpen) return;
+    const handle = setTimeout(async () => {
+      setEstLoading(true);
+      try {
+        const q = estQuery.trim();
+        const data = await customFetch<string[]>(`/api/establishments${q ? `?query=${encodeURIComponent(q)}` : ""}`);
+        setEstablishments(Array.isArray(data) ? data : []);
+      } catch {
+        setEstablishments([]);
+      } finally {
+        setEstLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [estOpen, estQuery]);
 
   // ── File handling ─────────────────────────────────────────────────────────
 
@@ -180,10 +214,21 @@ export default function NewTicket() {
   // ── Submit ────────────────────────────────────────────────────────────────
 
   const onSubmit = async (data: TicketForm) => {
+    if (files.length === 0) {
+      setFileErrors(["Envie ao menos 1 anexo obrigatório antes de abrir o chamado."]);
+      toast({
+        title: "Anexo obrigatório",
+        description: "Adicione pelo menos 1 arquivo anexo para prosseguir.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Clear subtype if not hardware
     const payload = {
       title: data.title,
       description: data.description,
+      establishment: data.establishment,
       type: data.type,
       priority: data.priority,
       hardwareSubtype: data.type === TicketType.HARDWARE ? data.hardwareSubtype : undefined,
@@ -385,12 +430,68 @@ export default function NewTicket() {
                 )}
               />
 
-              {/* 5 — Anexos */}
+              {/* 5 — Estabelecimento / Unidade de saúde */}
+              <FormField
+                control={form.control}
+                name="establishment"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>5. Estabelecimento / Unidade de saúde</FormLabel>
+                    <Popover open={estOpen} onOpenChange={(o) => { setEstOpen(o); if (o) setEstQuery(""); }}>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={estOpen}
+                            className={cn("w-full justify-between", !field.value && "text-muted-foreground")}
+                          >
+                            <span className="truncate">{field.value || "Selecione o estabelecimento..."}</span>
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Buscar estabelecimento..." value={estQuery} onValueChange={setEstQuery} />
+                          <CommandList>
+                            <CommandEmpty>
+                              {estLoading ? "Carregando..." : "Nenhum estabelecimento encontrado."}
+                            </CommandEmpty>
+                            <CommandGroup>
+                              {establishments.map((e) => (
+                                <CommandItem
+                                  key={e}
+                                  value={e}
+                                  onSelect={() => {
+                                    form.setValue("establishment", e, { shouldValidate: true });
+                                    setEstOpen(false);
+                                  }}
+                                >
+                                  <Check className={cn("mr-2 h-4 w-4", field.value === e ? "opacity-100" : "opacity-0")} />
+                                  <span className="truncate">{e}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* 6 — Anexos */}
               <div className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium leading-none mb-1">5. Anexo</p>
+                  <p className="text-sm font-medium leading-none mb-1">6. Anexo <span className="text-destructive">*</span></p>
                   <p className="text-xs text-muted-foreground">
-                    Imagens ou documentos. Máximo {MAX_FILES} arquivos de até 3 MB cada.
+                    Imagens ou documentos. Obrigatório ao menos 1 arquivo. Máximo {MAX_FILES} arquivos de até 3 MB cada.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {files.length}/{MAX_FILES} arquivo(s) anexado(s)
                   </p>
                 </div>
 

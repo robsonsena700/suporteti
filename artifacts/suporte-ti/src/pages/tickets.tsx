@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { 
@@ -14,10 +14,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PlusCircle, Search, Filter } from "lucide-react";
+import { PlusCircle } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { filterAndSortTickets } from "@/lib/tickets-utils";
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
@@ -27,12 +27,27 @@ const UFS = [
 export default function Tickets() {
   const { user } = useAuth();
   const [filters, setFilters] = useState<ListTicketsParams>({});
+  const [userFilter, setUserFilter] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [responsibleFilter, setResponsibleFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "user" | "location" | "responsible">("createdAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const { data: tickets, isLoading } = useListTickets(filters, {
     query: {
       queryKey: getListTicketsQueryKey(filters),
     }
   });
+
+  const visibleTickets = useMemo(() => {
+    return filterAndSortTickets(tickets ?? [], {
+      userFilter,
+      locationFilter,
+      responsibleFilter,
+      sortBy,
+      sortDir,
+    });
+  }, [tickets, userFilter, locationFilter, responsibleFilter, sortBy, sortDir]);
 
   return (
     <div className="space-y-6">
@@ -128,71 +143,104 @@ export default function Tickets() {
               </div>
             )}
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Filtrar por usuário</label>
+              <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="Nome do solicitante" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Filtrar por localização</label>
+              <Input value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} placeholder="UF ou Município" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Filtrar por responsável</label>
+              <Input value={responsibleFilter} onChange={(e) => setResponsibleFilter(e.target.value)} placeholder="Nome do responsável" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Ordenar por</label>
+              <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="createdAt">Data</SelectItem>
+                  <SelectItem value="user">Usuário</SelectItem>
+                  <SelectItem value="location">Localização</SelectItem>
+                  <SelectItem value="responsible">Responsável</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Ordem</label>
+              <Select value={sortDir} onValueChange={(v) => setSortDir(v as any)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="asc">Crescente</SelectItem>
+                  <SelectItem value="desc">Decrescente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       <Card>
-        <div className="rounded-md border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[100px]">ID</TableHead>
-                <TableHead>Título</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Prioridade</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead className="text-right">Criado em</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center">
-                    <div className="flex justify-center items-center">
-                      <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+        <CardContent className="p-4">
+          {isLoading ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+            </div>
+          ) : tickets === undefined ? (
+            <div className="py-12 text-center">
+              <p className="text-muted-foreground">
+                Não foi possível carregar os chamados. Verifique se a API está rodando e se o banco foi atualizado.
+              </p>
+            </div>
+          ) : visibleTickets.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">
+              Nenhum chamado encontrado com os filtros atuais.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {visibleTickets.map((ticket) => (
+                <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
+                  <div className="rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">#{ticket.id} — {ticket.title}</p>
+                        <p className="text-xs text-muted-foreground mt-1 truncate">
+                          {ticket.createdBy?.name ?? "—"} • {ticket.uf} - {ticket.municipality}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2 items-end">
+                        <StatusBadge status={ticket.status} />
+                        <PriorityBadge priority={ticket.priority} />
+                      </div>
                     </div>
-                  </TableCell>
-                </TableRow>
-              ) : tickets?.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                    Nenhum chamado encontrado com os filtros atuais.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                tickets?.map((ticket) => (
-                  <TableRow key={ticket.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
-                    <TableCell className="font-medium">
-                      <Link href={`/chamados/${ticket.id}`} className="block">
-                        #{ticket.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Link href={`/chamados/${ticket.id}`} className="block hover:underline">
-                        {ticket.title}
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {ticket.municipality} - {ticket.uf}
-                        </div>
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={ticket.status} />
-                    </TableCell>
-                    <TableCell>
-                      <PriorityBadge priority={ticket.priority} />
-                    </TableCell>
-                    <TableCell>
+
+                    <div className="mt-3 flex items-center justify-between gap-3">
                       <TypeBadge type={ticket.type} />
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {format(new Date(ticket.createdAt), "dd/MM/yyyy", { locale: ptBR })}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                      <p className="text-xs text-muted-foreground">
+                        {format(new Date(ticket.createdAt), "dd/MM/yyyy", { locale: ptBR })}
+                      </p>
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t text-sm">
+                      <p className="text-xs text-muted-foreground">Responsável</p>
+                      <p className="font-medium truncate">{ticket.assignedTo?.name ?? "Não atribuído"}</p>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   );

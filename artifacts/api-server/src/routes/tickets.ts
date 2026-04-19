@@ -59,6 +59,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     priority: t.priority,
     uf: t.uf,
     municipality: t.municipality,
+    establishment: t.establishment ?? null,
     createdById: t.createdById,
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
@@ -100,6 +101,7 @@ router.post("/tickets", requireAuth, requireActive, async (req, res): Promise<vo
 
   res.status(201).json({
     ...ticket,
+    establishment: ticket.establishment ?? null,
     createdBy: {
       id: createdBy.id,
       name: createdBy.name,
@@ -156,6 +158,7 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
     priority: ticket.priority,
     uf: ticket.uf,
     municipality: ticket.municipality,
+    establishment: ticket.establishment ?? null,
     createdById: ticket.createdById,
     assignedToId: ticket.assignedToId,
     createdAt: ticket.createdAt,
