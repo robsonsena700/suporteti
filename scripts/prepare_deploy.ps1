@@ -111,6 +111,47 @@ function ValidateCommitExists {
   ExecGit @("cat-file", "-e", "$Commit^{commit}") | Out-Null
 }
 
+function ResolveCommitRef {
+  param([string]$Input)
+
+  if ([string]::IsNullOrWhiteSpace($Input)) {
+    return (ExecGit @("rev-parse", "HEAD")).Trim()
+  }
+
+  $candidate = $Input.Trim()
+  & git rev-parse --verify "$candidate^{commit}" *> $null
+  if ($LASTEXITCODE -eq 0) {
+    return (ExecGit @("rev-parse", $candidate)).Trim()
+  }
+
+  $matchesRaw = & git log --all --max-count 20 --pretty=format:"%H`t%s" --grep $candidate -i 2>&1
+  $lines = ($matchesRaw | ForEach-Object { "$_" }) | Where-Object { $_.Trim().Length -gt 0 }
+  if (!$lines -or $lines.Count -eq 0) {
+    throw "Commit inválido: '$candidate'. Informe hash, tag, branch ou um trecho da mensagem do commit."
+  }
+
+  if ($lines.Count -eq 1) {
+    $parts = $lines[0].Split("`t", 2)
+    Write-Host "Commit encontrado por mensagem: $($parts[1])" -ForegroundColor Yellow
+    return $parts[0]
+  }
+
+  Write-Host "Mais de um commit corresponde a '$candidate'. Selecione:" -ForegroundColor Yellow
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $parts = $lines[$i].Split("`t", 2)
+    $n = $i + 1
+    Write-Host "[$n] $($parts[0].Substring(0, 7)) - $($parts[1])"
+  }
+
+  $choice = Read-Host "Escolha o número (1-$($lines.Count))"
+  $num = 0
+  if (![int]::TryParse($choice, [ref]$num) -or $num -lt 1 -or $num -gt $lines.Count) {
+    throw "Seleção inválida."
+  }
+  $selected = $lines[$num - 1].Split("`t", 2)
+  return $selected[0]
+}
+
 function ValidateCommitOnRemoteBranch {
   param(
     [Parameter(Mandatory)][string]$Commit,
@@ -153,9 +194,7 @@ EnsureBranchExists -Branch $MainBranch
 EnsureBranchExists -Branch $DevelopBranch
 
 $commit = Read-Host "Informe o hash do commit que deseja publicar (Enter = HEAD)"
-if ([string]::IsNullOrWhiteSpace($commit)) {
-  $commit = (ExecGit @("rev-parse", "HEAD")).Trim()
-}
+$commit = ResolveCommitRef -Input $commit
 ValidateCommitExists -Commit $commit
 
 ValidateCommitOnRemoteBranch -Commit $commit -RemoteBranch "$Remote/$DevelopBranch"
