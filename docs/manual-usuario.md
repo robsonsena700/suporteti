@@ -38,6 +38,15 @@
   - Botão de visualização (quando suportado pelo navegador)
   - Botão de download
 
+## Regras de Acesso (Chamados)
+
+- Visualização:
+  - Criador do chamado e responsável atual podem visualizar.
+  - Admin e Analista podem visualizar chamados mesmo sem atribuição.
+- Interação:
+  - Apenas o criador e o responsável atual podem interagir (enviar mensagens e anexar arquivos).
+  - Admin/Analista não conseguem enviar mensagens até que o chamado seja atribuído a eles.
+
 ### Pré-visualização
 
 - Suportado diretamente na interface:

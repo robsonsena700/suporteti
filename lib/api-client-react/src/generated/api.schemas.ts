@@ -253,6 +253,7 @@ export interface UpdateTicketBody {
 
 export interface AssignTicketBody {
   assignedToId: number;
+  reason: string;
 }
 
 export interface CreateMessageBody {

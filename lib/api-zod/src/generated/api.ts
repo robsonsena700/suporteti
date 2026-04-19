@@ -402,6 +402,7 @@ export const AssignTicketParams = zod.object({
 
 export const AssignTicketBody = zod.object({
   assignedToId: zod.number(),
+  reason: zod.string().trim().min(3).max(500),
 });
 
 export const AssignTicketResponse = zod.object({

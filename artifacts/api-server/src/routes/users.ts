@@ -2,8 +2,8 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import multer from "multer";
-import { db, usersTable, userCoordinatorsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, usersTable, userCoordinatorsTable, ticketsTable } from "@workspace/db";
+import { eq, and, inArray } from "drizzle-orm";
 import { UpdateUserBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { signToken } from "../middlewares/auth";
@@ -114,6 +114,35 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
     : await query;
 
   res.json(users);
+});
+
+router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (_req, res): Promise<void> => {
+  const assignable = await db.select({
+    id: usersTable.id,
+    name: usersTable.name,
+    email: usersTable.email,
+    role: usersTable.role,
+    status: usersTable.status,
+  }).from(usersTable).where(
+    and(
+      eq(usersTable.status, "ACTIVE"),
+      inArray(usersTable.role, ["ADMIN", "ANALYST", "COORDINATOR"]),
+    ),
+  );
+
+  const openStatuses = ["OPEN", "IN_PROGRESS"] as const;
+  const withLoad = await Promise.all(assignable.map(async (u) => {
+    const assigned = await db.select({ id: ticketsTable.id }).from(ticketsTable).where(
+      and(eq(ticketsTable.assignedToId, u.id), inArray(ticketsTable.status, [...openStatuses])),
+    );
+    return {
+      ...u,
+      assignedOpenTickets: assigned.length,
+    };
+  }));
+
+  withLoad.sort((a, b) => a.assignedOpenTickets - b.assignedOpenTickets || a.name.localeCompare(b.name, "pt-BR"));
+  res.json(withLoad);
 });
 
 router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<void> => {

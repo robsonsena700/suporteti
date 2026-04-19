@@ -14,6 +14,10 @@
     "test:tickets:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-tickets-unit.ts",
     "test:tickets:auto-assign:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-auto-assign-unit.ts",
     "test:tickets:reopen-policy:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-reopen-policy-unit.ts",
+    "test:tickets:reassign-policy:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-reassign-policy-unit.ts",
+    "test:tickets:reassign:integration": "node ./scripts/test-ticket-reassign-integration.cjs",
+    "test:tickets:access-policy:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-access-policy-unit.ts",
+    "test:tickets:access-control:integration": "node ./scripts/test-ticket-access-control-integration.cjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"

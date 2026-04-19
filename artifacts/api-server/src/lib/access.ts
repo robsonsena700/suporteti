@@ -2,6 +2,7 @@ import { db, userCoordinatorsTable, usersTable, ticketsTable } from "@workspace/
 import { eq, inArray } from "drizzle-orm";
 import type { JwtPayload } from "../middlewares/auth";
 import { logger } from "./logger";
+import { computeTicketAccess } from "./ticket-access-policy";
 
 type TicketRow = typeof ticketsTable.$inferSelect;
 
@@ -45,19 +46,12 @@ export async function listCoordinatorsForUser(userId: number) {
 }
 
 export async function canReadTicket(user: JwtPayload, ticket: TicketRow): Promise<boolean> {
-  if (user.role === "ADMIN" || user.role === "ANALYST") return true;
-
-  if (user.role === "USER") {
-    return ticket.createdById === user.userId && ticket.status === "OPEN";
-  }
-
-  if (user.role === "COORDINATOR") {
-    if (ticket.createdById === user.userId) return true;
-    const responsibleCoordinatorId = await getResponsibleCoordinatorIdForUser(ticket.createdById);
-    return responsibleCoordinatorId === user.userId;
-  }
-
-  return false;
+  return computeTicketAccess({
+    actorRole: user.role,
+    actorUserId: user.userId,
+    ticketCreatedById: ticket.createdById,
+    ticketAssignedToId: ticket.assignedToId ?? null,
+  }).canView;
 }
 
 export async function enforceTicketAccess(
@@ -65,13 +59,32 @@ export async function enforceTicketAccess(
   ticket: TicketRow,
   action: string,
 ): Promise<boolean> {
-  const allowed = await canReadTicket(user, ticket);
+  const access = computeTicketAccess({
+    actorRole: user.role,
+    actorUserId: user.userId,
+    ticketCreatedById: ticket.createdById,
+    ticketAssignedToId: ticket.assignedToId ?? null,
+  });
+
+  const requiresInteract =
+    action === "messages:create"
+    || action === "attachments:create"
+    || action === "attachments:delete"
+    || action === "tickets:update";
+
+  const allowed = action === "tickets:assign"
+    ? access.canAssign && access.canView
+    : requiresInteract
+      ? access.canInteract
+      : access.canView;
+
   if (!allowed) {
     logger.warn(
       {
         action,
         ticketId: ticket.id,
         ticketOwnerId: ticket.createdById,
+        ticketAssignedToId: ticket.assignedToId ?? null,
         actorUserId: user.userId,
         actorRole: user.role,
       },

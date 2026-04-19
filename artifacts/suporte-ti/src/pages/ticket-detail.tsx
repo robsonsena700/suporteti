@@ -58,6 +58,15 @@ type TicketAuditLog = {
   toAssignedTo: AuditUserRef;
 };
 
+type AssignableUser = {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  assignedOpenTickets: number;
+};
+
 export default function TicketDetail() {
   const [, params] = useRoute("/chamados/:id");
   const ticketId = Number(params?.id);
@@ -76,6 +85,9 @@ export default function TicketDetail() {
   const [auditLogs, setAuditLogs] = useState<TicketAuditLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [assignReason, setAssignReason] = useState("");
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>("");
 
   useEffect(() => {
     if (previewOpen) return;
@@ -111,6 +123,23 @@ export default function TicketDetail() {
       cancelled = true;
     };
   }, [ticketId, canManageRole]);
+
+  useEffect(() => {
+    if (!canManageRole) return;
+    let cancelled = false;
+    customFetch<AssignableUser[]>("/api/users/assignable")
+      .then((data) => {
+        if (cancelled) return;
+        setAssignableUsers(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAssignableUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageRole]);
 
   const {
     data: ticket,
@@ -190,13 +219,50 @@ export default function TicketDetail() {
   const handleAssignToMe = () => {
     if (!user) return;
     assignMutation.mutate(
-      { id: ticketId, data: { assignedToId: user.id } },
+      { id: ticketId, data: { assignedToId: user.id, reason: "Atribuição manual para o próprio usuário" } },
       {
         onSuccess: (data) => {
           queryClient.setQueryData(getGetTicketQueryKey(ticketId), data);
           toast({ title: "Chamado atribuído a você" });
         }
       }
+    );
+  };
+
+  const handleReassign = () => {
+    const assigneeId = Number(selectedAssigneeId);
+    if (!Number.isInteger(assigneeId) || assigneeId <= 0) {
+      toast({ title: "Selecione o novo responsável", variant: "destructive" });
+      return;
+    }
+    if (assignReason.trim().length < 3) {
+      toast({ title: "Informe o motivo da reatribuição (mínimo 3 caracteres)", variant: "destructive" });
+      return;
+    }
+
+    assignMutation.mutate(
+      { id: ticketId, data: { assignedToId: assigneeId, reason: assignReason.trim() } },
+      {
+        onSuccess: (data) => {
+          queryClient.setQueryData(getGetTicketQueryKey(ticketId), data);
+          queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
+          if (canManageRole) {
+            customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+              .then((rows) => setAuditLogs(Array.isArray(rows) ? rows : []))
+              .catch(() => null);
+          }
+          setAssignReason("");
+          setSelectedAssigneeId("");
+          toast({ title: "Responsável substituído com sucesso" });
+        },
+        onError: (error: any) => {
+          toast({
+            title: "Falha ao reatribuir",
+            description: error?.data?.error || "Não foi possível concluir a reatribuição.",
+            variant: "destructive",
+          });
+        },
+      },
     );
   };
 
@@ -270,6 +336,8 @@ export default function TicketDetail() {
   const closedAt = new Date(ticket.updatedAt).getTime();
   const withinReopenWindow = Number.isFinite(closedAt) && (Date.now() - closedAt) <= 24 * 60 * 60 * 1000;
   const canReopenClosed = ticket.status !== TicketStatus.CLOSED || (isAdminOrAnalyst && withinReopenWindow);
+  const canInteractTicket = ticket.createdById === user?.id || ticket.assignedToId === user?.id;
+  const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
 
   const fetchAttachmentBlob = async (att: Attachment) => {
     const resp = await fetch(attachmentApiUrl(att), {
@@ -339,24 +407,26 @@ export default function TicketDetail() {
             Aberto por {ticket.createdBy.name} em {format(new Date(ticket.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
           </p>
         </div>
-        {canManage && ticket.status !== TicketStatus.CLOSED && (
+        {canManage && (
           <div className="flex gap-2">
-            {!ticket.assignedToId && (
+            {!ticket.assignedToId && ticket.status !== TicketStatus.CLOSED && (
                <Button variant="secondary" onClick={handleAssignToMe} disabled={assignMutation.isPending}>
                  Atribuir a mim
                </Button>
             )}
-            <Select value={ticket.status} onValueChange={(v) => handleUpdateStatus(v as TicketStatus)}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Atualizar status" />
-              </SelectTrigger>
-              <SelectContent>
-                {canReopenClosed ? <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem> : null}
-                {canReopenClosed ? <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem> : null}
-                {canReopenClosed ? <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem> : null}
-                <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
-              </SelectContent>
-            </Select>
+            {canInteractTicket ? (
+              <Select value={ticket.status} onValueChange={(v) => handleUpdateStatus(v as TicketStatus)}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Atualizar status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {canReopenClosed ? <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem> : null}
+                  {canReopenClosed ? <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem> : null}
+                  {canReopenClosed ? <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem> : null}
+                  <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : null}
           </div>
         )}
       </div>
@@ -413,7 +483,13 @@ export default function TicketDetail() {
                 </div>
               )}
 
-              {ticket.status !== TicketStatus.CLOSED && (
+              {!canInteractTicket ? (
+                <p className="text-xs text-muted-foreground">
+                  Apenas o criador do ticket e o responsável atual podem enviar mensagens. Você pode visualizar este chamado.
+                </p>
+              ) : null}
+
+              {ticket.status !== TicketStatus.CLOSED && canInteractTicket ? (
                 <div className="mt-4 pt-4 border-t flex gap-2">
                   <Textarea
                     value={message}
@@ -436,7 +512,7 @@ export default function TicketDetail() {
                     <Send className="w-4 h-4" />
                   </Button>
                 </div>
-              )}
+              ) : null}
             </CardContent>
           </Card>
         </div>
@@ -481,6 +557,61 @@ export default function TicketDetail() {
               </div>
             </CardContent>
           </Card>
+
+          {canAssignTicket ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Substituir Atribuição</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-md border p-3 text-sm">
+                  <p className="text-xs text-muted-foreground">Ticket</p>
+                  <p className="font-medium">#{ticket.id} — {ticket.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Responsável atual: {ticket.assignedTo?.name ?? "Não atribuído"}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Novo responsável</label>
+                  <Select value={selectedAssigneeId} onValueChange={setSelectedAssigneeId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o usuário" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignableUsers.map((u) => (
+                        <SelectItem key={u.id} value={String(u.id)}>
+                          {u.name} • {u.role} • {u.assignedOpenTickets} em aberto
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Motivo da reatribuição</label>
+                  <Textarea
+                    value={assignReason}
+                    onChange={(e) => setAssignReason(e.target.value)}
+                    placeholder="Descreva o motivo da reatribuição"
+                    maxLength={500}
+                    rows={3}
+                  />
+                  <p className="text-xs text-muted-foreground text-right">{assignReason.length}/500</p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleReassign}
+                  disabled={assignMutation.isPending || ticket.status === TicketStatus.CLOSED}
+                  className="w-full"
+                >
+                  {assignMutation.isPending ? "Salvando..." : "Confirmar substituição"}
+                </Button>
+                {ticket.status === TicketStatus.CLOSED ? (
+                  <p className="text-xs text-muted-foreground">Tickets fechados não podem ser reatribuídos.</p>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
 
           {/* Attachments */}
           {((ticket as any).attachments?.length ?? 0) > 0 && (

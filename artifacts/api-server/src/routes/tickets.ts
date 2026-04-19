@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable } from "@workspace/db";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable } from "@workspace/db";
+import { eq, and, desc, inArray, or } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
+import { canReceiveReassign } from "../lib/ticket-reassign-policy";
 
 const router: IRouter = Router();
 
@@ -20,16 +21,13 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   const { status, type, priority, uf, municipality } = req.query as Record<string, string | undefined>;
 
   const whereClauses = [];
-  if (user.role === "USER") {
-    whereClauses.push(and(eq(ticketsTable.createdById, user.userId), eq(ticketsTable.status, "OPEN")));
-  } else if (user.role === "COORDINATOR") {
-    const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
-    const allowedOwners = [user.userId, ...managedUserIds];
-    if (allowedOwners.length === 0) {
-      res.json([]);
-      return;
-    }
-    whereClauses.push(inArray(ticketsTable.createdById, allowedOwners));
+  if (user.role !== "ADMIN" && user.role !== "ANALYST") {
+    whereClauses.push(
+      or(
+        eq(ticketsTable.createdById, user.userId),
+        eq(ticketsTable.assignedToId, user.userId),
+      ),
+    );
   }
 
   const baseWhere = whereClauses.length > 0 ? and(...whereClauses) : undefined;
@@ -303,6 +301,25 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
     return;
   }
 
+  if (existing.status === "CLOSED") {
+    res.status(400).json({ error: "Tickets fechados não podem ser reatribuídos" });
+    return;
+  }
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, parsed.data.assignedToId));
+  if (!targetUser) {
+    res.status(404).json({ error: "Responsável de destino não encontrado" });
+    return;
+  }
+  if (targetUser.status !== "ACTIVE") {
+    res.status(400).json({ error: "O novo responsável precisa estar ativo" });
+    return;
+  }
+  if (!canReceiveReassign(targetUser.role, targetUser.status)) {
+    res.status(400).json({ error: "Somente Admin, Coordenador e Analista podem receber reatribuição" });
+    return;
+  }
+
   const previousAssignedToId = existing.assignedToId ?? null;
 
   const [ticket] = await db.update(ticketsTable)
@@ -326,7 +343,13 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
     type: "MANUAL_ASSIGN",
     fromAssignedToId: previousAssignedToId,
     toAssignedToId: ticket.assignedToId ?? null,
-    detail: "Atribuição manual",
+    detail: parsed.data.reason,
+  });
+
+  await db.insert(messagesTable).values({
+    ticketId: id,
+    senderId: user.userId,
+    message: `[NOTIFICAÇÃO] Ticket reatribuído para ${targetUser.name}. Motivo: ${parsed.data.reason}`,
   });
 
   res.json({
