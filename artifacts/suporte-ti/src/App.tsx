@@ -63,7 +63,7 @@ function Router() {
         <ProtectedRoute path="/chamados/novo" component={NewTicket} />
         <ProtectedRoute path="/chamados/:id" component={TicketDetail} />
         <ProtectedRoute path="/chat" component={Chat} />
-        <ProtectedRoute path="/relatorios" component={Reports} />
+        <ProtectedRoute path="/relatorios" component={Reports} adminOnly />
         <ProtectedRoute path="/configuracoes" component={Settings} adminOnly />
         <ProtectedRoute path="/perfil" component={Profile} />
 

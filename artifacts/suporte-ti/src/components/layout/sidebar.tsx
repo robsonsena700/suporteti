@@ -26,7 +26,9 @@ export function Sidebar() {
     ...(user?.role && CHAT_ROLES.includes(user.role)
       ? [{ name: "Chat", href: "/chat", icon: MessageSquare, badge: unreadCount }]
       : []),
-    { name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 },
+    ...(user?.role === "ADMIN"
+      ? [{ name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 }]
+      : []),
     ...(user?.role === "ADMIN"
       ? [{ name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 }]
       : []),
