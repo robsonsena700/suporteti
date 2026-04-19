@@ -6,7 +6,9 @@ param(
   [string]$RemoteBaseDir = "/opt/suporte-ti",
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
   [switch]$SkipBuild,
-  [switch]$AllowDirty
+  [switch]$AllowDirty,
+  [switch]$SkipRestart,
+  [switch]$SkipHealthCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,11 +86,12 @@ function ResolveKeyPath {
 
 function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
-  $k = ""
+  $sshArgs = @("-p", "$Port")
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    $k = "-i `"$KeyPath`""
+    $sshArgs += @("-i", $KeyPath)
   }
-  & ssh -p $Port $k "$User@$HostName" $RemoteCommand
+  $sshArgs += @("$User@$HostName", $RemoteCommand)
+  & ssh.exe @sshArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Falha no ssh: $RemoteCommand"
   }
@@ -99,11 +102,12 @@ function ScpToRemote {
   if (!(Test-Path $LocalPath)) {
     throw "Arquivo não encontrado: $LocalPath"
   }
-  $k = ""
+  $scpArgs = @("-P", "$Port")
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    $k = "-i `"$KeyPath`""
+    $scpArgs += @("-i", $KeyPath)
   }
-  & scp -P $Port $k "$LocalPath" "${User}@${HostName}:$RemotePath"
+  $scpArgs += @("$LocalPath", "${User}@${HostName}:$RemotePath")
+  & scp.exe @scpArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Falha no scp para $RemotePath"
   }
@@ -117,7 +121,7 @@ if (!$AllowDirty -and $dirty.Trim().Length -gt 0) {
   throw "Existem alteracoes locais pendentes. Faca commit antes do deploy."
 }
 if ($AllowDirty -and $dirty.Trim().Length -gt 0) {
-  Write-Host "Aviso: AllowDirty ativo — deploy com working tree sujo." -ForegroundColor Yellow
+  Write-Host "Aviso: AllowDirty ativo - deploy com working tree sujo." -ForegroundColor Yellow
 }
 
 $appPkgPath = Join-Path (Get-Location) "artifacts\suporte-ti\package.json"
@@ -131,8 +135,11 @@ if ($version -notmatch "^\d+\.\d+\.\d+$") {
 }
 
 if (!$SkipBuild) {
-  Exec "pnpm run typecheck" | Out-Null
-  Exec "pnpm run build" | Out-Null
+  Exec "pnpm run typecheck:libs" | Out-Null
+  Exec "pnpm --filter @workspace/api-server --if-present run typecheck" | Out-Null
+  Exec "pnpm --filter @workspace/suporte-ti --if-present run typecheck" | Out-Null
+  Exec "pnpm --filter @workspace/api-server --if-present run build" | Out-Null
+  Exec "pnpm --filter @workspace/suporte-ti --if-present run build" | Out-Null
 }
 
 $distDir = Join-Path (Get-Location) "artifacts\suporte-ti\dist"
@@ -163,8 +170,24 @@ Ssh "mkdir -p $releasesDir"
 ScpToRemote -LocalPath $bundlePath -RemotePath "/tmp/$bundleName"
 Ssh "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C $releaseDir; rm -f /tmp/$bundleName"
 
-Ssh "set -e; if [ -L $currentLink ]; then rm -f $previousLink; ln -s \$(readlink $currentLink) $previousLink; fi; rm -f $currentLink; ln -s $releaseDir $currentLink"
-Ssh "set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi"
-Ssh "set -e; if command -v curl >/dev/null 2>&1; then curl -fsS $ApiHealthUrl >/dev/null; fi"
+$switchCmd = 'set -e; if [ -L "{0}" ]; then rm -f "{1}"; ln -s $(readlink "{0}") "{1}"; fi; rm -f "{0}"; ln -s "{2}" "{0}"' -f $currentLink, $previousLink, $releaseDir
+$serviceCmd = 'set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi'
+$healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >/dev/null; fi' -f $ApiHealthUrl
+
+Ssh $switchCmd
+if (!$SkipRestart) {
+  try {
+    Ssh $serviceCmd
+  } catch {
+    Write-Host "Aviso: falha ao reiniciar servicos via systemctl." -ForegroundColor Yellow
+  }
+}
+if (!$SkipHealthCheck) {
+  try {
+    Ssh $healthCmd
+  } catch {
+    Write-Host "Aviso: healthcheck falhou (API pode nao estar exposta/ativa ainda)." -ForegroundColor Yellow
+  }
+}
 
 Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os servicos."

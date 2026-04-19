@@ -2,8 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { mockupPreviewPlugin } from "./mockupPreviewPlugin";
+import { createRequire } from "node:module";
 
 const rawPort = process.env.PORT ?? "5175";
 
@@ -15,23 +15,30 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH ?? "/";
 
+const require = createRequire(import.meta.url);
+const optionalPlugins: any[] = [];
+try {
+  const runtime = require("@replit/vite-plugin-runtime-error-modal");
+  optionalPlugins.push(runtime.default());
+} catch {}
+if (process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined) {
+  try {
+    const cartographer = require("@replit/vite-plugin-cartographer");
+    optionalPlugins.push(
+      cartographer.cartographer({
+        root: path.resolve(import.meta.dirname, ".."),
+      }),
+    );
+  } catch {}
+}
+
 export default defineConfig({
   base: basePath,
   plugins: [
     mockupPreviewPlugin(),
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
-      ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
-            }),
-          ),
-        ]
-      : []),
+    ...optionalPlugins,
   ],
   resolve: {
     alias: {

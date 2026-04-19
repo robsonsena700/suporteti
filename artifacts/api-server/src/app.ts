@@ -3,6 +3,8 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const app: Express = express();
 
@@ -30,6 +32,15 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.resolve(__dirname, "../../suporte-ti/dist/public");
+app.use(express.static(publicDir, { index: false }));
+app.get(/^(?!\/api).*/, (req, res, next) => {
+  res.sendFile(path.join(publicDir, "index.html"), (err) => {
+    if (err) next(err);
+  });
+});
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
   if (res.headersSent) {

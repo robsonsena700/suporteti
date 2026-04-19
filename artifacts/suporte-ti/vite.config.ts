@@ -2,7 +2,6 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 const rawPort = process.env.PORT ?? "5174";
 const port = Number(rawPort);
@@ -14,25 +13,47 @@ if (Number.isNaN(port) || port <= 0) {
 const basePath = process.env.BASE_PATH ?? "/";
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? "http://localhost:3001";
 
-export default defineConfig({
+async function loadOptionalPlugins() {
+  const plugins: any[] = [];
+
+  try {
+    const runtime = await import("@replit/vite-plugin-runtime-error-modal");
+    plugins.push(runtime.default());
+  } catch {
+    // Optional in non-Replit environments.
+  }
+
+  if (process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined) {
+    try {
+      const cartographer = await import("@replit/vite-plugin-cartographer");
+      plugins.push(
+        cartographer.cartographer({
+          root: path.resolve(import.meta.dirname, ".."),
+        }),
+      );
+    } catch {
+      // Optional in non-Replit environments.
+    }
+
+    try {
+      const banner = await import("@replit/vite-plugin-dev-banner");
+      plugins.push(banner.devBanner());
+    } catch {
+      // Optional in non-Replit environments.
+    }
+  }
+
+  return plugins;
+}
+
+export default defineConfig(async () => {
+  const optionalPlugins = await loadOptionalPlugins();
+  return {
   base: basePath,
   plugins: [
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
-      ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
-            }),
-          ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
-        ]
-      : []),
+    ...optionalPlugins,
   ],
   resolve: {
     alias: {
@@ -66,4 +87,5 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
   },
+};
 });

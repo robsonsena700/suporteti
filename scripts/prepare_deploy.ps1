@@ -124,17 +124,40 @@ function WriteJsonFile {
   param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][object]$Object)
   $json = $Object | ConvertTo-Json -Depth 100
   $json = ($json -replace "\r?\n", "`n") + "`n"
-  Set-Content -Path $Path -Value $json -Encoding UTF8
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
 function ResolveCommitRef {
-  param([string]$Input)
+  param([string]$Input, [string]$DefaultRef = "HEAD")
 
   if ([string]::IsNullOrWhiteSpace($Input)) {
-    return (ExecGit @("rev-parse", "HEAD")).Trim()
+    return (ExecGit @("rev-parse", $DefaultRef)).Trim()
   }
 
   $candidate = $Input.Trim()
+
+  # If the user typed an existing branch/tag/ref, resolve that exact ref first.
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & git show-ref --verify --quiet "refs/heads/$candidate"
+    $isLocalBranch = ($LASTEXITCODE -eq 0)
+    if (-not $isLocalBranch) {
+      & git show-ref --verify --quiet "refs/remotes/$Remote/$candidate"
+      $isRemoteBranch = ($LASTEXITCODE -eq 0)
+    } else {
+      $isRemoteBranch = $false
+    }
+  } finally {
+    $ErrorActionPreference = $old
+  }
+  if ($isLocalBranch) {
+    return (ExecGit @("rev-parse", $candidate)).Trim()
+  }
+  if ($isRemoteBranch) {
+    return (ExecGit @("rev-parse", "$Remote/$candidate")).Trim()
+  }
 
   $old = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
@@ -220,8 +243,8 @@ if ($DevelopBranch -eq $MainBranch) {
 EnsureBranchExists -Branch $MainBranch
 EnsureBranchExists -Branch $DevelopBranch
 
-$inputCommit = Read-Host "Informe o hash/tag/branch do commit que deseja publicar (Enter = HEAD ou digite parte da mensagem)"
-$commit = ResolveCommitRef -Input $inputCommit
+$inputCommit = Read-Host "Informe o hash/tag/branch do commit que deseja publicar (Enter = HEAD da branch de desenvolvimento ou digite parte da mensagem)"
+$commit = ResolveCommitRef -Input $inputCommit -DefaultRef "$Remote/$DevelopBranch"
 
 ValidateCommitOnRemoteBranch -Commit $commit -RemoteBranch "$Remote/$DevelopBranch"
 
