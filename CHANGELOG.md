@@ -1,5 +1,8 @@
 ﻿# Changelog
 
+## v0.0.2 (2026-04-19)
+- modificações para publicação em produção (7a18cc9)
+
 ## v0.0.1 (2026-04-19)
 - chore(deploy): corrigir parsing do PowerShell (cbacadf)
 - chore(deploy): corrigir prepare_deploy e AllowDirty (bb73f39)
@@ -15,4 +18,5 @@
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
