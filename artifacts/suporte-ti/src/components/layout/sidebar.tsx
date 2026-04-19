@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
+import { useChatNotifications } from "@/lib/chat-notifications";
 import {
   LayoutDashboard,
   Ticket,
@@ -17,18 +18,27 @@ const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 export function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+  const { unreadCount } = useChatNotifications();
 
   const navigation = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Chamados", href: "/chamados", icon: Ticket },
+    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, badge: 0 },
+    { name: "Chamados", href: "/chamados", icon: Ticket, badge: 0 },
     ...(user?.role && CHAT_ROLES.includes(user.role)
-      ? [{ name: "Chat", href: "/chat", icon: MessageSquare }]
+      ? [{ name: "Chat", href: "/chat", icon: MessageSquare, badge: unreadCount }]
       : []),
-    { name: "Relatórios", href: "/relatorios", icon: BarChart3 },
+    { name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 },
     ...(user?.role === "ADMIN"
-      ? [{ name: "Configurações", href: "/configuracoes", icon: Settings }]
+      ? [{ name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 }]
       : []),
   ];
+
+  const NAV_LABELS: Record<string, string> = {
+    Dashboard: "Dashboard",
+    Chamados: "Chamados",
+    Chat: "Chat",
+    Relatorios: "Relatórios",
+    Configuracoes: "Configurações",
+  };
 
   return (
     <div className="flex h-full w-64 flex-col bg-sidebar border-r border-sidebar-border">
@@ -52,17 +62,26 @@ export function Sidebar() {
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                  "group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors"
+                  "group flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors"
                 )}
               >
-                <item.icon
-                  className={cn(
-                    isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/70 group-hover:text-sidebar-accent-foreground",
-                    "mr-3 h-5 w-5 flex-shrink-0"
-                  )}
-                  aria-hidden="true"
-                />
-                {item.name}
+                <div className="flex items-center">
+                  <item.icon
+                    className={cn(
+                      isActive
+                        ? "text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/70 group-hover:text-sidebar-accent-foreground",
+                      "mr-3 h-5 w-5 flex-shrink-0"
+                    )}
+                    aria-hidden="true"
+                  />
+                  {NAV_LABELS[item.name] ?? item.name}
+                </div>
+                {item.badge > 0 && (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white leading-none">
+                    {item.badge > 99 ? "99+" : item.badge}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -82,7 +101,12 @@ export function Sidebar() {
               Perfil
             </Link>
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => logout()} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => logout()}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
             <LogOut className="h-4 w-4" />
           </Button>
         </div>

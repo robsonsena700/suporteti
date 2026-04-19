@@ -1,9 +1,16 @@
-import { useState, useEffect, useRef, FormEvent, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  KeyboardEvent,
+} from "react";
+import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 import { useAuth } from "@/lib/auth";
+import { useChatNotifications } from "@/lib/chat-notifications";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Send, Users, SmilePlus } from "lucide-react";
+import { Send, Users, Smile, BellOff, Bell, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatMsg {
@@ -34,6 +41,12 @@ const AVATAR_BG: Record<string, string> = {
   ANALYST: "bg-sky-500",
 };
 
+const ROLE_COLOR: Record<string, string> = {
+  ADMIN: "#e11d48",
+  COORDINATOR: "#7c3aed",
+  ANALYST: "#0284c7",
+};
+
 const ROLE_PILL: Record<string, string> = {
   ADMIN: "bg-rose-100 text-rose-700",
   COORDINATOR: "bg-violet-100 text-violet-700",
@@ -49,25 +62,12 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function Avatar({
-  name,
-  role,
-  size = "md",
-}: {
-  name: string;
-  role: string;
-  size?: "sm" | "md" | "lg";
-}) {
-  const sz = size === "sm" ? "h-8 w-8 text-xs" : size === "lg" ? "h-12 w-12 text-base" : "h-10 w-10 text-sm";
+function Avatar({ name, role, size = "md" }: { name: string; role: string; size?: "sm" | "md" | "lg" }) {
+  const sz =
+    size === "sm" ? "h-8 w-8 text-xs" : size === "lg" ? "h-12 w-12 text-base" : "h-10 w-10 text-sm";
   const bg = AVATAR_BG[role] ?? "bg-slate-500";
   return (
-    <div
-      className={cn(
-        "shrink-0 rounded-full flex items-center justify-center font-bold text-white select-none",
-        sz,
-        bg
-      )}
-    >
+    <div className={cn("shrink-0 rounded-full flex items-center justify-center font-bold text-white select-none", sz, bg)}>
       {initials(name)}
     </div>
   );
@@ -97,28 +97,29 @@ function formatDateLabel(iso: string) {
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
-
-  const sameDay = (a: Date, b: Date) =>
-    a.getDate() === b.getDate() &&
-    a.getMonth() === b.getMonth() &&
-    a.getFullYear() === b.getFullYear();
-
-  if (sameDay(d, today)) return "Hoje";
-  if (sameDay(d, yesterday)) return "Ontem";
+  const same = (a: Date, b: Date) =>
+    a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+  if (same(d, today)) return "Hoje";
+  if (same(d, yesterday)) return "Ontem";
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 export default function Chat() {
   const { user } = useAuth();
+  const { markAllRead, requestPermission, notifPermission } = useChatNotifications();
+
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastIdRef = useRef<number>(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     bottomRef.current?.scrollIntoView({ behavior });
@@ -141,16 +142,46 @@ export default function Chat() {
   }, [scrollToBottom]);
 
   useEffect(() => {
+    markAllRead();
     loadMessages(true);
     fetchParticipants().then(setParticipants).catch(() => {});
     pollingRef.current = setInterval(() => loadMessages(), 4000);
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [loadMessages]);
+  }, [loadMessages, markAllRead]);
 
-  const handleSend = async (e: FormEvent) => {
-    e.preventDefault();
+  // Close emoji picker on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmoji(false);
+      }
+    };
+    if (showEmoji) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showEmoji]);
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    const emoji = emojiData.emoji;
+    const ta = inputRef.current;
+    if (!ta) {
+      setInput((prev) => prev + emoji);
+      return;
+    }
+    const start = ta.selectionStart ?? input.length;
+    const end = ta.selectionEnd ?? input.length;
+    const newValue = input.slice(0, start) + emoji + input.slice(end);
+    setInput(newValue);
+    // restore cursor after emoji
+    requestAnimationFrame(() => {
+      ta.selectionStart = ta.selectionEnd = start + emoji.length;
+      ta.focus();
+    });
+    setShowEmoji(false);
+  };
+
+  const handleSend = async () => {
     const text = input.trim();
     if (!text || sending) return;
     setSending(true);
@@ -163,9 +194,16 @@ export default function Chat() {
       setTimeout(() => scrollToBottom("smooth"), 50);
       inputRef.current?.focus();
     } catch {
-      setError("Nao foi possivel enviar. Tente novamente.");
+      setError("Não foi possível enviar. Tente novamente.");
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
@@ -173,8 +211,6 @@ export default function Chat() {
   for (const m of messages) {
     lastMessageByUser[m.senderId] = m;
   }
-
-  let lastDateLabel = "";
 
   return (
     <div className="flex h-full overflow-hidden bg-[#f0f2f5] dark:bg-[#111b21]">
@@ -187,15 +223,35 @@ export default function Chat() {
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <Users className="h-5 w-5" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold leading-none">Equipe Interna</p>
             <p className="text-xs text-muted-foreground mt-0.5">
               {participants.length} {participants.length === 1 ? "membro" : "membros"}
             </p>
           </div>
+          {/* Notification toggle */}
+          <button
+            onClick={requestPermission}
+            title={
+              notifPermission === "granted"
+                ? "Notificações ativas"
+                : notifPermission === "denied"
+                ? "Notificações bloqueadas no navegador"
+                : "Ativar notificações"
+            }
+            className="p-1.5 rounded-full hover:bg-muted transition-colors"
+          >
+            {notifPermission === "granted" ? (
+              <Bell className="h-4 w-4 text-green-500" />
+            ) : notifPermission === "denied" ? (
+              <BellOff className="h-4 w-4 text-destructive" />
+            ) : (
+              <Bell className="h-4 w-4 text-muted-foreground" />
+            )}
+          </button>
         </div>
 
-        {/* Search placeholder */}
+        {/* Search bar visual */}
         <div className="px-3 py-2 border-b border-border bg-white dark:bg-[#1f2c34]">
           <div className="flex items-center gap-2 rounded-lg bg-[#f0f2f5] dark:bg-[#2a3942] px-3 py-2">
             <svg className="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -207,7 +263,7 @@ export default function Chat() {
 
         {/* Participants list */}
         <div className="flex-1 overflow-y-auto">
-          {/* Group item pinned at top */}
+          {/* Pinned group */}
           <div className="flex items-center gap-3 px-4 py-3 bg-[#f0f9ff] dark:bg-[#182229] border-b-2 border-primary/30 cursor-default">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
               <Users className="h-6 w-6" />
@@ -229,7 +285,7 @@ export default function Chat() {
             </div>
           </div>
 
-          {/* Individual members */}
+          {/* Members */}
           <div className="pt-1">
             <p className="px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               Membros
@@ -242,9 +298,7 @@ export default function Chat() {
                   key={p.id}
                   className={cn(
                     "flex items-center gap-3 px-4 py-3 border-b border-border/50 transition-colors",
-                    isMe
-                      ? "bg-primary/5"
-                      : "hover:bg-[#f5f6f6] dark:hover:bg-[#2a3942] cursor-default"
+                    isMe ? "bg-primary/5" : "hover:bg-[#f5f6f6] dark:hover:bg-[#2a3942]"
                   )}
                 >
                   <div className="relative shrink-0">
@@ -254,29 +308,20 @@ export default function Chat() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-medium truncate leading-none">
-                        {p.name}
-                        {isMe && (
-                          <span className="ml-1 text-[10px] text-muted-foreground font-normal">(Você)</span>
-                        )}
-                      </p>
-                    </div>
+                    <p className="text-sm font-medium truncate leading-none">
+                      {p.name}
+                      {isMe && (
+                        <span className="ml-1 text-[10px] text-muted-foreground font-normal">(Você)</span>
+                      )}
+                    </p>
                     <div className="flex items-center gap-1.5 mt-1">
-                      <span
-                        className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded-full font-semibold",
-                          ROLE_PILL[p.role] ?? "bg-gray-100 text-gray-600"
-                        )}
-                      >
+                      <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-semibold", ROLE_PILL[p.role] ?? "bg-gray-100 text-gray-600")}>
                         {ROLE_LABELS[p.role] ?? p.role}
                       </span>
                       <span className="text-[10px] text-muted-foreground">{p.uf}</span>
                     </div>
                     {lastMsg && (
-                      <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                        {lastMsg.message}
-                      </p>
+                      <p className="text-[11px] text-muted-foreground truncate mt-0.5">{lastMsg.message}</p>
                     )}
                   </div>
                 </div>
@@ -302,7 +347,7 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* Messages area — WhatsApp wallpaper-like bg */}
+        {/* Messages */}
         <div
           className="flex-1 overflow-y-auto px-4 py-3"
           style={{
@@ -313,7 +358,7 @@ export default function Chat() {
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
               <div className="h-16 w-16 rounded-full bg-white/80 flex items-center justify-center shadow">
-                <SmilePlus className="h-8 w-8 text-primary/50" />
+                <Smile className="h-8 w-8 text-primary/40" />
               </div>
               <p className="text-sm text-gray-600 font-medium">Nenhuma mensagem ainda</p>
               <p className="text-xs text-gray-500">Seja o primeiro a escrever!</p>
@@ -338,18 +383,9 @@ export default function Chat() {
                     </div>
                   )}
 
-                  <div
-                    className={cn(
-                      "flex items-end gap-2 mb-1.5",
-                      isOwn ? "flex-row-reverse" : "flex-row"
-                    )}
-                  >
-                    {/* Avatar only for others */}
-                    {!isOwn && (
-                      <Avatar name={msg.sender.name} role={msg.sender.role} size="sm" />
-                    )}
+                  <div className={cn("flex items-end gap-2 mb-1.5", isOwn ? "flex-row-reverse" : "flex-row")}>
+                    {!isOwn && <Avatar name={msg.sender.name} role={msg.sender.role} size="sm" />}
 
-                    {/* Bubble */}
                     <div
                       className={cn(
                         "relative max-w-[65%] rounded-2xl px-3 py-2 shadow-sm",
@@ -358,41 +394,18 @@ export default function Chat() {
                           : "bg-white dark:bg-[#202c33] rounded-bl-sm text-gray-800 dark:text-white"
                       )}
                     >
-                      {/* Sender name for group messages */}
                       {!isOwn && (
-                        <p
-                          className={cn(
-                            "text-[11px] font-semibold mb-0.5",
-                            AVATAR_BG[msg.sender.role]
-                              ? `text-${AVATAR_BG[msg.sender.role].replace("bg-", "")}`
-                              : "text-primary"
-                          )}
-                          style={{
-                            color:
-                              msg.sender.role === "ADMIN"
-                                ? "#e11d48"
-                                : msg.sender.role === "COORDINATOR"
-                                ? "#7c3aed"
-                                : "#0284c7",
-                          }}
-                        >
+                        <p className="text-[11px] font-semibold mb-0.5" style={{ color: ROLE_COLOR[msg.sender.role] ?? "#1B3B6E" }}>
                           {msg.sender.name}
                           <span className="ml-1.5 font-normal text-[10px] text-gray-400">
                             ({ROLE_LABELS[msg.sender.role] ?? msg.sender.role})
                           </span>
                         </p>
                       )}
-
                       <p className="text-[13px] leading-snug break-words whitespace-pre-wrap pr-10">
                         {msg.message}
                       </p>
-
-                      {/* Time */}
-                      <span
-                        className={cn(
-                          "absolute bottom-1.5 right-2.5 text-[10px] text-gray-400"
-                        )}
-                      >
+                      <span className="absolute bottom-1.5 right-2.5 text-[10px] text-gray-400">
                         {formatTime(msg.createdAt)}
                       </span>
                     </div>
@@ -405,39 +418,80 @@ export default function Chat() {
         </div>
 
         {/* Input footer */}
-        <div className="flex items-center gap-2 px-3 py-3 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-border shrink-0">
-          {error && (
-            <p className="absolute bottom-16 left-1/2 -translate-x-1/2 text-xs text-destructive bg-white px-3 py-1 rounded-full shadow">
-              {error}
-            </p>
+        <div className="relative px-3 py-3 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-border shrink-0">
+
+          {/* Emoji Picker */}
+          {showEmoji && (
+            <div
+              ref={emojiPickerRef}
+              className="absolute bottom-full mb-2 left-3 z-50 shadow-xl rounded-xl overflow-hidden"
+            >
+              <EmojiPicker
+                onEmojiClick={handleEmojiClick}
+                theme={Theme.LIGHT}
+                lazyLoadEmojis
+                searchPlaceholder="Pesquisar emoji..."
+                height={380}
+                width={320}
+              />
+            </div>
           )}
-          <div className="flex flex-1 items-center gap-2 rounded-full bg-white dark:bg-[#2a3942] px-4 py-2 shadow-sm">
-            <Input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend(e as any);
-                }
-              }}
-              placeholder="Digite uma mensagem"
-              disabled={sending}
-              className="border-0 bg-transparent shadow-none focus-visible:ring-0 p-0 text-sm h-auto"
-              maxLength={2000}
-              autoComplete="off"
-            />
+
+          {error && (
+            <div className="flex items-center gap-2 mb-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs px-3 py-2 rounded-lg">
+              <span className="flex-1">{error}</span>
+              <button onClick={() => setError(null)}><X className="h-3 w-3" /></button>
+            </div>
+          )}
+
+          <div className="flex items-end gap-2">
+            {/* Emoji button */}
+            <button
+              type="button"
+              onClick={() => setShowEmoji((v) => !v)}
+              className={cn(
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors",
+                showEmoji
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-white dark:bg-[#2a3942] text-muted-foreground hover:text-primary hover:bg-white/80 shadow-sm"
+              )}
+              title="Emoji"
+            >
+              <Smile className="h-5 w-5" />
+            </button>
+
+            {/* Text input */}
+            <div className="flex flex-1 items-end rounded-2xl bg-white dark:bg-[#2a3942] px-4 py-2.5 shadow-sm min-h-[44px]">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder="Digite uma mensagem"
+                disabled={sending}
+                rows={1}
+                maxLength={2000}
+                autoComplete="off"
+                className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground leading-snug overflow-hidden w-full"
+                style={{ height: "24px" }}
+              />
+            </div>
+
+            {/* Send button */}
+            <Button
+              type="button"
+              onClick={handleSend}
+              disabled={!input.trim() || sending}
+              size="icon"
+              className="rounded-full h-11 w-11 shrink-0 shadow-sm"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
           </div>
-          <Button
-            type="button"
-            onClick={handleSend as any}
-            disabled={!input.trim() || sending}
-            size="icon"
-            className="rounded-full h-11 w-11 shrink-0 shadow-sm"
-          >
-            <Send className="h-5 w-5" />
-          </Button>
         </div>
       </div>
     </div>
