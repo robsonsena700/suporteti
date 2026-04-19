@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, chatMessagesTable, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -15,6 +15,22 @@ function requireChatAccess(req: any, res: any, next: any) {
   }
   next();
 }
+
+router.get("/chat/participants", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
+  const participants = await db.select({
+    id: usersTable.id,
+    name: usersTable.name,
+    role: usersTable.role,
+    uf: usersTable.uf,
+    municipality: usersTable.municipality,
+  })
+  .from(usersTable)
+  .where(
+    inArray(usersTable.role, ["ADMIN", "COORDINATOR", "ANALYST"] as any[])
+  );
+
+  res.json(participants);
+});
 
 router.get("/chat/messages", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
   const rawLimit = req.query.limit as string | undefined;

@@ -27,14 +27,22 @@ export function AppLayout({ children }: AppLayoutProps) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 
+  const isFullScreen = location === "/chat";
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <main className="flex-1 overflow-y-auto">
-          <div className="container mx-auto p-8">
-            {children}
-          </div>
+        <main className="flex-1 overflow-hidden">
+          {isFullScreen ? (
+            <div className="h-full">{children}</div>
+          ) : (
+            <div className="h-full overflow-y-auto">
+              <div className="container mx-auto p-8">
+                {children}
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>
