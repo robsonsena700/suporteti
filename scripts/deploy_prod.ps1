@@ -39,6 +39,37 @@ function RequireFile {
   }
 }
 
+function ResolveKeyPath {
+  param([string]$InputKeyPath)
+
+  if (![string]::IsNullOrWhiteSpace($InputKeyPath) -and (Test-Path $InputKeyPath)) {
+    return (Resolve-Path $InputKeyPath).Path
+  }
+
+  $sshDir = Join-Path $RepoRoot "lib\ssh"
+  $candidates = @(
+    (Join-Path $sshDir "id_rsa"),
+    (Join-Path $sshDir "suporteTi"),
+    (Join-Path $sshDir "id_ed25519")
+  )
+
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      Write-Host "Aviso: usando chave SSH encontrada automaticamente: $candidate" -ForegroundColor Yellow
+      return (Resolve-Path $candidate).Path
+    }
+  }
+
+  if (Test-Path $sshDir) {
+    $files = Get-ChildItem -Path $sshDir -File | Select-Object -ExpandProperty FullName
+    if ($files.Count -gt 0) {
+      throw "Chave SSH inválida/não encontrada em '$InputKeyPath'. Arquivos disponíveis em lib\\ssh:`n$($files -join "`n")"
+    }
+  }
+
+  throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada."
+}
+
 function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
   $k = ""
@@ -70,6 +101,8 @@ function ScpToRemote {
 }
 
 Write-Host "Deploy produção - alvo: ${User}@${HostName}:$Port"
+
+$KeyPath = ResolveKeyPath -InputKeyPath $KeyPath
 
 ExecGit @("status", "--porcelain") | Out-Null
 $dirty = (& git status --porcelain 2>&1) -join "`n"

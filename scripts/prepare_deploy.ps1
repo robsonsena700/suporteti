@@ -89,8 +89,11 @@ function WriteJsonFile {
 }
 
 function EnsureCleanWorkingTree {
-  $status = ExecGit @("status", "--porcelain")
-  if ($status.Trim().Length -gt 0) {
+  $statusOutput = (& git status --porcelain 2>&1)
+  $status = (($statusOutput | ForEach-Object { "$_" }) -join "`n").Trim()
+  if ($status.Length -gt 0) {
+    Write-Host "Alterações detectadas:" -ForegroundColor Yellow
+    Write-Host $status -ForegroundColor Yellow
     throw "Existem alterações locais pendentes. Faça commit/stash antes de preparar deploy."
   }
 }
