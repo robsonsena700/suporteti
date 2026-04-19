@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
+import multer from "multer";
 import { db, usersTable, userCoordinatorsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { UpdateUserBody } from "@workspace/api-zod";
@@ -12,6 +13,17 @@ import { validateMunicipalityForUf } from "../lib/ibge";
 import { listCoordinatorsForUser } from "../lib/access";
 
 const router: IRouter = Router();
+
+const AVATAR_MAX_SIZE = 1 * 1024 * 1024; // 1 MB
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_SIZE, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error(`Tipo de arquivo não permitido: ${file.mimetype}`));
+  },
+});
 
 type UserRole = "USER" | "COORDINATOR" | "ANALYST" | "ADMIN";
 type UserStatus = "ACTIVE" | "INACTIVE";
@@ -522,6 +534,58 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
   }
 
   res.json(user);
+});
+
+router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const [u] = await db.select({
+    id: usersTable.id,
+    avatarMimeType: usersTable.avatarMimeType,
+    avatarData: usersTable.avatarData,
+  }).from(usersTable).where(eq(usersTable.id, id));
+
+  if (!u || !u.avatarMimeType || !u.avatarData) {
+    res.status(404).json({ error: "Avatar não encontrado" });
+    return;
+  }
+
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ mimeType: u.avatarMimeType, data: u.avatarData });
+});
+
+router.post(
+  "/users/me/avatar",
+  requireAuth,
+  requireActive,
+  avatarUpload.single("file"),
+  async (req, res): Promise<void> => {
+    const currentUser = req.user!;
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) {
+      res.status(400).json({ error: "Arquivo não enviado" });
+      return;
+    }
+
+    const base64 = file.buffer.toString("base64");
+    await db.update(usersTable).set({
+      avatarMimeType: file.mimetype,
+      avatarData: base64,
+    }).where(eq(usersTable.id, currentUser.userId));
+
+    res.json({ message: "Avatar atualizado com sucesso" });
+  },
+);
+
+router.delete("/users/me/avatar", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const currentUser = req.user!;
+  await db.update(usersTable).set({ avatarMimeType: null, avatarData: null }).where(eq(usersTable.id, currentUser.userId));
+  res.json({ message: "Avatar removido com sucesso" });
 });
 
 export default router;

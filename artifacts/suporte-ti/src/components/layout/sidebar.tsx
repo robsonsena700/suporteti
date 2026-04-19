@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/user/user-avatar";
 
 const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 
@@ -92,6 +93,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3 px-3 py-2 text-sm text-sidebar-foreground">
+          <UserAvatar userId={user?.id} name={user?.name ?? "Usuário"} className="h-9 w-9" />
           <div className="flex-1 min-w-0">
             <p className="truncate font-medium">{user?.name}</p>
             <p className="truncate text-xs text-sidebar-foreground/70">{user?.role}</p>

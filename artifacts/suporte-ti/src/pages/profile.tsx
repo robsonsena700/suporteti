@@ -17,11 +17,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { UserCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useEffect, useMemo, useState } from "react";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { formatBrazilPhone, formatCpf, isValidBrazilMobile, isValidCpf, onlyDigits } from "@/lib/validators";
+import { UserAvatar } from "@/components/user/user-avatar";
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
@@ -48,6 +49,9 @@ export default function Profile() {
   const updateMutation = useUpdateUser();
   const [municipalities, setMunicipalities] = useState<string[]>([]);
   const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string>("");
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -101,6 +105,72 @@ export default function Profile() {
 
   const municipalityOptions = useMemo(() => municipalities, [municipalities]);
 
+  useEffect(() => {
+    if (!avatarFile) {
+      if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+      setAvatarPreviewUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(avatarFile);
+    setAvatarPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [avatarFile]);
+
+  const uploadAvatar = async () => {
+    if (!user) return;
+    if (!avatarFile) {
+      toast({ title: "Selecione uma imagem", variant: "destructive" });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", avatarFile);
+      const token = localStorage.getItem("ti_support_token");
+      const resp = await fetch("/api/users/me/avatar", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: fd,
+      });
+      if (!resp.ok) {
+        throw new Error();
+      }
+      await queryClient.invalidateQueries({ queryKey: ["user-avatar", user.id] });
+      setAvatarFile(null);
+      toast({ title: "Foto do perfil atualizada" });
+    } catch {
+      toast({
+        title: "Erro ao atualizar foto",
+        description: "Verifique o arquivo (JPG/PNG/WEBP/GIF, até 1 MB) e tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    if (!user) return;
+    setIsUploadingAvatar(true);
+    try {
+      const token = localStorage.getItem("ti_support_token");
+      const resp = await fetch("/api/users/me/avatar", {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!resp.ok) throw new Error();
+      await queryClient.invalidateQueries({ queryKey: ["user-avatar", user.id] });
+      toast({ title: "Foto do perfil removida" });
+    } catch {
+      toast({ title: "Erro ao remover foto", variant: "destructive" });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   const onSubmit = (data: ProfileForm) => {
     if (!user) return;
     updateMutation.mutate(
@@ -137,13 +207,42 @@ export default function Profile() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="md:col-span-1 border-none shadow-none bg-muted/30">
           <CardContent className="pt-6 flex flex-col items-center text-center">
-            <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <UserCircle className="w-16 h-16 text-primary" />
+            <div className="w-24 h-24 mb-4">
+              {avatarPreviewUrl ? (
+                <img
+                  src={avatarPreviewUrl}
+                  alt="Prévia do avatar"
+                  className="w-24 h-24 rounded-full object-cover border"
+                />
+              ) : (
+                <UserAvatar userId={user.id} name={user.name} className="w-24 h-24" />
+              )}
             </div>
             <h2 className="font-semibold text-lg">{user.name}</h2>
             <p className="text-sm text-muted-foreground">{user.email}</p>
             <div className="mt-4 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold">
               {user.role}
+            </div>
+
+            <div className="w-full mt-6 space-y-2 text-left">
+              <p className="text-xs font-medium text-muted-foreground">Foto do perfil</p>
+              <Input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={(e) => setAvatarFile(e.target.files?.[0] ?? null)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                JPG, PNG, WEBP ou GIF — até 1 MB.
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" onClick={uploadAvatar} disabled={!avatarFile || isUploadingAvatar}>
+                  {isUploadingAvatar ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Salvar
+                </Button>
+                <Button type="button" variant="outline" onClick={removeAvatar} disabled={isUploadingAvatar}>
+                  Remover
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

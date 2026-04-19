@@ -21,6 +21,8 @@ export const usersTable = pgTable("users", {
   termsAccepted: boolean("terms_accepted").notNull().default(false),
   termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
   uf: text("uf").notNull(),
+  avatarMimeType: text("avatar_mime_type"),
+  avatarData: text("avatar_data"),
   municipality: text("municipality").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

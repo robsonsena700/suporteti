@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { UserAvatar } from "@/components/user/user-avatar";
 
 const EmojiPicker = lazy(() => import("emoji-picker-react"));
 
@@ -66,12 +67,6 @@ const ROLE_LABELS: Record<string, string> = {
   ANALYST: "Analista",
 };
 
-const AVATAR_BG: Record<string, string> = {
-  ADMIN: "bg-rose-500",
-  COORDINATOR: "bg-violet-500",
-  ANALYST: "bg-sky-500",
-};
-
 const ROLE_COLOR: Record<string, string> = {
   ADMIN: "#e11d48",
   COORDINATOR: "#7c3aed",
@@ -85,19 +80,6 @@ const ROLE_PILL: Record<string, string> = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function initials(name: string) {
-  return name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase();
-}
-
-function Avatar({ name, role, size = "md" }: { name: string; role: string; size?: "sm" | "md" | "lg" }) {
-  const sz = size === "sm" ? "h-8 w-8 text-xs" : size === "lg" ? "h-12 w-12 text-base" : "h-10 w-10 text-sm";
-  return (
-    <div className={cn("shrink-0 rounded-full flex items-center justify-center font-bold text-white select-none", sz, AVATAR_BG[role] ?? "bg-slate-500")}>
-      {initials(name)}
-    </div>
-  );
-}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -160,6 +142,7 @@ async function postDM(userId: number, message: string): Promise<DM> {
 
 function MessageBubble({
   isOwn,
+  senderId,
   senderName,
   senderRole,
   message,
@@ -167,6 +150,7 @@ function MessageBubble({
   showSender,
 }: {
   isOwn: boolean;
+  senderId: number;
   senderName: string;
   senderRole: string;
   message: string;
@@ -175,7 +159,7 @@ function MessageBubble({
 }) {
   return (
     <div className={cn("flex items-end gap-2 mb-1.5", isOwn ? "flex-row-reverse" : "flex-row")}>
-      {!isOwn && <Avatar name={senderName} role={senderRole} size="sm" />}
+      {!isOwn && <UserAvatar userId={senderId} name={senderName} className="h-8 w-8" />}
       {isOwn && <div className="w-8 shrink-0" />}
 
       <div
@@ -523,7 +507,7 @@ export default function Chat() {
                   )}
                 >
                   <div className="relative shrink-0">
-                    <Avatar name={p.name} role={p.role} size="lg" />
+                    <UserAvatar userId={p.id} name={p.name} className="h-12 w-12" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-1">
@@ -572,7 +556,7 @@ export default function Chat() {
                 <Users className="h-5 w-5" />
               </div>
             ) : conversation.type === "dm" ? (
-              <Avatar name={conversation.participant.name} role={conversation.participant.role} size="md" />
+              <UserAvatar userId={conversation.participant.id} name={conversation.participant.name} className="h-10 w-10" />
             ) : null}
           </div>
           <div className="flex-1 min-w-0">
@@ -628,6 +612,7 @@ export default function Chat() {
                   )}
                   <MessageBubble
                     isOwn={isOwn}
+                    senderId={msg.senderId}
                     senderName={msg.senderName}
                     senderRole={msg.senderRole}
                     message={msg.message}
