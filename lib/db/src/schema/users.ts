@@ -25,6 +25,7 @@ export const usersTable = pgTable("users", {
   avatarData: text("avatar_data"),
   municipality: text("municipality").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

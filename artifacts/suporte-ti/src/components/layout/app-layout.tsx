@@ -6,6 +6,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu } from "lucide-react";
+import { AppFooter } from "@/components/layout/app-footer";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -75,6 +76,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <div className="container mx-auto px-4 py-6 sm:p-8">
                 {children}
               </div>
+              <AppFooter />
             </div>
           )}
         </main>

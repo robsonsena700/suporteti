@@ -537,10 +537,21 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
 });
 
 router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const currentUser = req.user!;
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  if (
+    currentUser.userId !== id
+    && currentUser.role !== "ADMIN"
+    && currentUser.role !== "ANALYST"
+    && currentUser.role !== "COORDINATOR"
+  ) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 

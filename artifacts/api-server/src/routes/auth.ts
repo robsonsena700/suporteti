@@ -145,6 +145,9 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  const now = new Date();
+  await db.update(usersTable).set({ lastLoginAt: now }).where(eq(usersTable.id, user.id));
+
   const token = signToken({
     userId: user.id,
     email: user.email,
@@ -172,6 +175,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       uf: user.uf,
       municipality: user.municipality,
       createdAt: user.createdAt,
+      lastLoginAt: now,
       mustChangePassword: user.mustChangePassword,
     },
   });
@@ -204,6 +208,7 @@ router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
     uf: user.uf,
     municipality: user.municipality,
     createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt,
     mustChangePassword: user.mustChangePassword,
   });
 });

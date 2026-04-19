@@ -15,6 +15,7 @@ import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft } from "lucide-re
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { UserAvatar } from "@/components/user/user-avatar";
+import { getRoleLabel } from "@/lib/role-labels";
 
 const EmojiPicker = lazy(() => import("emoji-picker-react"));
 
@@ -62,9 +63,10 @@ type Conversation =
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ROLE_LABELS: Record<string, string> = {
-  ADMIN: "Admin",
-  COORDINATOR: "Coordenador",
-  ANALYST: "Analista",
+  ADMIN: getRoleLabel("ADMIN"),
+  COORDINATOR: getRoleLabel("COORDINATOR"),
+  ANALYST: getRoleLabel("ANALYST"),
+  USER: getRoleLabel("USER"),
 };
 
 const ROLE_COLOR: Record<string, string> = {

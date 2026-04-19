@@ -87,6 +87,7 @@ export const GetMeResponse = zod.object({
   uf: zod.string(),
   municipality: zod.string(),
   createdAt: zod.coerce.date(),
+  lastLoginAt: zod.coerce.date().nullish(),
 });
 
 /**

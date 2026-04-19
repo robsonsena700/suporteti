@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user/user-avatar";
+import { getRoleLabel } from "@/lib/role-labels";
 
 const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 
@@ -96,7 +97,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <UserAvatar userId={user?.id} name={user?.name ?? "Usuário"} className="h-9 w-9" />
           <div className="flex-1 min-w-0">
             <p className="truncate font-medium">{user?.name}</p>
-            <p className="truncate text-xs text-sidebar-foreground/70">{user?.role}</p>
+            <p className="truncate text-xs text-sidebar-foreground/70">{getRoleLabel(user?.role)}</p>
           </div>
         </div>
         <div className="mt-2 flex gap-2">

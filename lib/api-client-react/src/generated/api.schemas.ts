@@ -73,6 +73,8 @@ export interface User {
   uf: string;
   municipality: string;
   createdAt: string;
+  /** @nullable */
+  lastLoginAt?: string | null;
 }
 
 export interface AuthResponse {

@@ -689,6 +689,9 @@ components:
         createdAt:
           type: string
           format: date-time
+        lastLoginAt:
+          type: ["string", "null"]
+          format: date-time
       required:
         - id
         - name

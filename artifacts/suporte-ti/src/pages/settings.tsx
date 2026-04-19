@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getRoleLabel } from "@/lib/role-labels";
 
 type UserWithCoordinator = {
   id: number;
@@ -345,7 +346,7 @@ export default function Settings() {
                     <TableCell className="font-medium">{user.name}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{user.role}</Badge>
+                      <Badge variant="outline">{getRoleLabel(user.role)}</Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={user.status === UserStatus.ACTIVE ? "default" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
