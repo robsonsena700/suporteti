@@ -8,6 +8,7 @@ import ratingsRouter from "./ratings";
 import reportsRouter from "./reports";
 import chatRouter from "./chat";
 import directMessagesRouter from "./direct-messages";
+import ticketAttachmentsRouter from "./ticket-attachments";
 
 const router: IRouter = Router();
 
@@ -15,6 +16,7 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use(usersRouter);
 router.use(ticketsRouter);
+router.use(ticketAttachmentsRouter);
 router.use(messagesRouter);
 router.use(ratingsRouter);
 router.use(reportsRouter);

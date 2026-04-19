@@ -13,4 +13,5 @@ export interface CreateTicketBody {
   description: string;
   type: CreateTicketBodyType;
   priority: CreateTicketBodyPriority;
+  hardwareSubtype?: string;
 }

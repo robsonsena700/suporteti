@@ -1,6 +1,6 @@
 import { relations } from "drizzle-orm";
 import { usersTable } from "./users";
-import { ticketsTable } from "./tickets";
+import { ticketsTable, ticketAttachmentsTable } from "./tickets";
 import { messagesTable } from "./messages";
 import { ratingsTable } from "./ratings";
 import { chatMessagesTable } from "./chat";
@@ -51,6 +51,14 @@ export const ticketsRelations = relations(ticketsTable, ({ one, many }) => ({
   rating: one(ratingsTable, {
     fields: [ticketsTable.id],
     references: [ratingsTable.ticketId],
+  }),
+  attachments: many(ticketAttachmentsTable),
+}));
+
+export const ticketAttachmentsRelations = relations(ticketAttachmentsTable, ({ one }) => ({
+  ticket: one(ticketsTable, {
+    fields: [ticketAttachmentsTable.ticketId],
+    references: [ticketsTable.id],
   }),
 }));
 

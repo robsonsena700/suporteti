@@ -12,6 +12,7 @@ export const ticketsTable = pgTable("tickets", {
   title: text("title").notNull(),
   description: text("description").notNull(),
   type: ticketTypeEnum("type").notNull(),
+  hardwareSubtype: text("hardware_subtype"),
   status: ticketStatusEnum("status").notNull().default("OPEN"),
   priority: ticketPriorityEnum("priority").notNull(),
   uf: text("uf").notNull(),
@@ -20,6 +21,16 @@ export const ticketsTable = pgTable("tickets", {
   assignedToId: integer("assigned_to_id").references(() => usersTable.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
+export const ticketAttachmentsTable = pgTable("ticket_attachments", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull().references(() => ticketsTable.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  size: integer("size").notNull(),
+  data: text("data").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const insertTicketSchema = createInsertSchema(ticketsTable).omit({ id: true, createdAt: true, updatedAt: true });

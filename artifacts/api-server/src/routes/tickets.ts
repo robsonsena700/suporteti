@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable } from "@workspace/db";
+import { db, usersTable, ticketsTable, ticketAttachmentsTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
@@ -44,6 +44,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     title: t.title,
     description: t.description,
     type: t.type,
+    hardwareSubtype: t.hardwareSubtype ?? null,
     status: t.status,
     priority: t.priority,
     uf: t.uf,
@@ -119,6 +120,9 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
         orderBy: (m, { asc }) => [asc(m.createdAt)],
       },
       rating: true,
+      attachments: {
+        columns: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
+      },
     },
   });
 
@@ -141,6 +145,7 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
     title: ticket.title,
     description: ticket.description,
     type: ticket.type,
+    hardwareSubtype: ticket.hardwareSubtype ?? null,
     status: ticket.status,
     priority: ticket.priority,
     uf: ticket.uf,
@@ -175,6 +180,13 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
       },
     })),
     rating: ticket.rating ?? null,
+    attachments: ticket.attachments.map(a => ({
+      id: a.id,
+      filename: a.filename,
+      mimeType: a.mimeType,
+      size: a.size,
+      createdAt: a.createdAt,
+    })),
   });
 });
 

@@ -205,6 +205,7 @@ export const CreateTicketBody = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
+  hardwareSubtype: zod.string().optional(),
 });
 
 /**

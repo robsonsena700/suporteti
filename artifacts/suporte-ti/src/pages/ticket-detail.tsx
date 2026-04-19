@@ -23,11 +23,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Star, UserCircle2, Calendar } from "lucide-react";
+import { ArrowLeft, Send, Star, UserCircle2, FileText, Paperclip, Download } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface Attachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+}
 
 export default function TicketDetail() {
   const [, params] = useRoute("/chamados/:id");
@@ -255,6 +269,14 @@ export default function TicketDetail() {
                 <span className="text-muted-foreground block mb-1">Tipo</span>
                 <TypeBadge type={ticket.type} />
               </div>
+              {(ticket as any).hardwareSubtype && (
+                <div>
+                  <span className="text-muted-foreground block mb-1">Subcategoria</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                    {(ticket as any).hardwareSubtype}
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-muted-foreground block mb-1">Prioridade</span>
                 <PriorityBadge priority={ticket.priority} />
@@ -271,6 +293,42 @@ export default function TicketDetail() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Attachments */}
+          {((ticket as any).attachments?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Paperclip className="h-4 w-4" />
+                  Anexos ({(ticket as any).attachments.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {(ticket as any).attachments.map((att: Attachment) => (
+                  <a
+                    key={att.id}
+                    href={`/api/tickets/${ticket.id}/attachments/${att.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/60 transition-colors group"
+                  >
+                    <div className="h-10 w-10 rounded bg-primary/10 flex items-center justify-center shrink-0">
+                      {att.mimeType.startsWith("image/")
+                        ? <span className="text-lg">🖼️</span>
+                        : att.mimeType === "application/pdf"
+                        ? <FileText className="h-5 w-5 text-red-500" />
+                        : <Paperclip className="h-5 w-5 text-primary" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{att.filename}</p>
+                      <p className="text-xs text-muted-foreground">{formatBytes(att.size)}</p>
+                    </div>
+                    <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
+                  </a>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           {ticket.status === TicketStatus.RESOLVED && isCreator && (
             <Card>

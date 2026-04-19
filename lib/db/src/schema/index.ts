@@ -5,3 +5,4 @@ export * from "./ratings";
 export * from "./chat";
 export * from "./direct-messages";
 export * from "./relations";
+export { ticketAttachmentsTable } from "./tickets";
