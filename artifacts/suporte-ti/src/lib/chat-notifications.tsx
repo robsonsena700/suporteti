@@ -26,23 +26,44 @@ const ChatNotificationContext = createContext<ChatNotificationContextType>({
   notifPermission: "default",
 });
 
-const STORAGE_KEY = "ti_chat_last_seen_id";
+// ── LocalStorage helpers ──────────────────────────────────────────────────────
 
-function getLastSeenId(): number {
-  return parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+const KEY_GROUP = "ti_chat_group_last_id";
+const KEY_DM    = "ti_chat_dm_last_id";
+
+function getStored(key: string): number {
+  return parseInt(localStorage.getItem(key) || "0", 10) || 0;
+}
+function setStored(key: string, id: number) {
+  localStorage.setItem(key, String(id));
 }
 
-function setLastSeenId(id: number) {
-  localStorage.setItem(STORAGE_KEY, String(id));
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ChatMsg {
+interface GroupMsg {
   id: number;
   senderId: number;
   message: string;
-  createdAt: string;
   sender: { id: number; name: string; role: string };
 }
+
+interface DMPreview {
+  partnerId: number;
+  partnerName: string;
+  partnerRole: string;
+  lastMessage: string;
+  lastMessageAt: string;
+  lastMessageId: number;
+  fromMe: boolean;
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Admin",
+  COORDINATOR: "Coordenador",
+  ANALYST: "Analista",
+};
+
+// ── Provider ──────────────────────────────────────────────────────────────────
 
 export function ChatNotificationProvider({ children }: { children: ReactNode }) {
   const { user, token } = useAuth();
@@ -55,10 +76,17 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   );
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isOnChat = location === "/chat";
+  const unreadRef = useRef(0);
+  // On first mount, run one silent poll to set the baseline IDs so we
+  // don't fire notifications for messages that already existed before login.
+  const initializedRef = useRef(false);
 
+  const isOnChat = location === "/chat";
   const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
-  const canAccessChat = user && CHAT_ROLES.includes(user.role);
+  const canAccessChat = !!(user && CHAT_ROLES.includes(user.role));
+
+  // Keep unreadRef in sync
+  useEffect(() => { unreadRef.current = unreadCount; }, [unreadCount]);
 
   const requestPermission = useCallback(async () => {
     if (typeof Notification === "undefined") return;
@@ -68,107 +96,124 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
 
   const markAllRead = useCallback(() => {
     setUnreadCount(0);
+    unreadRef.current = 0;
   }, []);
 
-  const showBrowserNotification = useCallback(
-    (msg: ChatMsg) => {
-      if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-      if (document.hasFocus() && isOnChat) return;
+  // ── Browser notification ──────────────────────────────────────────────────
 
-      const ROLE_LABELS: Record<string, string> = {
-        ADMIN: "Admin",
-        COORDINATOR: "Coordenador",
-        ANALYST: "Analista",
-      };
+  const fireBrowserNotif = useCallback((title: string, body: string) => {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    // Only fire browser notif when tab is not focused
+    if (document.hasFocus()) return;
 
-      const notif = new Notification(
-        `${msg.sender.name} (${ROLE_LABELS[msg.sender.role] ?? msg.sender.role})`,
-        {
-          body: msg.message.length > 80 ? msg.message.slice(0, 80) + "…" : msg.message,
-          icon: "/favicon.ico",
-          tag: "chat-message",
-          renotify: true,
-        }
-      );
+    const notif = new Notification(title, {
+      body: body.length > 80 ? body.slice(0, 80) + "…" : body,
+      icon: "/favicon.ico",
+      tag: "chat-message",
+      renotify: true,
+    });
+    notif.onclick = () => { window.focus(); notif.close(); };
+  }, []);
 
-      notif.onclick = () => {
-        window.focus();
-        notif.close();
-      };
-    },
-    [isOnChat]
-  );
+  // ── In-app toast ──────────────────────────────────────────────────────────
 
-  const pollMessages = useCallback(async () => {
+  const fireToast = useCallback((title: string, desc: string) => {
+    toast({
+      title,
+      description: desc.length > 80 ? desc.slice(0, 80) + "…" : desc,
+    });
+  }, [toast]);
+
+  // ── Poll group messages ───────────────────────────────────────────────────
+
+  const pollGroup = useCallback(async (silent = false) => {
     if (!token || !canAccessChat) return;
-
     try {
-      const data = await customFetch<ChatMsg[]>("/api/chat/messages?limit=200");
+      const data = await customFetch<GroupMsg[]>("/api/chat/messages?limit=200");
       if (!data.length) return;
 
-      const lastSeenId = getLastSeenId();
-      const newMessages = data.filter(
-        (m) => m.id > lastSeenId && m.senderId !== user?.id
-      );
+      const lastSeen = getStored(KEY_GROUP);
+      const maxId = Math.max(...data.map((m) => m.id));
 
-      if (newMessages.length === 0) return;
-
-      const latestId = Math.max(...data.map((m) => m.id));
-
-      if (isOnChat) {
-        // On chat page: show browser notification for new messages when tab not focused
-        for (const msg of newMessages) {
-          showBrowserNotification(msg);
+      if (!silent) {
+        const fresh = data.filter((m) => m.id > lastSeen && m.senderId !== user?.id);
+        if (fresh.length > 0 && !isOnChat) {
+          const latest = fresh[fresh.length - 1];
+          const label = ROLE_LABELS[latest.sender.role] ?? latest.sender.role;
+          fireToast(`Grupo: ${latest.sender.name} (${label})`, latest.message);
+          fireBrowserNotif(`Grupo — ${latest.sender.name} (${label})`, latest.message);
+          setUnreadCount((p) => p + fresh.length);
         }
-        // Mark as read immediately since user can see the chat
-        setLastSeenId(latestId);
-        setUnreadCount(0);
-      } else {
-        // On other page: increment badge + show toast for last new message
-        setUnreadCount((prev) => prev + newMessages.length);
-
-        const latest = newMessages[newMessages.length - 1];
-        const ROLE_LABELS: Record<string, string> = {
-          ADMIN: "Admin",
-          COORDINATOR: "Coordenador",
-          ANALYST: "Analista",
-        };
-        toast({
-          title: `Mensagem de ${latest.sender.name}`,
-          description:
-            latest.message.length > 60
-              ? latest.message.slice(0, 60) + "…"
-              : latest.message,
-        });
-
-        showBrowserNotification(latest);
-        setLastSeenId(latestId);
       }
-    } catch {
-      // silent
-    }
-  }, [token, canAccessChat, user?.id, isOnChat, showBrowserNotification, toast]);
 
-  // Mark all read when entering chat
+      if (maxId > lastSeen) setStored(KEY_GROUP, maxId);
+    } catch { /* silent */ }
+  }, [token, canAccessChat, user?.id, isOnChat, fireToast, fireBrowserNotif]);
+
+  // ── Poll DM inbox ─────────────────────────────────────────────────────────
+
+  const pollDMs = useCallback(async (silent = false) => {
+    if (!token || !canAccessChat) return;
+    try {
+      const inbox = await customFetch<DMPreview[]>("/api/chat/dm-inbox");
+      if (!inbox.length) return;
+
+      const lastSeen = getStored(KEY_DM);
+      const maxId = Math.max(...inbox.map((d) => d.lastMessageId));
+
+      if (!silent) {
+        const fresh = inbox.filter((d) => !d.fromMe && d.lastMessageId > lastSeen);
+        if (fresh.length > 0) {
+          if (!isOnChat) {
+            for (const dm of fresh) {
+              const label = ROLE_LABELS[dm.partnerRole] ?? dm.partnerRole;
+              fireToast(`Mensagem de ${dm.partnerName} (${label})`, dm.lastMessage);
+              fireBrowserNotif(`Mensagem de ${dm.partnerName} (${label})`, dm.lastMessage);
+            }
+            setUnreadCount((p) => p + fresh.length);
+          } else {
+            // On chat — browser notif only (user might be in a different conversation)
+            for (const dm of fresh) {
+              const label = ROLE_LABELS[dm.partnerRole] ?? dm.partnerRole;
+              fireBrowserNotif(`Mensagem de ${dm.partnerName} (${label})`, dm.lastMessage);
+            }
+          }
+        }
+      }
+
+      if (maxId > lastSeen) setStored(KEY_DM, maxId);
+    } catch { /* silent */ }
+  }, [token, canAccessChat, isOnChat, fireToast, fireBrowserNotif]);
+
+  // ── Mark all read when entering chat ─────────────────────────────────────
+
   useEffect(() => {
     if (isOnChat) {
       setUnreadCount(0);
+      unreadRef.current = 0;
     }
   }, [isOnChat]);
 
-  // Poll for new messages
+  // ── Polling loop ──────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!token || !canAccessChat) return;
 
-    pollMessages();
-    pollingRef.current = setInterval(pollMessages, 6000);
+    const run = (silent = false) => { pollGroup(silent); pollDMs(silent); };
 
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [token, canAccessChat, pollMessages]);
+    // First run is silent: sets baseline IDs without triggering notifications
+    // for messages that already existed before this session started.
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      run(true);
+    }
 
-  // Update page title with unread count
+    pollingRef.current = setInterval(() => run(false), 5000);
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, [token, canAccessChat, pollGroup, pollDMs]);
+
+  // ── Update page title ─────────────────────────────────────────────────────
+
   useEffect(() => {
     const base = "SuporteGov";
     document.title = unreadCount > 0 ? `(${unreadCount}) ${base}` : base;

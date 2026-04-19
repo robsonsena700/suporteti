@@ -123,6 +123,7 @@ router.get("/chat/dm-inbox", requireAuth, requireActive, requireChatAccess, asyn
       partnerRole: partner.role,
       lastMessage: m.message,
       lastMessageAt: m.createdAt,
+      lastMessageId: m.id,
       fromMe: m.senderId === me,
     };
   });
