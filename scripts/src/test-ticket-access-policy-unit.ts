@@ -38,5 +38,16 @@ const { computeTicketAccess } = mod as {
   assert.equal(a.canAssign, false);
 }
 
-console.log("Teste unitário de política de acesso ao ticket concluído com sucesso.");
+{
+  const a = computeTicketAccess({
+    actorRole: "COORDINATOR",
+    actorUserId: 10,
+    ticketCreatedById: 2,
+    ticketAssignedToId: null,
+    isCoordinatorOfOwner: true,
+  });
+  assert.equal(a.canView, true);
+  assert.equal(a.canInteract, false);
+}
 
+console.log("Teste unitário de política de acesso ao ticket concluído com sucesso.");

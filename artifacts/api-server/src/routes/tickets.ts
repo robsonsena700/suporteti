@@ -22,12 +22,23 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
 
   const whereClauses = [];
   if (user.role !== "ADMIN" && user.role !== "ANALYST") {
-    whereClauses.push(
-      or(
-        eq(ticketsTable.createdById, user.userId),
-        eq(ticketsTable.assignedToId, user.userId),
-      ),
-    );
+    if (user.role === "COORDINATOR") {
+      const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
+      const allowedOwners = [user.userId, ...managedUserIds];
+      whereClauses.push(
+        or(
+          inArray(ticketsTable.createdById, allowedOwners),
+          eq(ticketsTable.assignedToId, user.userId),
+        ),
+      );
+    } else {
+      whereClauses.push(
+        or(
+          eq(ticketsTable.createdById, user.userId),
+          eq(ticketsTable.assignedToId, user.userId),
+        ),
+      );
+    }
   }
 
   const baseWhere = whereClauses.length > 0 ? and(...whereClauses) : undefined;

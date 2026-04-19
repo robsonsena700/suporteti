@@ -46,12 +46,26 @@ export async function listCoordinatorsForUser(userId: number) {
 }
 
 export async function canReadTicket(user: JwtPayload, ticket: TicketRow): Promise<boolean> {
-  return computeTicketAccess({
+  const base = computeTicketAccess({
     actorRole: user.role,
     actorUserId: user.userId,
     ticketCreatedById: ticket.createdById,
     ticketAssignedToId: ticket.assignedToId ?? null,
-  }).canView;
+  });
+  if (base.canView) return true;
+
+  if (user.role === "COORDINATOR") {
+    const responsibleCoordinatorId = await getResponsibleCoordinatorIdForUser(ticket.createdById);
+    return computeTicketAccess({
+      actorRole: user.role,
+      actorUserId: user.userId,
+      ticketCreatedById: ticket.createdById,
+      ticketAssignedToId: ticket.assignedToId ?? null,
+      isCoordinatorOfOwner: responsibleCoordinatorId === user.userId,
+    }).canView;
+  }
+
+  return false;
 }
 
 export async function enforceTicketAccess(
@@ -59,11 +73,16 @@ export async function enforceTicketAccess(
   ticket: TicketRow,
   action: string,
 ): Promise<boolean> {
+  const coordinatorFlag = user.role === "COORDINATOR"
+    ? (await getResponsibleCoordinatorIdForUser(ticket.createdById)) === user.userId
+    : false;
+
   const access = computeTicketAccess({
     actorRole: user.role,
     actorUserId: user.userId,
     ticketCreatedById: ticket.createdById,
     ticketAssignedToId: ticket.assignedToId ?? null,
+    isCoordinatorOfOwner: coordinatorFlag,
   });
 
   const requiresInteract =
