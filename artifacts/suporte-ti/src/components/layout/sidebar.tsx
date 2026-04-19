@@ -7,9 +7,12 @@ import {
   Settings,
   LogOut,
   User as UserIcon,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+
+const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 
 export function Sidebar() {
   const [location] = useLocation();
@@ -18,6 +21,9 @@ export function Sidebar() {
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Chamados", href: "/chamados", icon: Ticket },
+    ...(user?.role && CHAT_ROLES.includes(user.role)
+      ? [{ name: "Chat", href: "/chat", icon: MessageSquare }]
+      : []),
     { name: "Relatórios", href: "/relatorios", icon: BarChart3 },
     ...(user?.role === "ADMIN"
       ? [{ name: "Configurações", href: "/configuracoes", icon: Settings }]

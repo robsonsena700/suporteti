@@ -16,6 +16,7 @@ import TicketDetail from "@/pages/ticket-detail";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
 import Profile from "@/pages/profile";
+import Chat from "@/pages/chat";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -60,6 +61,7 @@ function Router() {
         <ProtectedRoute path="/chamados" component={Tickets} />
         <ProtectedRoute path="/chamados/novo" component={NewTicket} />
         <ProtectedRoute path="/chamados/:id" component={TicketDetail} />
+        <ProtectedRoute path="/chat" component={Chat} />
         <ProtectedRoute path="/relatorios" component={Reports} />
         <ProtectedRoute path="/configuracoes" component={Settings} adminOnly />
         <ProtectedRoute path="/perfil" component={Profile} />

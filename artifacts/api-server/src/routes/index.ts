@@ -6,6 +6,7 @@ import ticketsRouter from "./tickets";
 import messagesRouter from "./messages";
 import ratingsRouter from "./ratings";
 import reportsRouter from "./reports";
+import chatRouter from "./chat";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(ticketsRouter);
 router.use(messagesRouter);
 router.use(ratingsRouter);
 router.use(reportsRouter);
+router.use(chatRouter);
 
 export default router;

@@ -3,12 +3,21 @@ import { usersTable } from "./users";
 import { ticketsTable } from "./tickets";
 import { messagesTable } from "./messages";
 import { ratingsTable } from "./ratings";
+import { chatMessagesTable } from "./chat";
 
 export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
   assignedTickets: many(ticketsTable, { relationName: "assignedTo" }),
   messages: many(messagesTable),
   ratings: many(ratingsTable),
+  chatMessages: many(chatMessagesTable),
+}));
+
+export const chatMessagesRelations = relations(chatMessagesTable, ({ one }) => ({
+  sender: one(usersTable, {
+    fields: [chatMessagesTable.senderId],
+    references: [usersTable.id],
+  }),
 }));
 
 export const ticketsRelations = relations(ticketsTable, ({ one, many }) => ({
