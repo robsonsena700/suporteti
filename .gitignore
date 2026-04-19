@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Secrets / SSH keys (never commit)
+lib/ssh/
+**/credenciais.txt
