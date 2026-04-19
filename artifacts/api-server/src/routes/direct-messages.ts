@@ -2,14 +2,18 @@ import { Router, type IRouter } from "express";
 import { db, directMessagesTable, usersTable } from "@workspace/db";
 import { eq, or, and, asc } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
+import {
+  auditChatDenied,
+  canInteractWithChatUser,
+  enforceChatModuleAccess,
+  getVisibleParticipantIds,
+} from "../lib/chat-access";
 
 const router: IRouter = Router();
 
-const ALLOWED_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
-
 function requireChatAccess(req: any, res: any, next: any) {
-  const role = req.user?.role;
-  if (!ALLOWED_ROLES.includes(role)) {
+  const user = req.user;
+  if (!user || !enforceChatModuleAccess(user, "chat:module")) {
     res.status(403).json({ error: "Acesso restrito a Administradores, Coordenadores e Analistas." });
     return;
   }
@@ -24,6 +28,13 @@ router.get("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, as
 
   if (isNaN(other) || other === me) {
     res.status(400).json({ error: "ID inválido." });
+    return;
+  }
+
+  const canAccess = await canInteractWithChatUser(req.user!, other);
+  if (!canAccess) {
+    auditChatDenied(req.user!, "chat:dm:get", { targetUserId: other });
+    res.status(403).json({ error: "Acesso negado." });
     return;
   }
 
@@ -70,9 +81,15 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
     return;
   }
 
-  // Verify receiver exists and has access
+  const canInteract = await canInteractWithChatUser(req.user!, other);
+  if (!canInteract) {
+    auditChatDenied(req.user!, "chat:dm:create", { targetUserId: other });
+    res.status(403).json({ error: "Acesso negado." });
+    return;
+  }
+
   const [receiver] = await db.select().from(usersTable).where(eq(usersTable.id, other));
-  if (!receiver || !ALLOWED_ROLES.includes(receiver.role)) {
+  if (!receiver) {
     res.status(404).json({ error: "Usuário não encontrado." });
     return;
   }
@@ -98,6 +115,7 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
 // GET /api/chat/dm-inbox — get last DM per conversation partner (for preview in sidebar)
 router.get("/chat/dm-inbox", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
   const me = req.user!.userId;
+  const visibleIds = await getVisibleParticipantIds(req.user!);
 
   const allDMs = await db.query.directMessagesTable.findMany({
     where: or(
@@ -112,6 +130,7 @@ router.get("/chat/dm-inbox", requireAuth, requireActive, requireChatAccess, asyn
   const byPartner = new Map<number, (typeof allDMs)[number]>();
   for (const m of allDMs) {
     const partnerId = m.senderId === me ? m.receiverId : m.senderId;
+    if (!visibleIds.includes(partnerId)) continue;
     byPartner.set(partnerId, m);
   }
 

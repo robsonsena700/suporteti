@@ -2,14 +2,18 @@ import { Router, type IRouter } from "express";
 import { db, chatMessagesTable, usersTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
+import {
+  auditChatDenied,
+  enforceChatModuleAccess,
+  getVisibleParticipantIds,
+  getVisibleParticipants,
+} from "../lib/chat-access";
 
 const router: IRouter = Router();
 
-const ALLOWED_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
-
 function requireChatAccess(req: any, res: any, next: any) {
-  const role = req.user?.role;
-  if (!ALLOWED_ROLES.includes(role)) {
+  const user = req.user;
+  if (!user || !enforceChatModuleAccess(user, "chat:module")) {
     res.status(403).json({ error: "Acesso restrito a Administradores, Coordenadores e Analistas." });
     return;
   }
@@ -17,26 +21,19 @@ function requireChatAccess(req: any, res: any, next: any) {
 }
 
 router.get("/chat/participants", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
-  const participants = await db.select({
-    id: usersTable.id,
-    name: usersTable.name,
-    role: usersTable.role,
-    uf: usersTable.uf,
-    municipality: usersTable.municipality,
-  })
-  .from(usersTable)
-  .where(
-    inArray(usersTable.role, ["ADMIN", "COORDINATOR", "ANALYST"] as any[])
-  );
-
+  const user = req.user!;
+  const participants = await getVisibleParticipants(user);
   res.json(participants);
 });
 
 router.get("/chat/messages", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
+  const user = req.user!;
   const rawLimit = req.query.limit as string | undefined;
   const limit = Math.min(parseInt(rawLimit || "100", 10) || 100, 200);
+  const visibleIds = await getVisibleParticipantIds(user);
 
   const messages = await db.query.chatMessagesTable.findMany({
+    where: visibleIds.length > 0 ? inArray(chatMessagesTable.senderId, visibleIds) : eq(chatMessagesTable.id, -1),
     with: { sender: true },
     orderBy: (m, { asc }) => [asc(m.createdAt)],
     limit,
@@ -68,6 +65,13 @@ router.post("/chat/messages", requireAuth, requireActive, requireChatAccess, asy
 
   if (message.length > 2000) {
     res.status(400).json({ error: "Mensagem muito longa (max 2000 caracteres)." });
+    return;
+  }
+
+  const visibleIds = await getVisibleParticipantIds(user);
+  if (!visibleIds.includes(user.userId)) {
+    auditChatDenied(user, "chat:group:create", { reason: "sender_not_in_scope" });
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 

@@ -215,6 +215,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chatDenied, setChatDenied] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -238,7 +239,11 @@ export default function Chat() {
       if (initial) scrollToBottom("instant");
       else if (lastId !== lastGroupIdRef.current) scrollToBottom("smooth");
       lastGroupIdRef.current = lastId;
-    } catch { /* retry */ }
+    } catch (e) {
+      if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
+        setChatDenied(true);
+      }
+    }
   }, [scrollToBottom]);
 
   const loadDMMessages = useCallback(async (userId: number, initial = false) => {
@@ -249,7 +254,11 @@ export default function Chat() {
       if (initial) scrollToBottom("instant");
       else if (lastId !== lastDmIdRef.current) scrollToBottom("smooth");
       lastDmIdRef.current = lastId;
-    } catch { /* retry */ }
+    } catch (e) {
+      if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
+        setError("Você não tem permissão para visualizar esta conversa.");
+      }
+    }
   }, [scrollToBottom]);
 
   const refreshInbox = useCallback(() => {
@@ -260,7 +269,16 @@ export default function Chat() {
 
   useEffect(() => {
     markAllRead();
-    fetchParticipants().then(setParticipants).catch(() => {});
+    fetchParticipants()
+      .then((data) => {
+        setParticipants(data);
+        setChatDenied(false);
+      })
+      .catch((e) => {
+        if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
+          setChatDenied(true);
+        }
+      });
     refreshInbox();
   }, [markAllRead, refreshInbox]);
 
@@ -385,6 +403,16 @@ export default function Chat() {
     : "";
 
   return (
+    chatDenied ? (
+      <div className="h-full flex items-center justify-center bg-[#f0f2f5] dark:bg-[#111b21]">
+        <div className="max-w-md rounded-xl border bg-white dark:bg-[#1f2c34] p-6 text-center">
+          <h2 className="text-lg font-semibold">Acesso restrito</h2>
+          <p className="text-sm text-muted-foreground mt-2">
+            Você não possui permissão para acessar o chat global.
+          </p>
+        </div>
+      </div>
+    ) : (
     <div className="flex h-full overflow-hidden bg-[#f0f2f5] dark:bg-[#111b21]">
 
       {/* ── LEFT PANEL ── */}
@@ -672,5 +700,6 @@ export default function Chat() {
         </div>
       </div>
     </div>
+    )
   );
 }

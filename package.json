@@ -9,6 +9,8 @@
     "dev": "node ./scripts/dev.cjs",
     "dev:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-windows.ps1",
     "test:coordinator-access": "node ./scripts/test-coordinator-access.cjs",
+    "test:chat:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-chat-permissions-unit.ts",
+    "test:chat:integration": "node ./scripts/test-chat-permissions-integration.cjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
