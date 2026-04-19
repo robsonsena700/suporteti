@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { db, usersTable, ticketsTable, ticketAttachmentsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
+import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
 
 const router: IRouter = Router();
 
@@ -17,7 +18,22 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   const user = req.user!;
   const { status, type, priority, uf, municipality } = req.query as Record<string, string | undefined>;
 
+  const whereClauses = [];
+  if (user.role === "USER") {
+    whereClauses.push(and(eq(ticketsTable.createdById, user.userId), eq(ticketsTable.status, "OPEN")));
+  } else if (user.role === "COORDINATOR") {
+    const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
+    const allowedOwners = [user.userId, ...managedUserIds];
+    if (allowedOwners.length === 0) {
+      res.json([]);
+      return;
+    }
+    whereClauses.push(inArray(ticketsTable.createdById, allowedOwners));
+  }
+
+  const baseWhere = whereClauses.length > 0 ? and(...whereClauses) : undefined;
   const allTickets = await db.query.ticketsTable.findMany({
+    where: baseWhere,
     with: {
       createdBy: true,
       assignedTo: true,
@@ -26,12 +42,6 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   });
 
   let filtered = allTickets;
-
-  if (user.role === "USER") {
-    filtered = filtered.filter(t => t.createdById === user.userId);
-  } else if (user.role === "COORDINATOR") {
-    filtered = filtered.filter(t => t.uf === user.uf && t.municipality === user.municipality);
-  }
 
   if (status) filtered = filtered.filter(t => t.status === status);
   if (type) filtered = filtered.filter(t => t.type === type);
@@ -131,11 +141,7 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
     return;
   }
 
-  if (user.role === "USER" && ticket.createdById !== user.userId) {
-    res.status(403).json({ error: "Acesso negado" });
-    return;
-  }
-  if (user.role === "COORDINATOR" && (ticket.uf !== user.uf || ticket.municipality !== user.municipality)) {
+  if (!(await enforceTicketAccess(user, ticket, "tickets:getById"))) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -206,7 +212,7 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     return;
   }
 
-  if (user.role === "USER" && existing.createdById !== user.userId) {
+  if (!(await enforceTicketAccess(user, existing, "tickets:update"))) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -245,6 +251,7 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
 });
 
 router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANALYST", "ADMIN", "COORDINATOR"), async (req, res): Promise<void> => {
+  const user = req.user!;
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);
 
@@ -256,6 +263,16 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
   const parsed = AssignTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [existing] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+  if (!(await enforceTicketAccess(user, existing, "tickets:assign"))) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 

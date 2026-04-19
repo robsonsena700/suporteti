@@ -3,15 +3,27 @@ import { db, messagesTable, ticketsTable, usersTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { CreateMessageBody } from "@workspace/api-zod";
 import { requireAuth, requireActive } from "../middlewares/auth";
+import { enforceTicketAccess } from "../lib/access";
 
 const router: IRouter = Router();
 
 router.get("/tickets/:ticketId/messages", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
   const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;
   const ticketId = parseInt(raw, 10);
 
   if (isNaN(ticketId)) {
     res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, ticketId));
+  if (!ticket) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+  if (!(await enforceTicketAccess(user, ticket, "messages:list"))) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 
@@ -55,6 +67,10 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, async (re
   const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, ticketId));
   if (!ticket) {
     res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+  if (!(await enforceTicketAccess(user, ticket, "messages:create"))) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 

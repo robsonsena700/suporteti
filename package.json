@@ -7,6 +7,8 @@
     "install:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/install-windows.ps1",
     "install:linux": "bash ./scripts/install-linux.sh",
     "dev": "node ./scripts/dev.cjs",
+    "dev:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-windows.ps1",
+    "test:coordinator-access": "node ./scripts/test-coordinator-access.cjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"

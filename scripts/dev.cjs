@@ -1,12 +1,21 @@
 const { spawn } = require("node:child_process");
 
-function getPnpmCommand() {
-  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+function getPnpmRunner() {
+  if (process.env.npm_execpath) {
+    return {
+      command: process.execPath,
+      baseArgs: [process.env.npm_execpath],
+    };
+  }
+
+  return process.platform === "win32"
+    ? { command: "pnpm.cmd", baseArgs: [] }
+    : { command: "pnpm", baseArgs: [] };
 }
 
 function spawnPnpm(args, extraEnv) {
-  const pnpm = getPnpmCommand();
-  return spawn(pnpm, args, {
+  const runner = getPnpmRunner();
+  return spawn(runner.command, [...runner.baseArgs, ...args], {
     stdio: "inherit",
     env: { ...process.env, ...extraEnv },
     shell: false,
@@ -59,4 +68,3 @@ web.on("exit", (code) => shutdown(code ?? 0));
 
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
-

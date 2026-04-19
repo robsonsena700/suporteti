@@ -119,6 +119,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       uf: user.uf,
       municipality: user.municipality,
       createdAt: user.createdAt,
+      mustChangePassword: user.mustChangePassword,
     },
   });
 });
@@ -171,6 +172,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       uf: user.uf,
       municipality: user.municipality,
       createdAt: user.createdAt,
+      mustChangePassword: user.mustChangePassword,
     },
   });
 });
@@ -202,7 +204,42 @@ router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
     uf: user.uf,
     municipality: user.municipality,
     createdAt: user.createdAt,
+    mustChangePassword: user.mustChangePassword,
   });
+});
+
+router.post("/auth/change-password", requireAuth, async (req, res): Promise<void> => {
+  const body = req.body as { currentPassword?: unknown; newPassword?: unknown } | undefined;
+  const currentPassword = body?.currentPassword;
+  const newPassword = body?.newPassword;
+  if (typeof currentPassword !== "string" || currentPassword.length === 0) {
+    res.status(400).json({ error: "Informe a senha atual" });
+    return;
+  }
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    res.status(400).json({ error: "A nova senha deve possuir no mínimo 8 caracteres" });
+    return;
+  }
+
+  const userId = req.user!.userId;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: "Senha atual inválida" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await db.update(usersTable)
+    .set({ passwordHash, mustChangePassword: false })
+    .where(eq(usersTable.id, userId));
+
+  res.json({ message: "Senha atualizada com sucesso" });
 });
 
 export default router;

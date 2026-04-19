@@ -3,15 +3,27 @@ import { db, ratingsTable, ticketsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { RateTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
+import { enforceTicketAccess } from "../lib/access";
 
 const router: IRouter = Router();
 
 router.get("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
   const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;
   const ticketId = parseInt(raw, 10);
 
   if (isNaN(ticketId)) {
     res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, ticketId));
+  if (!ticket) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+  if (!(await enforceTicketAccess(user, ticket, "ratings:get"))) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 
