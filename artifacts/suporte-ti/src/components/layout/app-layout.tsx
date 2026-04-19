@@ -1,7 +1,11 @@
 import { useAuth } from "@/lib/auth";
 import { Sidebar } from "./sidebar";
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { useLocation } from "wouter";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Menu } from "lucide-react";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -10,6 +14,8 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, isLoading } = useAuth();
   const [location] = useLocation();
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
 
   // If loading auth or not logged in and trying to access protected routes
   if (isLoading) {
@@ -30,15 +36,43 @@ export function AppLayout({ children }: AppLayoutProps) {
   const isFullScreen = location === "/chat";
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      <Sidebar />
+    <div className="flex h-screen bg-background overflow-hidden safe-area-px safe-area-py">
+      {!isMobile ? (
+        <Sidebar />
+      ) : (
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetTrigger asChild>
+            <span className="hidden" />
+          </SheetTrigger>
+          <SheetContent side="left" className="p-0 w-[85vw] max-w-[360px]">
+            <Sidebar onNavigate={() => setOpen(false)} />
+          </SheetContent>
+        </Sheet>
+      )}
       <div className="flex flex-1 flex-col overflow-hidden">
+        {isMobile && !isFullScreen ? (
+          <header className="flex items-center gap-3 px-4 h-14 border-b bg-background mobile-landscape-compact">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Abrir menu"
+              onClick={() => setOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">SuporteTI</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.name}</p>
+            </div>
+          </header>
+        ) : null}
         <main className="flex-1 overflow-hidden">
           {isFullScreen ? (
             <div className="h-full">{children}</div>
           ) : (
             <div className="h-full overflow-y-auto">
-              <div className="container mx-auto p-8">
+              <div className="container mx-auto px-4 py-6 sm:p-8">
                 {children}
               </div>
             </div>

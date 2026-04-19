@@ -5,13 +5,17 @@ import {
   useCallback,
   KeyboardEvent,
 } from "react";
-import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
+import type { EmojiClickData } from "emoji-picker-react";
+import { Suspense, lazy } from "react";
 import { useAuth } from "@/lib/auth";
 import { useChatNotifications } from "@/lib/chat-notifications";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Button } from "@/components/ui/button";
 import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
+
+const EmojiPicker = lazy(() => import("emoji-picker-react"));
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,6 +210,8 @@ function MessageBubble({
 export default function Chat() {
   const { user } = useAuth();
   const { markAllRead, requestPermission, notifPermission } = useChatNotifications();
+  const isMobile = useIsMobile();
+  const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
 
   const [conversation, setConversation] = useState<Conversation>({ type: "group" });
   const [groupMessages, setGroupMessages] = useState<GroupMsg[]>([]);
@@ -324,6 +330,13 @@ export default function Chat() {
     setError(null);
     setShowEmoji(false);
     setConversation(conv);
+    if (isMobile) setMobilePanel("chat");
+  };
+
+  const goBackToList = () => {
+    setMobilePanel("list");
+    setError(null);
+    setShowEmoji(false);
   };
 
   const handleEmojiClick = (emojiData: EmojiClickData) => {
@@ -416,7 +429,13 @@ export default function Chat() {
     <div className="flex h-full overflow-hidden bg-[#f0f2f5] dark:bg-[#111b21]">
 
       {/* ── LEFT PANEL ── */}
-      <div className="w-[300px] flex flex-col bg-white dark:bg-[#1f2c34] border-r border-border shrink-0">
+      <div
+        className={cn(
+          "w-full md:w-[320px] flex flex-col bg-white dark:bg-[#1f2c34] border-r border-border shrink-0",
+          isMobile && mobilePanel === "chat" ? "hidden" : "flex",
+          "md:flex",
+        )}
+      >
 
         {/* Header */}
         <div className="flex items-center gap-2 px-3 h-16 bg-[#f0f2f5] dark:bg-[#202c33] border-b border-border shrink-0">
@@ -535,14 +554,14 @@ export default function Chat() {
       </div>
 
       {/* ── RIGHT PANEL ── */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className={cn("flex flex-1 flex-col min-w-0", isMobile && mobilePanel === "list" ? "hidden" : "flex", "md:flex")}>
 
         {/* Chat header */}
         <div className="flex items-center gap-3 px-4 h-16 bg-[#f0f2f5] dark:bg-[#202c33] border-b border-border shrink-0">
-          {!isGroupSelected && (
+          {isMobile && (
             <button
-              onClick={() => selectConversation({ type: "group" })}
-              className="p-1.5 rounded-full hover:bg-muted transition-colors shrink-0 md:hidden"
+              onClick={goBackToList}
+              className="p-1.5 rounded-full hover:bg-muted transition-colors shrink-0 md:hidden tap-target"
             >
               <ArrowLeft className="h-4 w-4 text-muted-foreground" />
             </button>
@@ -628,14 +647,15 @@ export default function Chat() {
           {/* Emoji Picker */}
           {showEmoji && (
             <div ref={emojiPickerRef} className="absolute bottom-full mb-2 left-3 z-50 shadow-xl rounded-xl overflow-hidden">
-              <EmojiPicker
-                onEmojiClick={handleEmojiClick}
-                theme={Theme.LIGHT}
-                lazyLoadEmojis
-                searchPlaceholder="Pesquisar emoji..."
-                height={380}
-                width={300}
-              />
+              <Suspense fallback={<div className="w-[300px] h-[380px] bg-white dark:bg-[#2a3942]" />}>
+                <EmojiPicker
+                  onEmojiClick={handleEmojiClick}
+                  lazyLoadEmojis
+                  searchPlaceholder="Pesquisar emoji..."
+                  height={380}
+                  width={300}
+                />
+              </Suspense>
             </div>
           )}
 

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 
 const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const { unreadCount } = useChatNotifications();
@@ -60,11 +60,12 @@ export function Sidebar() {
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={() => onNavigate?.()}
                 className={cn(
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                  "group flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors"
+                  "group flex items-center justify-between rounded-md px-3 py-3 sm:py-2 text-sm font-medium transition-colors tap-target"
                 )}
               >
                 <div className="flex items-center">
