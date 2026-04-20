@@ -72,7 +72,7 @@ function Router() {
           <ProtectedRoute path="/chamados/:id" component={TicketDetail} />
           <ProtectedRoute path="/chat" component={Chat} />
           <ProtectedRoute path="/relatorios" component={Reports} adminOnly />
-          <ProtectedRoute path="/configuracoes" component={Settings} adminOnly />
+          <ProtectedRoute path="/configuracoes" component={Settings} />
           <ProtectedRoute path="/perfil" component={Profile} />
   
           <Route component={NotFound} />

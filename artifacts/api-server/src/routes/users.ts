@@ -565,6 +565,110 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
   res.json(user);
 });
 
+router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const role = parseRole((req.body as { role?: unknown } | undefined)?.role);
+  if (!role) {
+    res.status(400).json({ error: "Perfil inválido" });
+    return;
+  }
+
+  const currentUser = req.user!;
+  if (currentUser.userId === id && role !== "ADMIN") {
+    res.status(400).json({ error: "Não é permitido remover seu próprio perfil de administrador" });
+    return;
+  }
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!targetUser) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const coordinatorValue = (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
+    ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
+  const coordinatorId = coordinatorValue != null ? parseSingleCoordinatorId(coordinatorValue) : null;
+
+  if (role === "USER") {
+    const existing = await db.select().from(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    const hasCoordinator = existing.length > 0;
+    const shouldAttach = coordinatorId != null;
+    if (!hasCoordinator && !shouldAttach) {
+      res.status(400).json({ error: "Selecione um coordenador para o usuário" });
+      return;
+    }
+
+    if (shouldAttach) {
+      const coordinators = await db
+        .select({
+          id: usersTable.id,
+          role: usersTable.role,
+          status: usersTable.status,
+        })
+        .from(usersTable)
+        .where(eq(usersTable.id, coordinatorId));
+
+      if (coordinators.length !== 1) {
+        res.status(400).json({ error: "Coordenador não encontrado" });
+        return;
+      }
+
+      const invalidCoordinator = coordinators.find(c => c.role !== "COORDINATOR" || c.status !== "ACTIVE");
+      if (invalidCoordinator) {
+        res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
+        return;
+      }
+    }
+  }
+
+  const result = await db.transaction(async tx => {
+    const [updated] = await tx.update(usersTable)
+      .set({ role })
+      .where(eq(usersTable.id, id))
+      .returning({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        role: usersTable.role,
+        status: usersTable.status,
+        cpf: usersTable.cpf,
+        establishment: usersTable.establishment,
+        contactPhone: usersTable.contactPhone,
+        prefersWhatsapp: usersTable.prefersWhatsapp,
+        prefersTelegram: usersTable.prefersTelegram,
+        termsAccepted: usersTable.termsAccepted,
+        termsAcceptedAt: usersTable.termsAcceptedAt,
+        uf: usersTable.uf,
+        municipality: usersTable.municipality,
+        createdAt: usersTable.createdAt,
+      });
+
+    if (!updated) return null;
+
+    if (role !== "USER") {
+      await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    } else if (coordinatorId != null) {
+      await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+      await tx.insert(userCoordinatorsTable).values({ userId: id, coordinatorId });
+    }
+
+    return updated;
+  });
+
+  if (!result) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  res.json(result);
+});
+
 router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Promise<void> => {
   const currentUser = req.user!;
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

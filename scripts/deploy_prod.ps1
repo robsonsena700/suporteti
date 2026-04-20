@@ -8,7 +8,8 @@ param(
   [switch]$SkipBuild,
   [switch]$AllowDirty,
   [switch]$StartAfterDeploy,
-  [string]$StartScriptPath = ""
+  [string]$StartScriptPath = "",
+  [switch]$SkipMigrations
 )
 
 $ErrorActionPreference = "Stop"
@@ -158,7 +159,7 @@ Push-Location (Get-Location)
 try {
   $root = Get-Location
   Push-Location $root | Out-Null
-  tar -czf "$bundlePath" -C "$root" "artifacts/suporte-ti/dist" "artifacts/api-server/dist" "artifacts/api-server/package.json" "artifacts/suporte-ti/package.json" | Out-Null
+  tar -czf "$bundlePath" -C "$root" "artifacts/suporte-ti/dist" "artifacts/api-server/dist" "artifacts/api-server/package.json" "artifacts/suporte-ti/package.json" "lib/db/migrations" "scripts/remote/apply_sql_migrations.sh" | Out-Null
 } finally {
   Pop-Location | Out-Null
 }
@@ -182,11 +183,17 @@ InvokeRemoteCommand "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C 
 $switchCmd = 'set -e; if [ -L "{0}" ]; then rm -f "{1}"; ln -s $(readlink "{0}") "{1}"; fi; rm -f "{0}"; ln -s "{2}" "{0}"' -f $currentLink, $previousLink, $releaseDir
 $serviceCmd = 'set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi'
 $healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >/dev/null; fi' -f $ApiHealthUrl
+$migrationsScript = "$releaseDir/scripts/remote/apply_sql_migrations.sh"
+$migrationsDir = "$releaseDir/lib/db/migrations"
+$migrateCmd = 'set -e; if [ -x "{0}" ]; then "{0}" "{1}"; else chmod +x "{0}" && "{0}" "{1}"; fi' -f $migrationsScript, $migrationsDir
 
 $shouldStart = if ($PSBoundParameters.ContainsKey("StartAfterDeploy")) { [bool]$StartAfterDeploy } else { $User -ne "root" }
 $resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) { $StartScriptPath } else { "$RemoteBaseDir/shared/start_prod.sh" }
 $startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
 
+if (!$SkipMigrations) {
+  InvokeRemoteCommand $migrateCmd
+}
 InvokeRemoteCommand $switchCmd
 InvokeRemoteCommand $serviceCmd
 if ($shouldStart) {

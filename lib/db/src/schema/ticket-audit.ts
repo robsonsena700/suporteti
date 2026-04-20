@@ -9,6 +9,7 @@ export const ticketAuditTypeEnum = pgEnum("ticket_audit_type", [
   "MESSAGE_SENT",
   "AUTO_ASSIGN",
   "MANUAL_ASSIGN",
+  "TICKET_UPDATED",
 ]);
 
 export const ticketAuditLogsTable = pgTable("ticket_audit_logs", {

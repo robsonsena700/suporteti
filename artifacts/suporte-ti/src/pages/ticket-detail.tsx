@@ -14,6 +14,7 @@ import {
   getListMessagesQueryKey,
   getGetTicketRatingQueryKey,
   TicketStatus,
+  TicketType,
   TicketPriority,
   UserRole
 } from "@workspace/api-client-react";
@@ -21,9 +22,10 @@ import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-ba
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Star, UserCircle2, FileText, Paperclip, Download, Eye } from "lucide-react";
+import { ArrowLeft, Send, Star, UserCircle2, FileText, Paperclip, Download, Eye, Pencil, Save, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -31,6 +33,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
+import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
+import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
+import { getRoleLabel } from "@/lib/role-labels";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -88,6 +93,16 @@ export default function TicketDetail() {
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [assignReason, setAssignReason] = useState("");
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>("");
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [detailsType, setDetailsType] = useState<TicketType>("SOFTWARE");
+  const [detailsPriority, setDetailsPriority] = useState<TicketPriority>(TicketPriority.MEDIUM);
+  const [detailsUf, setDetailsUf] = useState<string>("");
+  const [detailsMunicipality, setDetailsMunicipality] = useState<string>("");
+  const [detailsEstablishment, setDetailsEstablishment] = useState<string>("");
+  const [detailsHardwareSubtype, setDetailsHardwareSubtype] = useState<string>("");
+  const [municipalityOptions, setMunicipalityOptions] = useState<string[]>([]);
+  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
 
   useEffect(() => {
     if (previewOpen) return;
@@ -172,12 +187,82 @@ export default function TicketDetail() {
   const rateMutation = useRateTicket();
   const assignMutation = useAssignTicket();
 
+  useEffect(() => {
+    if (!ticket) return;
+    if (isEditingDetails) return;
+    setDetailsType(ticket.type);
+    setDetailsPriority(ticket.priority);
+    setDetailsUf(ticket.uf);
+    setDetailsMunicipality(ticket.municipality);
+    setDetailsEstablishment(ticket.establishment ?? "");
+    setDetailsHardwareSubtype((ticket as any).hardwareSubtype ?? "");
+  }, [ticket, isEditingDetails]);
+
+  useEffect(() => {
+    if (!ticket) return;
+    if (!isEditingDetails) return;
+    setDetailsType(ticket.type);
+    setDetailsPriority(ticket.priority);
+    setDetailsUf(ticket.uf);
+    setDetailsMunicipality(ticket.municipality);
+    setDetailsEstablishment(ticket.establishment ?? "");
+    setDetailsHardwareSubtype((ticket as any).hardwareSubtype ?? "");
+    setSelectedAssigneeId(ticket.assignedToId ? String(ticket.assignedToId) : "");
+    setAssignReason("");
+  }, [isEditingDetails, ticket]);
+
+  useEffect(() => {
+    if (!isEditingDetails) return;
+    const uf = detailsUf.trim().toUpperCase();
+    if (!uf) {
+      setMunicipalityOptions([]);
+      setDetailsMunicipality("");
+      return;
+    }
+
+    const cached = getCachedMunicipalities(uf);
+    if (cached.length > 0) {
+      setMunicipalityOptions(cached);
+      if (detailsMunicipality && !cached.includes(detailsMunicipality)) {
+        setDetailsMunicipality("");
+      }
+    }
+
+    if (typeof navigator !== "undefined" && !navigator.onLine && cached.length > 0) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingMunicipalities(true);
+    fetchMunicipalitiesByUf(uf)
+      .then((data) => {
+        if (cancelled) return;
+        setMunicipalityOptions(data);
+        if (detailsMunicipality && !data.includes(detailsMunicipality)) {
+          setDetailsMunicipality("");
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingMunicipalities(false);
+      });
+    return () => { cancelled = true; };
+  }, [isEditingDetails, detailsUf, detailsMunicipality]);
+
   const handleUpdateStatus = (status: TicketStatus) => {
     updateMutation.mutate(
       { id: ticketId, data: { status } },
       {
         onSuccess: (data) => {
           queryClient.setQueryData(getGetTicketQueryKey(ticketId), data);
+          if (canManageRole) {
+            customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+              .then((rows) => setAuditLogs(Array.isArray(rows) ? rows : []))
+              .catch(() => null);
+          }
           toast({ title: "Status atualizado com sucesso" });
         }
       }
@@ -223,6 +308,11 @@ export default function TicketDetail() {
       {
         onSuccess: (data) => {
           queryClient.setQueryData(getGetTicketQueryKey(ticketId), data);
+          if (canManageRole) {
+            customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+              .then((rows) => setAuditLogs(Array.isArray(rows) ? rows : []))
+              .catch(() => null);
+          }
           toast({ title: "Chamado atribuído a você" });
         }
       }
@@ -338,6 +428,78 @@ export default function TicketDetail() {
   const canReopenClosed = ticket.status !== TicketStatus.CLOSED || (isAdminOrAnalyst && withinReopenWindow);
   const canInteractTicket = ticket.createdById === user?.id || ticket.assignedToId === user?.id;
   const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
+
+  const handleSaveDetails = async () => {
+    if (savingDetails) return;
+    if (!detailsUf) {
+      toast({ title: "Selecione a UF", variant: "destructive" });
+      return;
+    }
+    if (!detailsMunicipality) {
+      toast({ title: "Selecione o município", variant: "destructive" });
+      return;
+    }
+
+    const nextAssigneeId = selectedAssigneeId ? Number(selectedAssigneeId) : null;
+    const currentAssigneeId = ticket.assignedToId ?? null;
+
+    if (isEditingDetails && canAssignTicket && nextAssigneeId !== currentAssigneeId) {
+      if (!nextAssigneeId || !Number.isInteger(nextAssigneeId)) {
+        toast({ title: "Selecione o responsável", variant: "destructive" });
+        return;
+      }
+      if (assignReason.trim().length < 3) {
+        toast({ title: "Informe o motivo da alteração do responsável (mínimo 3 caracteres)", variant: "destructive" });
+        return;
+      }
+    }
+
+    setSavingDetails(true);
+    try {
+      if (canAssignTicket && nextAssigneeId !== currentAssigneeId && nextAssigneeId) {
+        await new Promise<void>((resolve, reject) => {
+          assignMutation.mutate(
+            { id: ticketId, data: { assignedToId: nextAssigneeId, reason: assignReason.trim() } },
+            {
+              onSuccess: (data) => {
+                queryClient.setQueryData(getGetTicketQueryKey(ticketId), data);
+                resolve();
+              },
+              onError: (err) => reject(err),
+            },
+          );
+        });
+      }
+
+      const updated = await customFetch<any>(`/api/tickets/${ticketId}/details`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: detailsType,
+          priority: detailsPriority,
+          uf: detailsUf,
+          municipality: detailsMunicipality,
+          establishment: detailsEstablishment || null,
+          hardwareSubtype: detailsType === "HARDWARE" ? (detailsHardwareSubtype || null) : null,
+        }),
+      });
+      queryClient.setQueryData(getGetTicketQueryKey(ticketId), updated);
+      if (canManageRole) {
+        const rows = await customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`);
+        setAuditLogs(Array.isArray(rows) ? rows : []);
+      }
+      toast({ title: "Detalhes atualizados com sucesso" });
+      setIsEditingDetails(false);
+    } catch (e: any) {
+      toast({
+        title: "Falha ao atualizar detalhes",
+        description: e?.data?.error || e?.message || "Não foi possível salvar as alterações.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingDetails(false);
+    }
+  };
 
   const fetchAttachmentBlob = async (att: Attachment) => {
     const resp = await fetch(attachmentApiUrl(att), {
@@ -519,41 +681,165 @@ export default function TicketDetail() {
 
         <div className="space-y-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-lg">Detalhes</CardTitle>
+              {canManageRole ? (
+                <div className="flex items-center gap-2">
+                  {!isEditingDetails ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingDetails(true)}>
+                      <Pencil className="mr-2 size-4" />
+                      Editar
+                    </Button>
+                  ) : (
+                    <>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingDetails(false)} disabled={savingDetails}>
+                        <X className="mr-2 size-4" />
+                        Cancelar
+                      </Button>
+                      <Button type="button" size="sm" onClick={handleSaveDetails} disabled={savingDetails}>
+                        <Save className="mr-2 size-4" />
+                        Salvar
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div>
                 <span className="text-muted-foreground block mb-1">Tipo</span>
-                <TypeBadge type={ticket.type} />
+                {!isEditingDetails ? (
+                  <TypeBadge type={ticket.type} />
+                ) : (
+                  <Select value={detailsType} onValueChange={(v) => setDetailsType(v as TicketType)} disabled={savingDetails}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SOFTWARE">Software</SelectItem>
+                      <SelectItem value="HARDWARE">Hardware</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
-              {(ticket as any).hardwareSubtype && (
+
+              {!isEditingDetails && (ticket as any).hardwareSubtype ? (
                 <div>
                   <span className="text-muted-foreground block mb-1">Subcategoria</span>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
                     {(ticket as any).hardwareSubtype}
                   </span>
                 </div>
-              )}
-              <div>
-                <span className="text-muted-foreground block mb-1">Prioridade</span>
-                <PriorityBadge priority={ticket.priority} />
-              </div>
-              <div>
-                <span className="text-muted-foreground block mb-1">Localidade</span>
-                <p className="font-medium">{ticket.municipality} - {ticket.uf}</p>
-              </div>
-              {ticket.establishment ? (
+              ) : null}
+
+              {isEditingDetails && detailsType === "HARDWARE" ? (
                 <div>
-                  <span className="text-muted-foreground block mb-1">Estabelecimento / Unidade</span>
-                  <p className="font-medium">{ticket.establishment}</p>
+                  <span className="text-muted-foreground block mb-1">Subcategoria</span>
+                  <Input
+                    value={detailsHardwareSubtype}
+                    onChange={(e) => setDetailsHardwareSubtype(e.target.value)}
+                    placeholder="Ex: Impressora, Notebook..."
+                    disabled={savingDetails}
+                  />
                 </div>
               ) : null}
+
+              <div>
+                <span className="text-muted-foreground block mb-1">Prioridade</span>
+                {!isEditingDetails ? (
+                  <PriorityBadge priority={ticket.priority} />
+                ) : (
+                  <Select value={detailsPriority} onValueChange={(v) => setDetailsPriority(v as TicketPriority)} disabled={savingDetails}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LOW">Baixa</SelectItem>
+                      <SelectItem value="MEDIUM">Média</SelectItem>
+                      <SelectItem value="HIGH">Alta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              <div>
+                <span className="text-muted-foreground block mb-1">Localidade</span>
+                {!isEditingDetails ? (
+                  <p className="font-medium">{ticket.municipality} - {ticket.uf}</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Select value={detailsUf} onValueChange={(v) => setDetailsUf(v)} disabled={savingDetails}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="UF" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UFS.map((uf) => (
+                          <SelectItem key={uf} value={uf}>{uf}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <MunicipalityCombobox
+                      uf={detailsUf}
+                      value={detailsMunicipality}
+                      options={municipalityOptions}
+                      loading={isLoadingMunicipalities}
+                      disabled={savingDetails || municipalityOptions.length === 0}
+                      onChange={setDetailsMunicipality}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <span className="text-muted-foreground block mb-1">Estabelecimento / Unidade</span>
+                {!isEditingDetails ? (
+                  <p className="font-medium">{ticket.establishment || "Não informado"}</p>
+                ) : (
+                  <Input
+                    value={detailsEstablishment}
+                    onChange={(e) => setDetailsEstablishment(e.target.value)}
+                    placeholder="Ex: Hospital Municipal..."
+                    disabled={savingDetails}
+                  />
+                )}
+              </div>
+
               <div>
                 <span className="text-muted-foreground block mb-1">Responsável</span>
-                <p className="font-medium">
-                  {ticket.assignedTo ? ticket.assignedTo.name : "Não atribuído"}
-                </p>
+                {!isEditingDetails ? (
+                  <p className="font-medium">{ticket.assignedTo ? ticket.assignedTo.name : "Não atribuído"}</p>
+                ) : (
+                  <div className="space-y-2">
+                    <Select value={selectedAssigneeId} onValueChange={setSelectedAssigneeId} disabled={savingDetails || !canAssignTicket}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={canAssignTicket ? "Selecione o usuário" : "Sem permissão"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assignableUsers.map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>
+                            {u.name} • {getRoleLabel(u.role)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {canAssignTicket ? (
+                      <div>
+                        <Textarea
+                          value={assignReason}
+                          onChange={(e) => setAssignReason(e.target.value.slice(0, 500))}
+                          placeholder="Motivo da alteração do responsável"
+                          rows={3}
+                          disabled={savingDetails}
+                        />
+                        <p className="text-xs text-muted-foreground text-right">{assignReason.length}/500</p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Para alterar o responsável, o chamado precisa estar sem responsável ou atribuído a você.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

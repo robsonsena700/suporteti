@@ -93,9 +93,14 @@ export async function enforceTicketAccess(
 
   const allowed = action === "tickets:assign"
     ? access.canAssign && access.canView
-    : requiresInteract
-      ? access.canInteract
-      : access.canView;
+    : action === "tickets:update"
+      ? (
+        access.canInteract
+        || (access.canView && (user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR"))
+      )
+      : requiresInteract
+        ? access.canInteract
+        : access.canView;
 
   if (!allowed) {
     logger.warn(

@@ -31,9 +31,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     ...(user?.role === "ADMIN"
       ? [{ name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 }]
       : []),
-    ...(user?.role === "ADMIN"
-      ? [{ name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 }]
-      : []),
+    { name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 },
   ];
 
   const NAV_LABELS: Record<string, string> = {

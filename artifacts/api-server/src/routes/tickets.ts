@@ -6,6 +6,7 @@ import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign } from "../lib/ticket-reassign-policy";
+import { validateMunicipalityForUf } from "../lib/ibge";
 
 const router: IRouter = Router();
 
@@ -15,6 +16,44 @@ const userRefSelect = {
   email: usersTable.email,
   role: usersTable.role,
 };
+
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseTicketType(value: unknown): "SOFTWARE" | "HARDWARE" | null {
+  if (value === "SOFTWARE" || value === "HARDWARE") return value;
+  return null;
+}
+
+function parseTicketPriority(value: unknown): "LOW" | "MEDIUM" | "HIGH" | null {
+  if (value === "LOW" || value === "MEDIUM" || value === "HIGH") return value;
+  return null;
+}
+
+function formatChange(field: string, from: unknown, to: unknown): string {
+  const fromText = from == null || from === "" ? "—" : String(from);
+  const toText = to == null || to === "" ? "—" : String(to);
+  return `${field}: ${fromText} -> ${toText}`;
+}
+
+async function auditTicketUpdate(args: {
+  ticketId: number;
+  actorUserId: number;
+  changes: Array<{ field: string; from: unknown; to: unknown }>;
+}): Promise<void> {
+  const { ticketId, actorUserId, changes } = args;
+  if (changes.length === 0) return;
+  const detail = changes.map(c => formatChange(c.field, c.from, c.to)).join("\n");
+  await db.insert(ticketAuditLogsTable).values({
+    ticketId,
+    actorUserId,
+    type: "TICKET_UPDATED",
+    detail,
+  });
+}
 
 router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
@@ -263,6 +302,116 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     .set(parsed.data)
     .where(eq(ticketsTable.id, id))
     .returning();
+
+  const changes: Array<{ field: string; from: unknown; to: unknown }> = [];
+  if (parsed.data.status && parsed.data.status !== existing.status) {
+    changes.push({ field: "status", from: existing.status, to: parsed.data.status });
+  }
+  if (parsed.data.priority && parsed.data.priority !== existing.priority) {
+    changes.push({ field: "priority", from: existing.priority, to: parsed.data.priority });
+  }
+  if (typeof parsed.data.title === "string" && parsed.data.title !== existing.title) {
+    changes.push({ field: "title", from: existing.title, to: parsed.data.title });
+  }
+  if (typeof parsed.data.description === "string" && parsed.data.description !== existing.description) {
+    changes.push({ field: "description", from: "(texto)", to: "(texto)" });
+  }
+  await auditTicketUpdate({ ticketId: id, actorUserId: user.userId, changes });
+
+  const [createdBy] = await db.select().from(usersTable).where(eq(usersTable.id, ticket.createdById));
+  const assignedTo = ticket.assignedToId
+    ? (await db.select().from(usersTable).where(eq(usersTable.id, ticket.assignedToId)))[0]
+    : null;
+
+  res.json({
+    ...ticket,
+    createdBy: createdBy ? {
+      id: createdBy.id,
+      name: createdBy.name,
+      email: createdBy.email,
+      role: createdBy.role,
+    } : null,
+    assignedTo: assignedTo ? {
+      id: assignedTo.id,
+      name: assignedTo.name,
+      email: assignedTo.email,
+      role: assignedTo.role,
+    } : null,
+  });
+});
+
+router.patch("/tickets/:id/details", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const [existing] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+
+  if (!(await enforceTicketAccess(user, existing, "tickets:update"))) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const type = body.type != null ? parseTicketType(body.type) : null;
+  const priority = body.priority != null ? parseTicketPriority(body.priority) : null;
+  const hardwareSubtype = body.hardwareSubtype != null ? normalizeText(body.hardwareSubtype) : null;
+  const establishment = body.establishment != null ? normalizeText(body.establishment) : null;
+  const uf = body.uf != null ? normalizeText(body.uf)?.toUpperCase() ?? null : null;
+  const municipality = body.municipality != null ? normalizeText(body.municipality) : null;
+
+  if (body.type != null && !type) {
+    res.status(400).json({ error: "Tipo inválido" });
+    return;
+  }
+  if (body.priority != null && !priority) {
+    res.status(400).json({ error: "Prioridade inválida" });
+    return;
+  }
+  if ((body.uf != null || body.municipality != null)) {
+    const nextUf = uf ?? existing.uf;
+    const nextMunicipality = municipality ?? existing.municipality;
+    const ok = await validateMunicipalityForUf(nextUf, nextMunicipality);
+    if (!ok) {
+      res.status(400).json({ error: "Município inválido para a UF selecionada" });
+      return;
+    }
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (type) patch.type = type;
+  if (priority) patch.priority = priority;
+  if (body.hardwareSubtype != null) patch.hardwareSubtype = hardwareSubtype;
+  if (body.establishment != null) patch.establishment = establishment;
+  if (uf) patch.uf = uf;
+  if (municipality) patch.municipality = municipality;
+
+  const [ticket] = await db.update(ticketsTable)
+    .set(patch)
+    .where(eq(ticketsTable.id, id))
+    .returning();
+
+  const changes: Array<{ field: string; from: unknown; to: unknown }> = [];
+  if (type && type !== existing.type) changes.push({ field: "type", from: existing.type, to: type });
+  if (priority && priority !== existing.priority) changes.push({ field: "priority", from: existing.priority, to: priority });
+  if (body.hardwareSubtype != null && hardwareSubtype !== (existing.hardwareSubtype ?? null)) {
+    changes.push({ field: "hardwareSubtype", from: existing.hardwareSubtype ?? null, to: hardwareSubtype });
+  }
+  if (body.establishment != null && establishment !== (existing.establishment ?? null)) {
+    changes.push({ field: "establishment", from: existing.establishment ?? null, to: establishment });
+  }
+  if (uf && uf !== existing.uf) changes.push({ field: "uf", from: existing.uf, to: uf });
+  if (municipality && municipality !== existing.municipality) changes.push({ field: "municipality", from: existing.municipality, to: municipality });
+  await auditTicketUpdate({ ticketId: id, actorUserId: user.userId, changes });
 
   const [createdBy] = await db.select().from(usersTable).where(eq(usersTable.id, ticket.createdById));
   const assignedTo = ticket.assignedToId

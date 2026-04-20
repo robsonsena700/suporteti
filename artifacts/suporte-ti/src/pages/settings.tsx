@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "wouter";
 import { 
   useListUsers, 
   useApproveUser,
@@ -17,6 +18,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRoleLabel } from "@/lib/role-labels";
+import { useAuth } from "@/lib/auth";
 
 type UserWithCoordinator = {
   id: number;
@@ -38,7 +40,7 @@ type ResetInfo = {
   temporaryPassword: string;
 };
 
-export default function Settings() {
+function AdminSettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedRoles, setSelectedRoles] = useState<Record<number, UserRole>>({});
@@ -82,6 +84,16 @@ export default function Settings() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+      });
+    },
+  });
+
+  const changeRoleMutation = useMutation({
+    mutationFn: async ({ userId, role, coordinatorId }: { userId: number; role: UserRole; coordinatorId?: number }) => {
+      return customFetch(`/api/users/${userId}/role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, coordinatorId }),
       });
     },
   });
@@ -180,13 +192,6 @@ export default function Settings() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
-        <p className="text-muted-foreground mt-1">
-          Gerenciamento de usuários e perfis de acesso.
-        </p>
-      </div>
-
       {resetInfo ? (
         <Card className="border-primary/20 shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -341,12 +346,59 @@ export default function Settings() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {allUsers?.map((user) => (
+                {allUsers?.map((user) => {
+                  const effectiveRole = selectedRoles[user.id] ?? user.role;
+                  const effectiveCoordinatorId = associationCoordinatorByUser[user.id] ?? (user.coordinatorId ? String(user.coordinatorId) : "");
+
+                  return (
                   <TableRow key={user.id}>
                     <TableCell className="font-medium">{user.name}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{getRoleLabel(user.role)}</Badge>
+                      <Select
+                        value={effectiveRole}
+                        onValueChange={(v) => {
+                          const nextRole = v as UserRole;
+                          setSelectedRoles((prev) => ({ ...prev, [user.id]: nextRole }));
+
+                          const coordinatorId = effectiveCoordinatorId ? Number(effectiveCoordinatorId) : undefined;
+                          if (nextRole === UserRole.USER && !coordinatorId) {
+                            toast({
+                              title: "Selecione um coordenador",
+                              description: "Para perfil Usuário, associe um coordenador.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+
+                          changeRoleMutation.mutate(
+                            {
+                              userId: user.id,
+                              role: nextRole,
+                              coordinatorId: nextRole === UserRole.USER ? coordinatorId : undefined,
+                            },
+                            {
+                              onSuccess: () => {
+                                toast({ title: "Perfil atualizado com sucesso" });
+                                queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+                              },
+                              onError: () => {
+                                toast({ title: "Erro ao atualizar perfil", variant: "destructive" });
+                              },
+                            },
+                          );
+                        }}
+                      >
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UserRole.USER}>Usuário Padrão</SelectItem>
+                          <SelectItem value={UserRole.COORDINATOR}>Coordenador</SelectItem>
+                          <SelectItem value={UserRole.ANALYST}>Analista</SelectItem>
+                          <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                     <TableCell>
                       <Badge variant={user.status === UserStatus.ACTIVE ? "default" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
@@ -354,9 +406,9 @@ export default function Settings() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {user.role === UserRole.USER ? (
+                      {effectiveRole === UserRole.USER ? (
                         <Select
-                          value={associationCoordinatorByUser[user.id] ?? (user.coordinatorId ? String(user.coordinatorId) : "")}
+                          value={effectiveCoordinatorId}
                           onValueChange={(v) => handleAssociateCoordinator(user.id, v)}
                           disabled={associateCoordinatorMutation.isPending}
                         >
@@ -401,12 +453,43 @@ export default function Settings() {
                       {format(new Date(user.createdAt), "dd/MM/yyyy", { locale: ptBR })}
                     </TableCell>
                   </TableRow>
-                ))}
+                )})}
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+export default function Settings() {
+  const { user } = useAuth();
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <p className="text-muted-foreground mt-1">
+          Ajustes da sua conta e, para administradores, gerenciamento de usuários.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Meu Perfil</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground">
+            Atualize seus dados pessoais, preferências e localidade.
+          </div>
+          <Button asChild>
+            <Link href="/perfil">Editar perfil</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
+      {user?.role === "ADMIN" ? <AdminSettings /> : null}
     </div>
   );
 }
