@@ -6,7 +6,9 @@ param(
   [string]$RemoteBaseDir = "/opt/suporte-ti",
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
   [switch]$SkipBuild,
-  [switch]$AllowDirty
+  [switch]$AllowDirty,
+  [switch]$StartAfterDeploy,
+  [string]$StartScriptPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -181,8 +183,15 @@ $switchCmd = 'set -e; if [ -L "{0}" ]; then rm -f "{1}"; ln -s $(readlink "{0}")
 $serviceCmd = 'set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi'
 $healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >/dev/null; fi' -f $ApiHealthUrl
 
+$shouldStart = if ($PSBoundParameters.ContainsKey("StartAfterDeploy")) { [bool]$StartAfterDeploy } else { $User -ne "root" }
+$resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) { $StartScriptPath } else { "$RemoteBaseDir/shared/start_prod.sh" }
+$startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
+
 InvokeRemoteCommand $switchCmd
 InvokeRemoteCommand $serviceCmd
+if ($shouldStart) {
+  InvokeRemoteCommand $startCmd
+}
 InvokeRemoteCommand $healthCmd
 
 Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os serviços."
