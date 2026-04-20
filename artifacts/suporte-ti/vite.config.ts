@@ -82,21 +82,21 @@ export default defineConfig(async () => {
       strictPort: true,
       host: "0.0.0.0",
       allowedHosts: true,
-    proxy: {
-      "/api": {
-        target: apiProxyTarget,
-        changeOrigin: true,
+      fs: {
+        strict: true,
+        deny: ["**/.*"],
+      },
+      proxy: {
+        "/api": {
+          target: apiProxyTarget,
+          changeOrigin: true,
+        },
       },
     },
-    fs: {
-      strict: true,
-      deny: ["**/.*"],
-    },
-    proxy: {
-      "/api": {
-        target: apiProxyTarget,
-        changeOrigin: true,
-      },
+    preview: {
+      port,
+      host: "0.0.0.0",
+      allowedHosts: true,
     },
   };
 });
