@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, chatMessagesTable, usersTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { db, chatAttachmentsTable, chatMessagesTable, usersTable } from "@workspace/db";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import {
   auditChatDenied,
@@ -39,6 +39,30 @@ router.get("/chat/messages", requireAuth, requireActive, requireChatAccess, asyn
     limit,
   });
 
+  const messageIds = messages.map((m) => m.id);
+  const attachments = messageIds.length
+    ? await db
+      .select({
+        id: chatAttachmentsTable.id,
+        chatMessageId: chatAttachmentsTable.chatMessageId,
+        filename: chatAttachmentsTable.filename,
+        mimeType: chatAttachmentsTable.mimeType,
+        size: chatAttachmentsTable.size,
+        uploaderId: chatAttachmentsTable.uploaderId,
+        createdAt: chatAttachmentsTable.createdAt,
+      })
+      .from(chatAttachmentsTable)
+      .where(inArray(chatAttachmentsTable.chatMessageId, messageIds))
+    : [];
+
+  const attachmentsByMessageId = new Map<number, typeof attachments>();
+  for (const a of attachments) {
+    const mid = a.chatMessageId!;
+    const list = attachmentsByMessageId.get(mid) ?? [];
+    list.push(a);
+    attachmentsByMessageId.set(mid, list);
+  }
+
   res.json(
     messages.map((m) => ({
       id: m.id,
@@ -50,20 +74,29 @@ router.get("/chat/messages", requireAuth, requireActive, requireChatAccess, asyn
         name: m.sender.name,
         role: m.sender.role,
       },
+      attachments: (attachmentsByMessageId.get(m.id) ?? []).map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploaderId: a.uploaderId,
+        createdAt: a.createdAt,
+      })),
     }))
   );
 });
 
 router.post("/chat/messages", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { message } = req.body;
+  const { message, attachmentIds } = req.body as { message?: unknown; attachmentIds?: unknown };
+  const ids = Array.isArray(attachmentIds) ? attachmentIds.map((v) => Number(v)).filter((v) => Number.isInteger(v)) : [];
 
-  if (!message || typeof message !== "string" || message.trim().length === 0) {
+  const text = typeof message === "string" ? message.trim() : "";
+  if (!text && ids.length === 0) {
     res.status(400).json({ error: "Mensagem invalida." });
     return;
   }
-
-  if (message.length > 2000) {
+  if (text && text.length > 2000) {
     res.status(400).json({ error: "Mensagem muito longa (max 2000 caracteres)." });
     return;
   }
@@ -77,8 +110,28 @@ router.post("/chat/messages", requireAuth, requireActive, requireChatAccess, asy
 
   const [msg] = await db
     .insert(chatMessagesTable)
-    .values({ senderId: user.userId, message: message.trim() })
+    .values({ senderId: user.userId, message: text })
     .returning();
+
+  const linked = ids.length
+    ? await db.update(chatAttachmentsTable)
+      .set({ chatMessageId: msg.id })
+      .where(and(
+        inArray(chatAttachmentsTable.id, ids),
+        eq(chatAttachmentsTable.uploaderId, user.userId),
+        eq(chatAttachmentsTable.scope, "GROUP"),
+        isNull(chatAttachmentsTable.chatMessageId),
+        isNull(chatAttachmentsTable.directMessageId),
+      ))
+      .returning({
+        id: chatAttachmentsTable.id,
+        filename: chatAttachmentsTable.filename,
+        mimeType: chatAttachmentsTable.mimeType,
+        size: chatAttachmentsTable.size,
+        uploaderId: chatAttachmentsTable.uploaderId,
+        createdAt: chatAttachmentsTable.createdAt,
+      })
+    : [];
 
   const [sender] = await db.select().from(usersTable).where(eq(usersTable.id, user.userId));
 
@@ -92,6 +145,7 @@ router.post("/chat/messages", requireAuth, requireActive, requireChatAccess, asy
       name: sender.name,
       role: sender.role,
     },
+    attachments: linked,
   });
 });
 

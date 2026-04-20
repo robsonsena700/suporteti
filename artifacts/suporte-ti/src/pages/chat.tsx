@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { useChatNotifications } from "@/lib/chat-notifications";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Button } from "@/components/ui/button";
-import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft } from "lucide-react";
+import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft, Paperclip, Download, Trash2, FileText, FileImage, Music, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { UserAvatar } from "@/components/user/user-avatar";
@@ -27,6 +27,7 @@ interface GroupMsg {
   message: string;
   createdAt: string;
   sender: { id: number; name: string; role: string };
+  attachments: ChatAttachment[];
 }
 
 interface DM {
@@ -37,7 +38,24 @@ interface DM {
   createdAt: string;
   sender: { id: number; name: string; role: string };
   receiver: { id: number; name: string; role: string };
+  attachments: ChatAttachment[];
 }
+
+interface ChatAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  uploaderId: number;
+  createdAt: string;
+}
+
+type AttachmentPreviewState = {
+  open: boolean;
+  loading: boolean;
+  url: string | null;
+  error: string | null;
+};
 
 interface Participant {
   id: number;
@@ -126,17 +144,17 @@ async function fetchDMInbox(): Promise<DMPreview[]> {
   return customFetch<DMPreview[]>("/api/chat/dm-inbox");
 }
 
-async function postGroupMessage(message: string): Promise<GroupMsg> {
+async function postGroupMessage(message: string, attachmentIds: number[]): Promise<GroupMsg> {
   return customFetch<GroupMsg>("/api/chat/messages", {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, attachmentIds }),
   });
 }
 
-async function postDM(userId: number, message: string): Promise<DM> {
+async function postDM(userId: number, message: string, attachmentIds: number[]): Promise<DM> {
   return customFetch<DM>(`/api/chat/dm/${userId}`, {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, attachmentIds }),
   });
 }
 
@@ -150,6 +168,12 @@ function MessageBubble({
   message,
   createdAt,
   showSender,
+  attachments,
+  onDownloadAttachment,
+  onDeleteAttachment,
+  canDeleteAttachment,
+  getPreviewState,
+  onTogglePreview,
 }: {
   isOwn: boolean;
   senderId: number;
@@ -158,6 +182,12 @@ function MessageBubble({
   message: string;
   createdAt: string;
   showSender: boolean;
+  attachments: ChatAttachment[];
+  onDownloadAttachment: (att: ChatAttachment) => void;
+  onDeleteAttachment: (att: ChatAttachment) => void;
+  canDeleteAttachment: (att: ChatAttachment) => boolean;
+  getPreviewState: (id: number) => AttachmentPreviewState | undefined;
+  onTogglePreview: (att: ChatAttachment) => void;
 }) {
   return (
     <div className={cn("flex items-end gap-2 mb-1.5", isOwn ? "flex-row-reverse" : "flex-row")}>
@@ -180,9 +210,108 @@ function MessageBubble({
             </span>
           </p>
         )}
-        <p className="text-[13px] leading-snug break-words whitespace-pre-wrap pr-10">
-          {message}
-        </p>
+        {message ? (
+          <p className="text-[13px] leading-snug break-words whitespace-pre-wrap pr-10">
+            {message}
+          </p>
+        ) : null}
+
+        {attachments.length > 0 ? (
+          <div className={cn("mt-2 grid gap-2", message ? "" : "pr-10")}>
+            {attachments.map((att) => {
+              const isImage = att.mimeType.startsWith("image/");
+              const isAudio = att.mimeType.startsWith("audio/");
+              const Icon = isImage ? FileImage : isAudio ? Music : FileText;
+              const canInlinePreview = isImage || isAudio;
+              const preview = getPreviewState(att.id);
+              return (
+                <div
+                  key={att.id}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg border border-black/5 bg-black/5 px-2 py-1.5",
+                    "dark:border-white/10 dark:bg-white/5"
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left text-[12px] font-medium underline-offset-2 hover:underline"
+                    onClick={() => onDownloadAttachment(att)}
+                    aria-label={`Baixar ${att.filename}`}
+                  >
+                    <span className="block truncate">{att.filename}</span>
+                  </button>
+                  {canInlinePreview ? (
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
+                      onClick={() => onTogglePreview(att)}
+                      aria-label={preview?.open ? `Ocultar pré-visualização de ${att.filename}` : `Pré-visualizar ${att.filename}`}
+                      title={preview?.open ? "Ocultar" : "Pré-visualizar"}
+                    >
+                      {preview?.open ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  ) : null}
+                  {isAudio ? (
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
+                      onClick={() => onDownloadAttachment(att)}
+                      aria-label={`Baixar áudio ${att.filename}`}
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
+                      onClick={() => onDownloadAttachment(att)}
+                      aria-label={`Baixar ${att.filename}`}
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
+                  )}
+                  {canDeleteAttachment(att) ? (
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-400/10"
+                      onClick={() => onDeleteAttachment(att)}
+                      aria-label={`Excluir ${att.filename}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {attachments.some((a) => a.mimeType.startsWith("image/") || a.mimeType.startsWith("audio/")) ? (
+          <div className="mt-2 space-y-2">
+            {attachments.map((att) => {
+              const isImage = att.mimeType.startsWith("image/");
+              const isAudio = att.mimeType.startsWith("audio/");
+              if (!isImage && !isAudio) return null;
+              const preview = getPreviewState(att.id);
+              if (!preview?.open) return null;
+              return (
+                <div key={`preview_${att.id}`} className="rounded-lg border border-black/5 bg-white/60 p-2 dark:border-white/10 dark:bg-white/5">
+                  {preview.loading ? (
+                    <p className="text-xs text-muted-foreground">Carregando pré-visualização…</p>
+                  ) : preview.error ? (
+                    <p className="text-xs text-destructive">{preview.error}</p>
+                  ) : preview.url ? (
+                    isImage ? (
+                      <img src={preview.url} alt={att.filename} className="max-h-64 w-full rounded-md object-contain" />
+                    ) : (
+                      <audio controls src={preview.url} className="w-full" />
+                    )
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <span className="absolute bottom-1.5 right-2.5 text-[10px] text-gray-400">
           {formatTime(createdAt)}
         </span>
@@ -194,7 +323,7 @@ function MessageBubble({
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function Chat() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { markAllRead, requestPermission, notifPermission } = useChatNotifications();
   const isMobile = useIsMobile();
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
@@ -209,6 +338,17 @@ export default function Chat() {
   const [error, setError] = useState<string | null>(null);
   const [chatDenied, setChatDenied] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [draftAttachments, setDraftAttachments] = useState<Array<{
+    localId: string;
+    file: File;
+    kind: "IMAGE" | "AUDIO" | "FILE";
+    previewUrl: string | null;
+    status: "ready" | "uploading" | "uploaded" | "error";
+    progress: number;
+    serverId: number | null;
+    error: string | null;
+  }>>([]);
+  const [attachmentPreviews, setAttachmentPreviews] = useState<Record<number, AttachmentPreviewState>>({});
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -216,6 +356,7 @@ export default function Chat() {
   const lastDmIdRef = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     bottomRef.current?.scrollIntoView({ behavior });
@@ -309,6 +450,22 @@ export default function Chat() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showEmoji]);
 
+  useEffect(() => {
+    return () => {
+      for (const a of draftAttachments) {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      }
+    };
+  }, [draftAttachments]);
+
+  useEffect(() => {
+    return () => {
+      for (const p of Object.values(attachmentPreviews)) {
+        if (p.url) URL.revokeObjectURL(p.url);
+      }
+    };
+  }, [attachmentPreviews]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   const selectConversation = (conv: Conversation) => {
@@ -340,23 +497,244 @@ export default function Chat() {
     setShowEmoji(false);
   };
 
+  const MAX_FILE_BYTES = 5 * 1024 * 1024;
+  const allowedByExt: Record<string, { kind: "IMAGE" | "AUDIO" | "FILE"; accept: string[] }> = {
+    jpg: { kind: "IMAGE", accept: ["image/jpeg"] },
+    jpeg: { kind: "IMAGE", accept: ["image/jpeg"] },
+    png: { kind: "IMAGE", accept: ["image/png"] },
+    gif: { kind: "IMAGE", accept: ["image/gif"] },
+    webp: { kind: "IMAGE", accept: ["image/webp"] },
+    pdf: { kind: "FILE", accept: ["application/pdf"] },
+    doc: { kind: "FILE", accept: ["application/msword"] },
+    docx: { kind: "FILE", accept: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/zip"] },
+    txt: { kind: "FILE", accept: ["text/plain"] },
+    zip: { kind: "FILE", accept: ["application/zip"] },
+    mp3: { kind: "AUDIO", accept: ["audio/mpeg"] },
+    wav: { kind: "AUDIO", accept: ["audio/wav", "audio/x-wav"] },
+    m4a: { kind: "AUDIO", accept: ["audio/mp4"] },
+    ogg: { kind: "AUDIO", accept: ["audio/ogg"] },
+  };
+
+  const getExt = (name: string) => {
+    const lower = name.toLowerCase();
+    const idx = lower.lastIndexOf(".");
+    return idx === -1 ? "" : lower.slice(idx + 1);
+  };
+
+  const validateFile = (file: File): { ok: true; kind: "IMAGE" | "AUDIO" | "FILE" } | { ok: false; error: string } => {
+    if (file.size > MAX_FILE_BYTES) return { ok: false, error: "Arquivo excede 5MB" };
+    const ext = getExt(file.name);
+    const cfg = allowedByExt[ext];
+    if (!cfg) return { ok: false, error: "Tipo de arquivo não permitido" };
+    const declared = (file.type || "").toLowerCase();
+    if (declared && declared !== "application/octet-stream" && cfg.accept.length > 0 && !cfg.accept.includes(declared)) {
+      if (!(ext === "docx" && file.type === "application/zip")) {
+        return { ok: false, error: "Tipo MIME não permitido" };
+      }
+    }
+    return { ok: true, kind: cfg.kind };
+  };
+
+  const compressImage = async (file: File): Promise<File> => {
+    const ext = getExt(file.name);
+    if (ext === "gif") return file;
+    if (file.size <= 1024 * 1024) return file;
+    if (!("createImageBitmap" in window)) return file;
+
+    const bitmap = await createImageBitmap(file);
+    const maxEdge = 1920;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    if (scale >= 1) return file;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    const preferWebp = ext !== "png";
+    const mime = preferWebp ? "image/webp" : "image/jpeg";
+    const quality = 0.85;
+
+    const blob: Blob = await new Promise((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (!b) reject(new Error("Falha ao comprimir imagem"));
+        else resolve(b);
+      }, mime, quality);
+    });
+
+    if (blob.size > MAX_FILE_BYTES) {
+      return file;
+    }
+
+    const newName = file.name.replace(/\.[^.]+$/, preferWebp ? ".webp" : ".jpg");
+    return new File([blob], newName, { type: blob.type });
+  };
+
+  const handlePickFiles = async (files: FileList | null) => {
+    if (!files || !files.length) return;
+    const next: typeof draftAttachments = [];
+
+    for (const file of Array.from(files)) {
+      const validation = validateFile(file);
+      if (!validation.ok) {
+        next.push({
+          localId: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          file,
+          kind: "FILE",
+          previewUrl: null,
+          status: "error",
+          progress: 0,
+          serverId: null,
+          error: validation.error,
+        });
+        continue;
+      }
+
+      let finalFile = file;
+      try {
+        if (validation.kind === "IMAGE") {
+          finalFile = await compressImage(file);
+          const revalidate = validateFile(finalFile);
+          if (!revalidate.ok) {
+            next.push({
+              localId: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+              file,
+              kind: validation.kind,
+              previewUrl: null,
+              status: "error",
+              progress: 0,
+              serverId: null,
+              error: revalidate.error,
+            });
+            continue;
+          }
+        }
+      } catch {
+        finalFile = file;
+      }
+
+      const previewUrl = validation.kind === "IMAGE" || validation.kind === "AUDIO"
+        ? URL.createObjectURL(finalFile)
+        : null;
+
+      next.push({
+        localId: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        file: finalFile,
+        kind: validation.kind,
+        previewUrl,
+        status: "ready",
+        progress: 0,
+        serverId: null,
+        error: null,
+      });
+    }
+
+    setDraftAttachments((prev) => [...prev, ...next]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeDraftAttachment = (localId: string) => {
+    setDraftAttachments((prev) => {
+      const item = prev.find((p) => p.localId === localId);
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return prev.filter((p) => p.localId !== localId);
+    });
+  };
+
+  const uploadOne = (item: (typeof draftAttachments)[number]): Promise<number> => {
+    if (!token) return Promise.reject(new Error("Não autenticado"));
+
+    const isGroup = conversation.type === "group";
+    const scope = isGroup ? "GROUP" : "DM";
+    const receiverId = conversation.type === "dm" ? conversation.participant.id : null;
+
+    const form = new FormData();
+    form.append("files", item.file, item.file.name);
+
+    const url = receiverId
+      ? `/api/chat/attachments/upload?scope=${encodeURIComponent(scope)}&receiverId=${encodeURIComponent(String(receiverId))}`
+      : `/api/chat/attachments/upload?scope=${encodeURIComponent(scope)}`;
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url);
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (evt) => {
+        if (!evt.lengthComputable) return;
+        const pct = Math.max(0, Math.min(100, Math.round((evt.loaded / evt.total) * 100)));
+        setDraftAttachments((prev) =>
+          prev.map((p) => (p.localId === item.localId ? { ...p, progress: pct } : p))
+        );
+      };
+      xhr.onload = () => {
+        try {
+          const status = xhr.status;
+          const text = xhr.responseText || "";
+          const json = text ? JSON.parse(text) : null;
+          if (status >= 200 && status < 300 && json?.attachments?.[0]?.id) {
+            resolve(Number(json.attachments[0].id));
+          } else {
+            reject(new Error(json?.error || "Falha no upload"));
+          }
+        } catch {
+          reject(new Error("Resposta inválida do servidor"));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Falha de conexão"));
+      xhr.ontimeout = () => reject(new Error("Tempo de conexão excedido"));
+      xhr.timeout = 60_000;
+      xhr.send(form);
+    });
+  };
+
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (sending) return;
+    const hasReady = draftAttachments.some((a) => a.status === "ready" || a.status === "uploaded");
+    if (!text && !hasReady) return;
     setSending(true);
     setError(null);
     try {
+      const toUpload = draftAttachments.filter((a) => a.status === "ready" && !a.serverId);
+      if (toUpload.length > 0) {
+        setDraftAttachments((prev) => prev.map((p) => (p.status === "ready" && !p.serverId ? { ...p, status: "uploading", progress: 0 } : p)));
+        for (const item of toUpload) {
+          try {
+            const id = await uploadOne(item);
+            setDraftAttachments((prev) =>
+              prev.map((p) => (p.localId === item.localId ? { ...p, status: "uploaded", serverId: id, progress: 100 } : p))
+            );
+          } catch (e: any) {
+            const msg = e?.message || "Falha no upload";
+            setDraftAttachments((prev) =>
+              prev.map((p) => (p.localId === item.localId ? { ...p, status: "error", error: msg } : p))
+            );
+            throw new Error(msg);
+          }
+        }
+      }
+
+      const attachmentIds = draftAttachments
+        .filter((a) => a.status === "uploaded" && a.serverId)
+        .map((a) => a.serverId!) as number[];
+
       if (conversation.type === "group") {
-        const msg = await postGroupMessage(text);
+        const msg = await postGroupMessage(text, attachmentIds);
         setGroupMessages((p) => [...p, msg]);
         lastGroupIdRef.current = msg.id;
       } else {
-        const msg = await postDM(conversation.participant.id, text);
+        const msg = await postDM(conversation.participant.id, text, attachmentIds);
         setDmMessages((p) => [...p, msg]);
         lastDmIdRef.current = msg.id;
         refreshInbox();
       }
       setInput("");
+      setDraftAttachments((prev) => {
+        for (const p of prev) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+        return [];
+      });
       setTimeout(() => scrollToBottom("smooth"), 50);
       inputRef.current?.focus();
     } catch {
@@ -373,6 +751,106 @@ export default function Chat() {
     }
   };
 
+  const downloadAttachment = async (att: ChatAttachment) => {
+    if (!token) return;
+    try {
+      const resp = await fetch(`/api/chat/attachments/${att.id}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        setError("Não foi possível baixar o anexo.");
+        return;
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Falha de conexão ao baixar o anexo.");
+    }
+  };
+
+  const canDeleteAttachment = (att: ChatAttachment) => {
+    if (!user) return false;
+    return user.role === "ADMIN" || att.uploaderId === user.id;
+  };
+
+  const deleteAttachment = async (att: ChatAttachment) => {
+    try {
+      await customFetch(`/api/chat/attachments/${att.id}`, { method: "DELETE" });
+      setAttachmentPreviews((prev) => {
+        const existing = prev[att.id];
+        if (existing?.url) URL.revokeObjectURL(existing.url);
+        const { [att.id]: _removed, ...rest } = prev;
+        return rest;
+      });
+      if (conversation.type === "group") {
+        setGroupMessages((prev) =>
+          prev.map((m) => (m.attachments.some((a) => a.id === att.id) ? { ...m, attachments: m.attachments.filter((a) => a.id !== att.id) } : m))
+        );
+      } else {
+        setDmMessages((prev) =>
+          prev.map((m) => (m.attachments.some((a) => a.id === att.id) ? { ...m, attachments: m.attachments.filter((a) => a.id !== att.id) } : m))
+        );
+      }
+    } catch {
+      setError("Não foi possível excluir o anexo.");
+    }
+  };
+
+  const getPreviewState = (id: number) => attachmentPreviews[id];
+
+  const togglePreview = async (att: ChatAttachment) => {
+    const canInline = att.mimeType.startsWith("image/") || att.mimeType.startsWith("audio/");
+    if (!canInline) return;
+    if (!token) return;
+
+    const existing = attachmentPreviews[att.id];
+    if (existing?.open) {
+      setAttachmentPreviews((prev) => ({ ...prev, [att.id]: { ...(prev[att.id] ?? { open: false, loading: false, url: null, error: null }), open: false } }));
+      return;
+    }
+
+    if (existing?.url && !existing.loading) {
+      setAttachmentPreviews((prev) => ({ ...prev, [att.id]: { ...prev[att.id], open: true } }));
+      return;
+    }
+
+    setAttachmentPreviews((prev) => ({
+      ...prev,
+      [att.id]: { open: true, loading: true, url: null, error: null },
+    }));
+
+    try {
+      const resp = await fetch(`/api/chat/attachments/${att.id}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        setAttachmentPreviews((prev) => ({
+          ...prev,
+          [att.id]: { open: true, loading: false, url: null, error: "Não foi possível carregar a pré-visualização." },
+        }));
+        return;
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      setAttachmentPreviews((prev) => ({
+        ...prev,
+        [att.id]: { open: true, loading: false, url, error: null },
+      }));
+    } catch {
+      setAttachmentPreviews((prev) => ({
+        ...prev,
+        [att.id]: { open: true, loading: false, url: null, error: "Falha de conexão ao carregar a pré-visualização." },
+      }));
+    }
+  };
+
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const inboxByPartner = new Map(dmInbox.map((d) => [d.partnerId, d]));
@@ -382,7 +860,15 @@ export default function Chat() {
   const isGroupSelected = conversation.type === "group";
   const selectedParticipantId = conversation.type === "dm" ? conversation.participant.id : null;
 
-  const currentMessages: { id: number; senderId: number; message: string; createdAt: string; senderName: string; senderRole: string }[] =
+  const currentMessages: Array<{
+    id: number;
+    senderId: number;
+    message: string;
+    createdAt: string;
+    senderName: string;
+    senderRole: string;
+    attachments: ChatAttachment[];
+  }> =
     isGroupSelected
       ? groupMessages.map((m) => ({ ...m, senderName: m.sender.name, senderRole: m.sender.role }))
       : dmMessages.map((m) => ({ ...m, senderName: m.sender.name, senderRole: m.sender.role }));
@@ -620,6 +1106,12 @@ export default function Chat() {
                     message={msg.message}
                     createdAt={msg.createdAt}
                     showSender={isGroupSelected}
+                    attachments={msg.attachments}
+                    onDownloadAttachment={downloadAttachment}
+                    onDeleteAttachment={deleteAttachment}
+                    canDeleteAttachment={canDeleteAttachment}
+                    getPreviewState={getPreviewState}
+                    onTogglePreview={togglePreview}
                   />
                 </div>
               );
@@ -653,6 +1145,73 @@ export default function Chat() {
             </div>
           )}
 
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.txt,.zip,.mp3,.wav,.m4a,.ogg"
+            className="hidden"
+            onChange={(e) => handlePickFiles(e.target.files)}
+          />
+
+          {draftAttachments.length > 0 ? (
+            <div className="mb-2 rounded-lg border bg-white/80 dark:bg-[#2a3942] p-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {draftAttachments.map((a) => (
+                  <div key={a.localId} className="rounded-lg border border-black/5 dark:border-white/10 bg-white dark:bg-[#1f2c34] p-2">
+                    <div className="flex items-start gap-2">
+                      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-black/5 dark:bg-white/5 flex items-center justify-center">
+                        {a.kind === "IMAGE" && a.previewUrl ? (
+                          <img src={a.previewUrl} alt={a.file.name} className="h-full w-full object-cover" />
+                        ) : a.kind === "AUDIO" ? (
+                          <Music className="h-5 w-5 text-muted-foreground" />
+                        ) : (
+                          <FileText className="h-5 w-5 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium truncate">{a.file.name}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {(a.file.size / (1024 * 1024)).toFixed(2)} MB
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeDraftAttachment(a.localId)}
+                            className="rounded-md p-1 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10"
+                            aria-label={`Remover ${a.file.name}`}
+                            disabled={sending || a.status === "uploading"}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                        {a.kind === "AUDIO" && a.previewUrl ? (
+                          <audio controls src={a.previewUrl} className="mt-2 w-full" />
+                        ) : null}
+
+                        {a.status === "uploading" ? (
+                          <div className="mt-2">
+                            <div className="h-2 w-full rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                              <div className="h-full bg-primary" style={{ width: `${a.progress}%` }} />
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{a.progress}%</p>
+                          </div>
+                        ) : a.status === "error" ? (
+                          <p className="mt-2 text-[11px] text-destructive">{a.error || "Erro no anexo"}</p>
+                        ) : a.status === "uploaded" ? (
+                          <p className="mt-2 text-[11px] text-green-600 dark:text-green-400">Anexo pronto</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex items-end gap-2">
             <button
               type="button"
@@ -666,6 +1225,17 @@ export default function Chat() {
               title="Emoji"
             >
               <Smile className="h-5 w-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white dark:bg-[#2a3942] text-muted-foreground hover:text-primary shadow-sm"
+              title="Anexar arquivo"
+              aria-label="Anexar arquivo"
+              disabled={sending}
+            >
+              <Paperclip className="h-5 w-5" />
             </button>
 
             <div className="flex flex-1 items-end rounded-2xl bg-white dark:bg-[#2a3942] px-4 py-2.5 shadow-sm min-h-[44px]">
@@ -697,7 +1267,7 @@ export default function Chat() {
             <Button
               type="button"
               onClick={handleSend}
-              disabled={!input.trim() || sending}
+              disabled={(sending || (!input.trim() && !draftAttachments.some((a) => a.status === "ready" || a.status === "uploaded")))}
               size="icon"
               className="rounded-full h-11 w-11 shrink-0 shadow-sm"
             >

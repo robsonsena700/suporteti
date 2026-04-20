@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, directMessagesTable, usersTable } from "@workspace/db";
-import { eq, or, and, asc } from "drizzle-orm";
+import { db, chatAttachmentsTable, directMessagesTable, usersTable } from "@workspace/db";
+import { eq, or, and, asc, inArray, isNull } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import {
   auditChatDenied,
@@ -47,6 +47,30 @@ router.get("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, as
     orderBy: [asc(directMessagesTable.createdAt)],
   });
 
+  const messageIds = messages.map((m) => m.id);
+  const attachments = messageIds.length
+    ? await db
+      .select({
+        id: chatAttachmentsTable.id,
+        directMessageId: chatAttachmentsTable.directMessageId,
+        filename: chatAttachmentsTable.filename,
+        mimeType: chatAttachmentsTable.mimeType,
+        size: chatAttachmentsTable.size,
+        uploaderId: chatAttachmentsTable.uploaderId,
+        createdAt: chatAttachmentsTable.createdAt,
+      })
+      .from(chatAttachmentsTable)
+      .where(inArray(chatAttachmentsTable.directMessageId, messageIds))
+    : [];
+
+  const attachmentsByMessageId = new Map<number, typeof attachments>();
+  for (const a of attachments) {
+    const mid = a.directMessageId!;
+    const list = attachmentsByMessageId.get(mid) ?? [];
+    list.push(a);
+    attachmentsByMessageId.set(mid, list);
+  }
+
   res.json(
     messages.map((m) => ({
       id: m.id,
@@ -56,6 +80,14 @@ router.get("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, as
       createdAt: m.createdAt,
       sender: { id: m.sender.id, name: m.sender.name, role: m.sender.role },
       receiver: { id: m.receiver.id, name: m.receiver.name, role: m.receiver.role },
+      attachments: (attachmentsByMessageId.get(m.id) ?? []).map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploaderId: a.uploaderId,
+        createdAt: a.createdAt,
+      })),
     }))
   );
 });
@@ -71,12 +103,14 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
     return;
   }
 
-  const { message } = req.body;
-  if (!message || typeof message !== "string" || message.trim().length === 0) {
+  const { message, attachmentIds } = req.body as { message?: unknown; attachmentIds?: unknown };
+  const ids = Array.isArray(attachmentIds) ? attachmentIds.map((v) => Number(v)).filter((v) => Number.isInteger(v)) : [];
+  const text = typeof message === "string" ? message.trim() : "";
+  if (!text && ids.length === 0) {
     res.status(400).json({ error: "Mensagem inválida." });
     return;
   }
-  if (message.length > 2000) {
+  if (text && text.length > 2000) {
     res.status(400).json({ error: "Mensagem muito longa (max 2000 caracteres)." });
     return;
   }
@@ -98,7 +132,7 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
 
   const [msg] = await db
     .insert(directMessagesTable)
-    .values({ senderId: me, receiverId: other, message: message.trim() })
+    .values({ senderId: me, receiverId: other, message: text })
     .returning();
 
   res.status(201).json({
@@ -109,6 +143,26 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
     createdAt: msg.createdAt,
     sender: { id: sender.id, name: sender.name, role: sender.role },
     receiver: { id: receiver.id, name: receiver.name, role: receiver.role },
+    attachments: ids.length
+      ? await db.update(chatAttachmentsTable)
+        .set({ directMessageId: msg.id })
+        .where(and(
+          inArray(chatAttachmentsTable.id, ids),
+          eq(chatAttachmentsTable.uploaderId, me),
+          eq(chatAttachmentsTable.scope, "DM"),
+          eq(chatAttachmentsTable.dmReceiverId, other),
+          isNull(chatAttachmentsTable.chatMessageId),
+          isNull(chatAttachmentsTable.directMessageId),
+        ))
+        .returning({
+          id: chatAttachmentsTable.id,
+          filename: chatAttachmentsTable.filename,
+          mimeType: chatAttachmentsTable.mimeType,
+          size: chatAttachmentsTable.size,
+          uploaderId: chatAttachmentsTable.uploaderId,
+          createdAt: chatAttachmentsTable.createdAt,
+        })
+      : [],
   });
 });
 

@@ -5,6 +5,7 @@ import { messagesTable } from "./messages";
 import { ratingsTable } from "./ratings";
 import { chatMessagesTable } from "./chat";
 import { directMessagesTable } from "./direct-messages";
+import { chatAttachmentsTable } from "./chat-attachments";
 import { userCoordinatorsTable } from "./user-coordinators";
 import { ticketAuditLogsTable } from "./ticket-audit";
 
@@ -15,6 +16,7 @@ export const usersRelations = relations(usersTable, ({ many }) => ({
   ratings: many(ratingsTable),
   ticketAuditLogs: many(ticketAuditLogsTable),
   chatMessages: many(chatMessagesTable),
+  chatAttachments: many(chatAttachmentsTable),
   sentDirectMessages: many(directMessagesTable, { relationName: "dmSender" }),
   receivedDirectMessages: many(directMessagesTable, { relationName: "dmReceiver" }),
   coordinatorsLinks: many(userCoordinatorsTable, { relationName: "userCoordinator_user" }),
@@ -44,6 +46,25 @@ export const directMessagesRelations = relations(directMessagesTable, ({ one }) 
     fields: [directMessagesTable.receiverId],
     references: [usersTable.id],
     relationName: "dmReceiver",
+  }),
+}));
+
+export const chatAttachmentsRelations = relations(chatAttachmentsTable, ({ one }) => ({
+  uploader: one(usersTable, {
+    fields: [chatAttachmentsTable.uploaderId],
+    references: [usersTable.id],
+  }),
+  dmReceiver: one(usersTable, {
+    fields: [chatAttachmentsTable.dmReceiverId],
+    references: [usersTable.id],
+  }),
+  chatMessage: one(chatMessagesTable, {
+    fields: [chatAttachmentsTable.chatMessageId],
+    references: [chatMessagesTable.id],
+  }),
+  directMessage: one(directMessagesTable, {
+    fields: [chatAttachmentsTable.directMessageId],
+    references: [directMessagesTable.id],
   }),
 }));
 
