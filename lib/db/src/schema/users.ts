@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, pgEnum, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, pgEnum, boolean, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -20,6 +20,7 @@ export const usersTable = pgTable("users", {
   prefersTelegram: boolean("prefers_telegram").notNull().default(false),
   termsAccepted: boolean("terms_accepted").notNull().default(false),
   termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
+  birthDate: date("birth_date", { mode: "date" }),
   uf: text("uf").notNull(),
   avatarMimeType: text("avatar_mime_type"),
   avatarData: text("avatar_data"),

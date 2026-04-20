@@ -70,6 +70,8 @@ export interface User {
   termsAccepted: boolean;
   /** @nullable */
   termsAcceptedAt?: string | null;
+  /** @nullable */
+  birthDate?: string | null;
   uf: string;
   municipality: string;
   createdAt: string;
@@ -91,6 +93,7 @@ export interface UpdateUserBody {
   prefersTelegram?: boolean;
   uf?: string;
   municipality?: string;
+  birthDate?: string;
 }
 
 export type ApproveUserBodyRole =
@@ -219,6 +222,7 @@ export const CreateTicketBodyPriority = {
 export interface CreateTicketBody {
   title: string;
   description: string;
+  /** @maxLength 255 */
   establishment: string;
   type: CreateTicketBodyType;
   priority: CreateTicketBodyPriority;
@@ -253,6 +257,10 @@ export interface UpdateTicketBody {
 
 export interface AssignTicketBody {
   assignedToId: number;
+  /**
+   * @minLength 3
+   * @maxLength 500
+   */
   reason: string;
 }
 

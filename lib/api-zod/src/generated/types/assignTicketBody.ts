@@ -8,4 +8,9 @@
 
 export interface AssignTicketBody {
   assignedToId: number;
+  /**
+   * @minLength 3
+   * @maxLength 500
+   */
+  reason: string;
 }

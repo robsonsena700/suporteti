@@ -11,6 +11,7 @@ import type { CreateTicketBodyType } from "./createTicketBodyType";
 export interface CreateTicketBody {
   title: string;
   description: string;
+  /** @maxLength 255 */
   establishment: string;
   type: CreateTicketBodyType;
   priority: CreateTicketBodyPriority;

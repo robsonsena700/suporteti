@@ -682,6 +682,9 @@ components:
         termsAcceptedAt:
           type: ["string", "null"]
           format: date-time
+        birthDate:
+          type: ["string", "null"]
+          format: date
         uf:
           type: string
         municipality:
@@ -724,6 +727,9 @@ components:
           type: string
         municipality:
           type: string
+        birthDate:
+          type: string
+          format: date
 
     ApproveUserBody:
       type: object

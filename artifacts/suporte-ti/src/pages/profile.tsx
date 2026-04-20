@@ -29,6 +29,17 @@ import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/mun
 const profileSchema = z.object({
   name: z.string().min(2, "Nome é obrigatório"),
   cpf: z.string().refine(isValidCpf, "CPF inválido"),
+  birthDate: z
+    .string()
+    .min(1, "Data de nascimento é obrigatória")
+    .refine((value) => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      const min = new Date("1900-01-01T00:00:00.000Z");
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      return date >= min && date <= today;
+    }, "Data de nascimento inválida"),
   establishment: z.string().min(2, "Estabelecimento/Unidade de Saúde é obrigatório"),
   contactPhone: z.string().refine(isValidBrazilMobile, "Contato inválido"),
   prefersWhatsapp: z.boolean().default(false),
@@ -55,6 +66,7 @@ export default function Profile() {
     defaultValues: {
       name: user?.name || "",
       cpf: user?.cpf ? formatCpf(user.cpf) : "",
+      birthDate: user?.birthDate ? user.birthDate.slice(0, 10) : "",
       establishment: user?.establishment || "",
       contactPhone: user?.contactPhone ? formatBrazilPhone(user.contactPhone) : "+55 ",
       prefersWhatsapp: user?.prefersWhatsapp ?? false,
@@ -189,6 +201,7 @@ export default function Profile() {
         data: {
           ...data,
           cpf: onlyDigits(data.cpf),
+          birthDate: data.birthDate,
         },
       },
       {
@@ -290,6 +303,19 @@ export default function Profile() {
                           value={field.value}
                           onChange={(e) => field.onChange(formatCpf(e.target.value))}
                         />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="birthDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Data de nascimento</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

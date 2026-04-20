@@ -25,7 +25,11 @@ export interface User {
   termsAccepted: boolean;
   /** @nullable */
   termsAcceptedAt?: Date | null;
+  /** @nullable */
+  birthDate?: Date | null;
   uf: string;
   municipality: string;
   createdAt: Date;
+  /** @nullable */
+  lastLoginAt?: Date | null;
 }

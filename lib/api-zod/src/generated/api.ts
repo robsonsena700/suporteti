@@ -55,9 +55,11 @@ export const LoginResponse = zod.object({
     prefersTelegram: zod.boolean(),
     termsAccepted: zod.boolean(),
     termsAcceptedAt: zod.coerce.date().nullish(),
+    birthDate: zod.coerce.date().nullish(),
     uf: zod.string(),
     municipality: zod.string(),
     createdAt: zod.coerce.date(),
+    lastLoginAt: zod.coerce.date().nullish(),
   }),
 });
 
@@ -84,6 +86,7 @@ export const GetMeResponse = zod.object({
   prefersTelegram: zod.boolean(),
   termsAccepted: zod.boolean(),
   termsAcceptedAt: zod.coerce.date().nullish(),
+  birthDate: zod.coerce.date().nullish(),
   uf: zod.string(),
   municipality: zod.string(),
   createdAt: zod.coerce.date(),
@@ -111,9 +114,11 @@ export const ListUsersResponseItem = zod.object({
   prefersTelegram: zod.boolean(),
   termsAccepted: zod.boolean(),
   termsAcceptedAt: zod.coerce.date().nullish(),
+  birthDate: zod.coerce.date().nullish(),
   uf: zod.string(),
   municipality: zod.string(),
   createdAt: zod.coerce.date(),
+  lastLoginAt: zod.coerce.date().nullish(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
@@ -137,9 +142,11 @@ export const GetUserResponse = zod.object({
   prefersTelegram: zod.boolean(),
   termsAccepted: zod.boolean(),
   termsAcceptedAt: zod.coerce.date().nullish(),
+  birthDate: zod.coerce.date().nullish(),
   uf: zod.string(),
   municipality: zod.string(),
   createdAt: zod.coerce.date(),
+  lastLoginAt: zod.coerce.date().nullish(),
 });
 
 /**
@@ -158,6 +165,7 @@ export const UpdateUserBody = zod.object({
   prefersTelegram: zod.boolean().optional(),
   uf: zod.string().optional(),
   municipality: zod.string().optional(),
+  birthDate: zod.coerce.date().optional(),
 });
 
 export const UpdateUserResponse = zod.object({
@@ -173,9 +181,11 @@ export const UpdateUserResponse = zod.object({
   prefersTelegram: zod.boolean(),
   termsAccepted: zod.boolean(),
   termsAcceptedAt: zod.coerce.date().nullish(),
+  birthDate: zod.coerce.date().nullish(),
   uf: zod.string(),
   municipality: zod.string(),
   createdAt: zod.coerce.date(),
+  lastLoginAt: zod.coerce.date().nullish(),
 });
 
 /**
@@ -202,9 +212,11 @@ export const ApproveUserResponse = zod.object({
   prefersTelegram: zod.boolean(),
   termsAccepted: zod.boolean(),
   termsAcceptedAt: zod.coerce.date().nullish(),
+  birthDate: zod.coerce.date().nullish(),
   uf: zod.string(),
   municipality: zod.string(),
   createdAt: zod.coerce.date(),
+  lastLoginAt: zod.coerce.date().nullish(),
 });
 
 /**
@@ -223,13 +235,13 @@ export const ListTicketsResponseItem = zod.object({
   title: zod.string(),
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
-  hardwareSubtype: zod.string().nullable(),
+  hardwareSubtype: zod.string().nullish(),
   status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
-  establishment: zod.string().nullable(),
-  imageAttachmentsCount: zod.number(),
+  establishment: zod.string().nullish(),
+  imageAttachmentsCount: zod.number().optional(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
   createdAt: zod.coerce.date(),
@@ -257,10 +269,12 @@ export const ListTicketsResponse = zod.array(ListTicketsResponseItem);
 /**
  * @summary Abrir novo chamado
  */
+export const createTicketBodyEstablishmentMax = 255;
+
 export const CreateTicketBody = zod.object({
   title: zod.string(),
   description: zod.string(),
-  establishment: zod.string().trim().min(1).max(255),
+  establishment: zod.string().max(createTicketBodyEstablishmentMax),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   hardwareSubtype: zod.string().optional(),
@@ -281,12 +295,13 @@ export const GetTicketResponse = zod
     title: zod.string(),
     description: zod.string(),
     type: zod.enum(["SOFTWARE", "HARDWARE"]),
-    hardwareSubtype: zod.string().nullable(),
+    hardwareSubtype: zod.string().nullish(),
     status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
     priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
     uf: zod.string(),
     municipality: zod.string(),
-    establishment: zod.string().nullable(),
+    establishment: zod.string().nullish(),
+    imageAttachmentsCount: zod.number().optional(),
     createdById: zod.number(),
     assignedToId: zod.number().nullable(),
     createdAt: zod.coerce.date(),
@@ -366,10 +381,13 @@ export const UpdateTicketResponse = zod.object({
   title: zod.string(),
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
+  hardwareSubtype: zod.string().nullish(),
   status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
+  establishment: zod.string().nullish(),
+  imageAttachmentsCount: zod.number().optional(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
   createdAt: zod.coerce.date(),
@@ -400,9 +418,15 @@ export const AssignTicketParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const assignTicketBodyReasonMin = 3;
+export const assignTicketBodyReasonMax = 500;
+
 export const AssignTicketBody = zod.object({
   assignedToId: zod.number(),
-  reason: zod.string().trim().min(3).max(500),
+  reason: zod
+    .string()
+    .min(assignTicketBodyReasonMin)
+    .max(assignTicketBodyReasonMax),
 });
 
 export const AssignTicketResponse = zod.object({
@@ -410,10 +434,13 @@ export const AssignTicketResponse = zod.object({
   title: zod.string(),
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
+  hardwareSubtype: zod.string().nullish(),
   status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
+  establishment: zod.string().nullish(),
+  imageAttachmentsCount: zod.number().optional(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
   createdAt: zod.coerce.date(),

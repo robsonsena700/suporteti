@@ -82,6 +82,7 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
       prefersTelegram: usersTable.prefersTelegram,
       termsAccepted: usersTable.termsAccepted,
       termsAcceptedAt: usersTable.termsAcceptedAt,
+      birthDate: usersTable.birthDate,
       uf: usersTable.uf,
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
@@ -100,6 +101,7 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
       prefersTelegram: usersTable.prefersTelegram,
       termsAccepted: usersTable.termsAccepted,
       termsAcceptedAt: usersTable.termsAcceptedAt,
+      birthDate: usersTable.birthDate,
       uf: usersTable.uf,
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
@@ -167,6 +169,7 @@ router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<v
     prefersTelegram: usersTable.prefersTelegram,
     termsAccepted: usersTable.termsAccepted,
     termsAcceptedAt: usersTable.termsAcceptedAt,
+    birthDate: usersTable.birthDate,
     uf: usersTable.uf,
     municipality: usersTable.municipality,
     createdAt: usersTable.createdAt,
@@ -288,6 +291,7 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
   const nextCpf = parsed.data.cpf ?? existing.cpf ?? "";
   const nextEstablishment = parsed.data.establishment ?? existing.establishment ?? "";
   const nextContactPhone = parsed.data.contactPhone ?? existing.contactPhone ?? "";
+  const nextBirthDate = parsed.data.birthDate ?? existing.birthDate ?? null;
   const nextUf = parsed.data.uf ?? existing.uf;
   const nextMunicipality = parsed.data.municipality ?? existing.municipality;
 
@@ -304,6 +308,21 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
       res.status(400).json({ error: "Contato inválido" });
       return;
     }
+    if (!nextBirthDate) {
+      res.status(400).json({ error: "Data de nascimento é obrigatória" });
+      return;
+    }
+    const min = new Date("1900-01-01T00:00:00.000Z");
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (!(nextBirthDate instanceof Date) || Number.isNaN(nextBirthDate.getTime())) {
+      res.status(400).json({ error: "Data de nascimento inválida" });
+      return;
+    }
+    if (nextBirthDate < min || nextBirthDate > today) {
+      res.status(400).json({ error: "Data de nascimento inválida" });
+      return;
+    }
   } else {
     if (parsed.data.cpf && !isValidCpf(parsed.data.cpf)) {
       res.status(400).json({ error: "CPF inválido" });
@@ -312,6 +331,15 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
     if (parsed.data.contactPhone && !isValidBrazilMobile(parsed.data.contactPhone)) {
       res.status(400).json({ error: "Contato inválido" });
       return;
+    }
+    if (parsed.data.birthDate) {
+      const min = new Date("1900-01-01T00:00:00.000Z");
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      if (Number.isNaN(parsed.data.birthDate.getTime()) || parsed.data.birthDate < min || parsed.data.birthDate > today) {
+        res.status(400).json({ error: "Data de nascimento inválida" });
+        return;
+      }
     }
   }
 
@@ -363,6 +391,7 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
       prefersTelegram: usersTable.prefersTelegram,
       termsAccepted: usersTable.termsAccepted,
       termsAcceptedAt: usersTable.termsAcceptedAt,
+      birthDate: usersTable.birthDate,
       uf: usersTable.uf,
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
