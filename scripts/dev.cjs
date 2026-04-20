@@ -1,16 +1,19 @@
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 function getPnpmRunner() {
   if (process.env.npm_execpath) {
     return {
       command: process.execPath,
       baseArgs: [process.env.npm_execpath],
+      useShell: false,
     };
   }
 
   return process.platform === "win32"
-    ? { command: "pnpm.cmd", baseArgs: [] }
-    : { command: "pnpm", baseArgs: [] };
+    ? { command: "pnpm.cmd", baseArgs: [], useShell: true }
+    : { command: "pnpm", baseArgs: [], useShell: false };
 }
 
 function spawnPnpm(args, extraEnv) {
@@ -18,7 +21,7 @@ function spawnPnpm(args, extraEnv) {
   return spawn(runner.command, [...runner.baseArgs, ...args], {
     stdio: "inherit",
     env: { ...process.env, ...extraEnv },
-    shell: false,
+    shell: runner.useShell,
   });
 }
 
@@ -27,10 +30,48 @@ function fail(message) {
   process.exit(1);
 }
 
+function readDotEnvFile(envPath) {
+  if (!fs.existsSync(envPath)) return {};
+  const content = fs.readFileSync(envPath, "utf8");
+  const result = {};
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1];
+    let value = match[2] ?? "";
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function tryLoadEnvFromDotEnv() {
+  const repoRoot = path.resolve(__dirname, "..");
+  const envPath = path.join(repoRoot, ".env");
+  const loaded = readDotEnvFile(envPath);
+  for (const [k, v] of Object.entries(loaded)) {
+    if (process.env[k] == null || process.env[k] === "") {
+      process.env[k] = String(v);
+    }
+  }
+}
+
+if (!process.env.DATABASE_URL) {
+  tryLoadEnvFromDotEnv();
+}
+
 if (!process.env.DATABASE_URL) {
   fail(
     "DATABASE_URL não está definido. Exemplo:\n" +
-      '  $env:DATABASE_URL = "postgresql://postgres:senha@localhost:5445/suporteti"\n',
+      '  $env:DATABASE_URL = "postgresql://postgres:senha@localhost:5445/suporteti"\n' +
+      "Ou defina DATABASE_URL no arquivo .env na raiz do repositório.\n",
   );
 }
 

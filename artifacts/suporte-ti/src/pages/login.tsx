@@ -49,6 +49,8 @@ export default function Login() {
           login(response.token);
           if (response.user.status === "PENDING") {
             setLocation("/pendente");
+          } else if (!response.user.birthDate) {
+            setLocation("/perfil");
           } else {
             setLocation("/dashboard");
           }

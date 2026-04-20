@@ -23,6 +23,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     password,
     uf,
     municipality,
+    birthDate,
     cpf,
     establishment,
     contactPhone,
@@ -43,6 +44,18 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   if (!isValidBrazilMobile(contactPhone)) {
     res.status(400).json({ error: "Contato inválido" });
+    return;
+  }
+
+  if (!(birthDate instanceof Date) || Number.isNaN(birthDate.getTime())) {
+    res.status(400).json({ error: "Data de nascimento inválida" });
+    return;
+  }
+  const minBirth = new Date("1900-01-01T00:00:00.000Z");
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  if (birthDate < minBirth || birthDate > today) {
+    res.status(400).json({ error: "Data de nascimento inválida" });
     return;
   }
 
@@ -79,6 +92,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     name,
     email,
     passwordHash,
+    birthDate,
     cpf: normalizedCpf,
     establishment,
     contactPhone: normalizedPhone,

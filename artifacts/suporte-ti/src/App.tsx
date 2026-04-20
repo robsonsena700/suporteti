@@ -41,6 +41,10 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
           window.location.href = "/pendente";
           return null;
         }
+        if (!user.birthDate && window.location.pathname !== "/perfil") {
+          window.location.href = "/perfil";
+          return null;
+        }
         if (rest.adminOnly && user.role !== "ADMIN") {
           window.location.href = "/dashboard";
           return null;

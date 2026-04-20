@@ -21,6 +21,7 @@ export interface RegisterBody {
   name: string;
   email: string;
   password: string;
+  birthDate: string;
   cpf: string;
   establishment: string;
   contactPhone: string;

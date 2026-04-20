@@ -27,6 +27,17 @@ const registerSchema = z.object({
   name: z.string().min(2, "Nome é obrigatório"),
   email: z.string().email("E-mail inválido"),
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
+  birthDate: z
+    .string()
+    .min(1, "Data de nascimento é obrigatória")
+    .refine((value) => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      const min = new Date("1900-01-01T00:00:00.000Z");
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      return date >= min && date <= today;
+    }, "Data de nascimento inválida"),
   cpf: z.string().refine(isValidCpf, "CPF inválido"),
   establishment: z.string().min(2, "Estabelecimento/Unidade de Saúde é obrigatório"),
   contactPhone: z.string().refine(isValidBrazilMobile, "Contato inválido"),
@@ -53,6 +64,7 @@ export default function Register() {
       name: "",
       email: "",
       password: "",
+      birthDate: "",
       cpf: "",
       establishment: "",
       contactPhone: "+55 ",
@@ -231,6 +243,19 @@ export default function Register() {
                         value={field.value}
                         onChange={(e) => field.onChange(formatCpf(e.target.value))}
                       />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="birthDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Data de nascimento</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

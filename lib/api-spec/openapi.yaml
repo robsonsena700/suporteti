@@ -602,6 +602,9 @@ components:
           type: string
         password:
           type: string
+        birthDate:
+          type: string
+          format: date
         cpf:
           type: string
         establishment:
@@ -622,6 +625,7 @@ components:
         - name
         - email
         - password
+        - birthDate
         - cpf
         - establishment
         - contactPhone
