@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { rm, readFile, writeFile } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -118,6 +118,15 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // esbuild-plugin-pino may inline an absolute local build path for outputDir.
+  // Replace it with runtime __dirname so artifacts run on Linux/production.
+  const entryPath = path.join(distDir, "index.mjs");
+  const built = await readFile(entryPath, "utf8");
+  const patched = built.replace(/const outputDir = \"[^\"]+\";/g, "const outputDir = globalThis.__dirname;");
+  if (patched !== built) {
+    await writeFile(entryPath, patched, "utf8");
+  }
 }
 
 buildAll().catch((err) => {

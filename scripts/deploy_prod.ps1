@@ -5,7 +5,8 @@ param(
   [string]$KeyPath = "",
   [string]$RemoteBaseDir = "/opt/suporte-ti",
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$AllowDirty
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +47,10 @@ function ResolveKeyPath {
     return (Resolve-Path $InputKeyPath).Path
   }
 
+  if ([string]::IsNullOrWhiteSpace($InputKeyPath)) {
+    return ""
+  }
+
   $sshDir = Join-Path $RepoRoot "lib\ssh"
   $candidates = @(
     (Join-Path $sshDir "id_rsa"),
@@ -67,34 +72,36 @@ function ResolveKeyPath {
     }
   }
 
-  throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada."
+  throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada ou deixe vazio para usar ssh-agent."
 }
 
-function Ssh {
+function InvokeRemoteCommand {
   param([Parameter(Mandatory)][string]$RemoteCommand)
-  $k = ""
+  $sshArgs = @("-p", "$Port")
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
     RequireFile -Path $KeyPath
-    $k = "-i `"$KeyPath`""
+    $sshArgs += @("-i", $KeyPath)
   }
-  & ssh -p $Port $k "$User@$HostName" $RemoteCommand
+  $sshArgs += @("$User@$HostName", $RemoteCommand)
+  & ssh.exe @sshArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Falha no ssh: $RemoteCommand"
   }
 }
 
-function ScpToRemote {
+function CopyToRemote {
   param(
     [Parameter(Mandatory)][string]$LocalPath,
     [Parameter(Mandatory)][string]$RemotePath
   )
   RequireFile -Path $LocalPath
-  $k = ""
+  $scpArgs = @("-P", "$Port")
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
     RequireFile -Path $KeyPath
-    $k = "-i `"$KeyPath`""
+    $scpArgs += @("-i", $KeyPath)
   }
-  & scp -P $Port $k "$LocalPath" "${User}@${HostName}:$RemotePath"
+  $scpArgs += @("$LocalPath", "${User}@${HostName}:$RemotePath")
+  & scp.exe @scpArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Falha no scp para $RemotePath"
   }
@@ -106,8 +113,11 @@ $KeyPath = ResolveKeyPath -InputKeyPath $KeyPath
 
 ExecGit @("status", "--porcelain") | Out-Null
 $dirty = (& git status --porcelain 2>&1) -join "`n"
-if ($dirty.Trim().Length -gt 0) {
+if (!$AllowDirty -and $dirty.Trim().Length -gt 0) {
   throw "Existem alterações locais pendentes. Faça commit antes do deploy."
+}
+if ($AllowDirty -and $dirty.Trim().Length -gt 0) {
+  Write-Host "Aviso: AllowDirty ativo - deploy com working tree sujo." -ForegroundColor Yellow
 }
 
 $appPkgPath = Join-Path (Get-Location) "artifacts\suporte-ti\package.json"
@@ -156,15 +166,23 @@ $releaseDir = "$releasesDir/$version"
 $currentLink = "$RemoteBaseDir/current"
 $previousLink = "$RemoteBaseDir/previous"
 
-Ssh "mkdir -p $releasesDir"
-ScpToRemote -LocalPath $bundlePath -RemotePath "/tmp/$bundleName"
+$mkdirCmd = "mkdir -p $releasesDir"
+if ([string]::IsNullOrWhiteSpace($mkdirCmd)) {
+  throw "Comando remoto de criacao de releases ficou vazio. Verifique RemoteBaseDir."
+}
+Write-Host ">> remote base: $RemoteBaseDir"
+Write-Host ">> remote mkdir: $mkdirCmd"
+InvokeRemoteCommand $mkdirCmd
+CopyToRemote -LocalPath $bundlePath -RemotePath "/tmp/$bundleName"
 
-Ssh "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C $releaseDir; rm -f /tmp/$bundleName"
+InvokeRemoteCommand "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C $releaseDir; rm -f /tmp/$bundleName"
 
-Ssh "set -e; if [ -L $currentLink ]; then rm -f $previousLink; ln -s \$(readlink $currentLink) $previousLink; fi; rm -f $currentLink; ln -s $releaseDir $currentLink"
+$switchCmd = 'set -e; if [ -L "{0}" ]; then rm -f "{1}"; ln -s $(readlink "{0}") "{1}"; fi; rm -f "{0}"; ln -s "{2}" "{0}"' -f $currentLink, $previousLink, $releaseDir
+$serviceCmd = 'set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi'
+$healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >/dev/null; fi' -f $ApiHealthUrl
 
-Ssh "set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi"
-
-Ssh "set -e; if command -v curl >/dev/null 2>&1; then curl -fsS $ApiHealthUrl >/dev/null; fi"
+InvokeRemoteCommand $switchCmd
+InvokeRemoteCommand $serviceCmd
+InvokeRemoteCommand $healthCmd
 
 Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os serviços."

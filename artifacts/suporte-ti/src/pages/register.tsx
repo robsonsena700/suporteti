@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useLocation } from "wouter";
 import { useRegister } from "@workspace/api-client-react";
-import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,8 +18,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
 import { Eye, EyeOff } from "lucide-react";
 import { formatBrazilPhone, formatCpf, isValidBrazilMobile, isValidCpf, onlyDigits } from "@/lib/validators";
+import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 
 const registerSchema = z.object({
   name: z.string().min(2, "Nome é obrigatório"),
@@ -37,11 +38,6 @@ const registerSchema = z.object({
 });
 
 type RegisterForm = z.infer<typeof registerSchema>;
-
-const UFS = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
-  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
-];
 
 export default function Register() {
   const [, setLocation] = useLocation();
@@ -77,13 +73,26 @@ export default function Register() {
       return;
     }
 
+    const cached = getCachedMunicipalities(uf);
+    if (cached.length > 0) {
+      setMunicipalities(cached);
+    }
+
+    if (typeof navigator !== "undefined" && !navigator.onLine && cached.length > 0) {
+      const current = form.getValues("municipality");
+      if (current && !cached.includes(current)) {
+        form.setValue("municipality", "");
+      }
+      return;
+    }
+
     let cancelled = false;
     setIsLoadingMunicipalities(true);
 
-    customFetch<string[]>(`/api/ibge/ufs/${encodeURIComponent(uf)}/municipalities`)
+    fetchMunicipalitiesByUf(uf)
       .then((data) => {
         if (cancelled) return;
-        setMunicipalities(Array.isArray(data) ? data : []);
+        setMunicipalities(data);
         const current = form.getValues("municipality");
         if (current && !data.includes(current)) {
           form.setValue("municipality", "");
@@ -283,7 +292,7 @@ export default function Register() {
                   )}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="uf"
@@ -312,32 +321,16 @@ export default function Register() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Município</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        disabled={!uf || isLoadingMunicipalities || municipalityOptions.length === 0}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue
-                              placeholder={
-                                !uf
-                                  ? "Selecione a UF"
-                                  : isLoadingMunicipalities
-                                    ? "Carregando..."
-                                    : "Selecione"
-                              }
-                            />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {municipalityOptions.map((name) => (
-                            <SelectItem key={name} value={name}>
-                              {name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormControl>
+                        <MunicipalityCombobox
+                          uf={uf}
+                          value={field.value}
+                          options={municipalityOptions}
+                          loading={isLoadingMunicipalities}
+                          disabled={!uf || municipalityOptions.length === 0}
+                          onChange={field.onChange}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
