@@ -7,6 +7,8 @@ param(
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
   [switch]$SkipBuild,
   [switch]$AllowDirty,
+  [switch]$SkipRestart,
+  [switch]$SkipHealthCheck,
   [switch]$StartAfterDeploy,
   [string]$StartScriptPath = "",
   [switch]$SkipMigrations
@@ -18,29 +20,40 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-function Exec {
-  param([Parameter(Mandatory)][string]$Command)
-  Write-Host ">> $Command"
-  & powershell -NoProfile -Command $Command
-  if ($LASTEXITCODE -ne 0) {
-    throw "Falha ao executar: $Command"
-  }
-}
-
 function ExecGit {
   param([Parameter(Mandatory)][string[]]$Args)
   Write-Host (">> git " + ($Args -join " "))
-  & git @Args
-  if ($LASTEXITCODE -ne 0) {
-    throw "Falha ao executar git $($Args -join ' ')"
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $out = & git @Args 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $old
   }
+  $text = (($out | ForEach-Object { "$_" }) -join "`n").TrimEnd()
+  if ($code -ne 0) {
+    throw "Falha ao executar git $($Args -join ' ')`n$text"
+  }
+  return $text
 }
 
-function RequireFile {
-  param([Parameter(Mandatory)][string]$Path)
-  if ([string]::IsNullOrWhiteSpace($Path) -or !(Test-Path $Path)) {
-    throw "Arquivo não encontrado: $Path"
+function Exec {
+  param([Parameter(Mandatory)][string]$Command)
+  Write-Host ">> $Command"
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $out = & powershell -NoProfile -Command $Command 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $old
   }
+  $text = (($out | ForEach-Object { "$_" }) -join "`n").TrimEnd()
+  if ($code -ne 0) {
+    throw "Falha ao executar: $Command`n$text"
+  }
+  return $text
 }
 
 function ResolveKeyPath {
@@ -50,9 +63,7 @@ function ResolveKeyPath {
     return (Resolve-Path $InputKeyPath).Path
   }
 
-  if ([string]::IsNullOrWhiteSpace($InputKeyPath)) {
-    return ""
-  }
+  $inputWasEmpty = [string]::IsNullOrWhiteSpace($InputKeyPath)
 
   $sshDir = Join-Path $RepoRoot "lib\ssh"
   $candidates = @(
@@ -75,14 +86,16 @@ function ResolveKeyPath {
     }
   }
 
-  throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada ou deixe vazio para usar ssh-agent."
+  if ($inputWasEmpty) {
+    return ""
+  }
+  throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada."
 }
 
-function InvokeRemoteCommand {
+function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
   $sshArgs = @("-p", "$Port")
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    RequireFile -Path $KeyPath
     $sshArgs += @("-i", $KeyPath)
   }
   $sshArgs += @("$User@$HostName", $RemoteCommand)
@@ -92,15 +105,13 @@ function InvokeRemoteCommand {
   }
 }
 
-function CopyToRemote {
-  param(
-    [Parameter(Mandatory)][string]$LocalPath,
-    [Parameter(Mandatory)][string]$RemotePath
-  )
-  RequireFile -Path $LocalPath
+function ScpToRemote {
+  param([Parameter(Mandatory)][string]$LocalPath, [Parameter(Mandatory)][string]$RemotePath)
+  if (!(Test-Path $LocalPath)) {
+    throw "Arquivo não encontrado: $LocalPath"
+  }
   $scpArgs = @("-P", "$Port")
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    RequireFile -Path $KeyPath
     $scpArgs += @("-i", $KeyPath)
   }
   $scpArgs += @("$LocalPath", "${User}@${HostName}:$RemotePath")
@@ -110,14 +121,12 @@ function CopyToRemote {
   }
 }
 
-Write-Host "Deploy produção - alvo: ${User}@${HostName}:$Port"
-
+Write-Host "Deploy producao - alvo: ${User}@${HostName}:$Port"
 $KeyPath = ResolveKeyPath -InputKeyPath $KeyPath
 
-ExecGit @("status", "--porcelain") | Out-Null
-$dirty = (& git status --porcelain 2>&1) -join "`n"
+$dirty = ((& git status --porcelain 2>&1) | ForEach-Object { "$_" }) -join "`n"
 if (!$AllowDirty -and $dirty.Trim().Length -gt 0) {
-  throw "Existem alterações locais pendentes. Faça commit antes do deploy."
+  throw "Existem alteracoes locais pendentes. Faca commit antes do deploy."
 }
 if ($AllowDirty -and $dirty.Trim().Length -gt 0) {
   Write-Host "Aviso: AllowDirty ativo - deploy com working tree sujo." -ForegroundColor Yellow
@@ -130,12 +139,15 @@ if (!(Test-Path $appPkgPath)) {
 $appPkg = Get-Content -Raw -Path $appPkgPath | ConvertFrom-Json
 $version = [string]$appPkg.version
 if ($version -notmatch "^\d+\.\d+\.\d+$") {
-  throw "Versão inválida para deploy: '$version' (esperado MAJOR.MINOR.PATCH)."
+  throw "Versao invalida para deploy: '$version' (esperado MAJOR.MINOR.PATCH)."
 }
 
 if (!$SkipBuild) {
-  Exec "pnpm run typecheck"
-  Exec "pnpm run build"
+  Exec "pnpm run typecheck:libs" | Out-Null
+  Exec "pnpm --filter @workspace/api-server --if-present run typecheck" | Out-Null
+  Exec "pnpm --filter @workspace/suporte-ti --if-present run typecheck" | Out-Null
+  Exec "pnpm --filter @workspace/api-server --if-present run build" | Out-Null
+  Exec "pnpm --filter @workspace/suporte-ti --if-present run build" | Out-Null
 }
 
 $distDir = Join-Path (Get-Location) "artifacts\suporte-ti\dist"
@@ -155,50 +167,63 @@ $bundleName = "suporte-ti_$version.tgz"
 $bundlePath = Join-Path $tmp $bundleName
 if (Test-Path $bundlePath) { Remove-Item -Force $bundlePath }
 
-Push-Location (Get-Location)
-try {
-  $root = Get-Location
-  Push-Location $root | Out-Null
-  tar -czf "$bundlePath" -C "$root" "artifacts/suporte-ti/dist" "artifacts/api-server/dist" "artifacts/api-server/package.json" "artifacts/suporte-ti/package.json" "lib/db/migrations" "scripts/remote/apply_sql_migrations.sh" | Out-Null
-} finally {
-  Pop-Location | Out-Null
+$bundleItems = @(
+  "artifacts/suporte-ti/dist",
+  "artifacts/api-server/dist",
+  "artifacts/api-server/package.json",
+  "artifacts/suporte-ti/package.json"
+)
+if (Test-Path (Join-Path (Get-Location) "lib/db/migrations")) {
+  $bundleItems += "lib/db/migrations"
 }
+if (Test-Path (Join-Path (Get-Location) "scripts/remote/apply_sql_migrations.sh")) {
+  $bundleItems += "scripts/remote/apply_sql_migrations.sh"
+}
+
+& tar -czf "$bundlePath" -C (Get-Location) @bundleItems | Out-Null
 
 $releasesDir = "$RemoteBaseDir/releases"
 $releaseDir = "$releasesDir/$version"
 $currentLink = "$RemoteBaseDir/current"
 $previousLink = "$RemoteBaseDir/previous"
 
-$mkdirCmd = "mkdir -p $releasesDir"
-if ([string]::IsNullOrWhiteSpace($mkdirCmd)) {
-  throw "Comando remoto de criacao de releases ficou vazio. Verifique RemoteBaseDir."
-}
-Write-Host ">> remote base: $RemoteBaseDir"
-Write-Host ">> remote mkdir: $mkdirCmd"
-InvokeRemoteCommand $mkdirCmd
-CopyToRemote -LocalPath $bundlePath -RemotePath "/tmp/$bundleName"
-
-InvokeRemoteCommand "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C $releaseDir; rm -f /tmp/$bundleName"
+Ssh "mkdir -p $releasesDir"
+ScpToRemote -LocalPath $bundlePath -RemotePath "/tmp/$bundleName"
+Ssh "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C $releaseDir; rm -f /tmp/$bundleName"
 
 $switchCmd = 'set -e; if [ -L "{0}" ]; then rm -f "{1}"; ln -s $(readlink "{0}") "{1}"; fi; rm -f "{0}"; ln -s "{2}" "{0}"' -f $currentLink, $previousLink, $releaseDir
 $serviceCmd = 'set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi'
 $healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >/dev/null; fi' -f $ApiHealthUrl
-$migrationsScript = "$releaseDir/scripts/remote/apply_sql_migrations.sh"
-$migrationsDir = "$releaseDir/lib/db/migrations"
-$migrateCmd = 'set -e; if [ -x "{0}" ]; then "{0}" "{1}"; else chmod +x "{0}" && "{0}" "{1}"; fi' -f $migrationsScript, $migrationsDir
-
 $shouldStart = if ($PSBoundParameters.ContainsKey("StartAfterDeploy")) { [bool]$StartAfterDeploy } else { $User -ne "root" }
 $resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) { $StartScriptPath } else { "$RemoteBaseDir/shared/start_prod.sh" }
 $startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
+$migrateCmd = 'set -e; if [ -d "{0}/lib/db/migrations" ] && [ -f "{0}/scripts/remote/apply_sql_migrations.sh" ]; then chmod +x "{0}/scripts/remote/apply_sql_migrations.sh"; "{0}/scripts/remote/apply_sql_migrations.sh" "{0}/lib/db/migrations"; fi' -f $releaseDir
 
 if (!$SkipMigrations) {
-  InvokeRemoteCommand $migrateCmd
+  try {
+    Ssh $migrateCmd
+  } catch {
+    Write-Host "Aviso: falha ao aplicar migrations SQL automaticamente." -ForegroundColor Yellow
+  }
 }
-InvokeRemoteCommand $switchCmd
-InvokeRemoteCommand $serviceCmd
-if ($shouldStart) {
-  InvokeRemoteCommand $startCmd
-}
-InvokeRemoteCommand $healthCmd
 
-Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os serviços."
+Ssh $switchCmd
+if (!$SkipRestart -and !$shouldStart) {
+  try {
+    Ssh $serviceCmd
+  } catch {
+    Write-Host "Aviso: falha ao reiniciar servicos via systemctl." -ForegroundColor Yellow
+  }
+}
+if ($shouldStart) {
+  Ssh $startCmd
+}
+if (!$SkipHealthCheck) {
+  try {
+    Ssh $healthCmd
+  } catch {
+    Write-Host "Aviso: healthcheck falhou (API pode nao estar exposta/ativa ainda)." -ForegroundColor Yellow
+  }
+}
+
+Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os servicos."

@@ -15,8 +15,15 @@ Set-Location $RepoRoot
 function ExecGit {
   param([Parameter(Mandatory)][string[]]$Args)
   Write-Host (">> git " + ($Args -join " "))
-  & git @Args
-  if ($LASTEXITCODE -ne 0) {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & git @Args 2>&1 | Out-Null
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $old
+  }
+  if ($code -ne 0) {
     throw "Falha ao executar git $($Args -join ' ')"
   }
 }
@@ -26,26 +33,17 @@ function HasGhCli {
   return $null -ne $cmd
 }
 
-ExecGit @("fetch", $Remote, "--prune") | Out-Null
+ExecGit @("fetch", $Remote, "--prune")
 
 if ([string]::IsNullOrWhiteSpace($Head)) {
   $Head = (& git branch --show-current).Trim()
 }
 
-if (![string]::IsNullOrWhiteSpace($Title)) {
-  $prTitle = $Title
-} else {
-  $prTitle = "Deploy: $Head -> $Base"
-}
-
-if (![string]::IsNullOrWhiteSpace($Body)) {
-  $prBody = $Body
-} else {
-  $prBody = "Pull Request gerado automaticamente para publicação."
-}
+$prTitle = if (![string]::IsNullOrWhiteSpace($Title)) { $Title } else { "Deploy: $Head -> $Base" }
+$prBody = if (![string]::IsNullOrWhiteSpace($Body)) { $Body } else { "Pull Request gerado automaticamente para publicação." }
 
 if (!(HasGhCli)) {
-  Write-Host "GitHub CLI (gh) não encontrado."
+  Write-Host "GitHub CLI (gh) nao encontrado."
   Write-Host "Crie o PR manualmente no GitHub:"
   Write-Host "Base: $Base"
   Write-Host "Head: $Head"
