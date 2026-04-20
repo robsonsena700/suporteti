@@ -197,7 +197,7 @@ $healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >
 $shouldStart = if ($PSBoundParameters.ContainsKey("StartAfterDeploy")) { [bool]$StartAfterDeploy } else { $User -ne "root" }
 $resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) { $StartScriptPath } else { "$RemoteBaseDir/shared/start_prod.sh" }
 $startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
-$migrateCmd = 'set -e; if [ -d "{0}/lib/db/migrations" ] && [ -f "{0}/scripts/remote/apply_sql_migrations.sh" ]; then chmod +x "{0}/scripts/remote/apply_sql_migrations.sh"; "{0}/scripts/remote/apply_sql_migrations.sh" "{0}/lib/db/migrations"; fi' -f $releaseDir
+$migrateCmd = 'set -e; if [ -d "{0}/lib/db/migrations" ] && [ -f "{0}/scripts/remote/apply_sql_migrations.sh" ]; then sed -i ''s/\r$//'' "{0}/scripts/remote/apply_sql_migrations.sh"; chmod +x "{0}/scripts/remote/apply_sql_migrations.sh"; "{0}/scripts/remote/apply_sql_migrations.sh" "{0}/lib/db/migrations"; fi' -f $releaseDir
 
 if (!$SkipMigrations) {
   try {
