@@ -19,6 +19,7 @@ const Reports = lazy(() => import("@/pages/reports"));
 const Settings = lazy(() => import("@/pages/settings"));
 const Profile = lazy(() => import("@/pages/profile"));
 const Chat = lazy(() => import("@/pages/chat"));
+const PriorityPreview = lazy(() => import("@/pages/priority-preview"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 const queryClient = new QueryClient();
@@ -78,6 +79,7 @@ function Router() {
           <ProtectedRoute path="/relatorios" component={Reports} adminOnly />
           <ProtectedRoute path="/configuracoes" component={Settings} />
           <ProtectedRoute path="/perfil" component={Profile} />
+          <Route path="/preview/prioridades" component={PriorityPreview} />
   
           <Route component={NotFound} />
         </Switch>

@@ -28,6 +28,11 @@ function parseTicketType(value: unknown): "SOFTWARE" | "HARDWARE" | null {
   return null;
 }
 
+function parseTicketStatus(value: unknown): "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" | null {
+  if (value === "OPEN" || value === "IN_PROGRESS" || value === "RESOLVED" || value === "CLOSED") return value;
+  return null;
+}
+
 function parseTicketPriority(value: unknown): "LOW" | "MEDIUM" | "HIGH" | null {
   if (value === "LOW" || value === "MEDIUM" || value === "HIGH") return value;
   return null;
@@ -80,9 +85,39 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     }
   }
 
-  const baseWhere = whereClauses.length > 0 ? and(...whereClauses) : undefined;
+  const parsedStatus = status != null ? parseTicketStatus(status) : null;
+  if (status != null && !parsedStatus) {
+    res.status(400).json({ error: "Status inválido" });
+    return;
+  }
+
+  const parsedType = type != null ? parseTicketType(type) : null;
+  if (type != null && !parsedType) {
+    res.status(400).json({ error: "Tipo inválido" });
+    return;
+  }
+
+  const parsedPriority = priority != null ? parseTicketPriority(priority) : null;
+  if (priority != null && !parsedPriority) {
+    res.status(400).json({ error: "Prioridade inválida" });
+    return;
+  }
+
+  const parsedUf = uf != null ? normalizeText(uf)?.toUpperCase() ?? null : null;
+  const parsedMunicipality = municipality != null ? normalizeText(municipality) : null;
+
+  const dbWhereClauses: any[] = [];
+  if (whereClauses.length > 0) dbWhereClauses.push(and(...whereClauses));
+  if (parsedStatus) dbWhereClauses.push(eq(ticketsTable.status, parsedStatus));
+  if (parsedType) dbWhereClauses.push(eq(ticketsTable.type, parsedType));
+  if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
+  if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));
+  if (parsedMunicipality) dbWhereClauses.push(eq(ticketsTable.municipality, parsedMunicipality));
+
+  const finalWhere = dbWhereClauses.length > 0 ? and(...dbWhereClauses) : undefined;
+
   const allTickets = await db.query.ticketsTable.findMany({
-    where: baseWhere,
+    where: finalWhere,
     with: {
       createdBy: true,
       assignedTo: true,
@@ -92,16 +127,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     },
     orderBy: [desc(ticketsTable.createdAt)],
   });
-
-  let filtered = allTickets;
-
-  if (status) filtered = filtered.filter(t => t.status === status);
-  if (type) filtered = filtered.filter(t => t.type === type);
-  if (priority) filtered = filtered.filter(t => t.priority === priority);
-  if (uf) filtered = filtered.filter(t => t.uf === uf);
-  if (municipality) filtered = filtered.filter(t => t.municipality === municipality);
-
-  const result = filtered.map(t => ({
+  const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
     description: t.description,

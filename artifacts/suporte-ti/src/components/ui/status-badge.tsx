@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { TicketStatus, TicketPriority, TicketType } from "@workspace/api-client-react";
 
 const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" | "success" }> = {
@@ -8,10 +9,10 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   [TicketStatus.CLOSED]: { label: "Fechado", variant: "outline" },
 };
 
-const priorityConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  [TicketPriority.LOW]: { label: "Baixa", variant: "outline" },
-  [TicketPriority.MEDIUM]: { label: "Média", variant: "secondary" },
-  [TicketPriority.HIGH]: { label: "Alta", variant: "destructive" },
+const priorityConfig: Record<string, { label: string; className: string }> = {
+  [TicketPriority.LOW]: { label: "Baixa", className: "border-transparent bg-[var(--priority-low-bg)] text-[var(--priority-low-fg)]" },
+  [TicketPriority.MEDIUM]: { label: "Média", className: "border-transparent bg-[var(--priority-medium-bg)] text-[var(--priority-medium-fg)]" },
+  [TicketPriority.HIGH]: { label: "Alta", className: "border-transparent bg-[var(--priority-high-bg)] text-[var(--priority-high-fg)]" },
 };
 
 const typeConfig: Record<string, { label: string }> = {
@@ -29,9 +30,9 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function PriorityBadge({ priority }: { priority: string }) {
-  const config = priorityConfig[priority] || { label: priority, variant: "outline" };
+  const config = priorityConfig[priority] || { label: priority, className: "text-foreground border [border-color:var(--badge-outline)]" };
   return (
-    <Badge variant={config.variant as any} className="font-medium">
+    <Badge variant="outline" className={cn("font-medium", config.className)}>
       {config.label}
     </Badge>
   );
