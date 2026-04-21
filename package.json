@@ -13,6 +13,8 @@
     "test:chat:load": "pnpm --filter @workspace/scripts exec tsx ./src/loadtest-chat-endpoints.ts",
     "test:chat:integration": "node ./scripts/test-chat-permissions-integration.cjs",
     "test:tickets:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-tickets-unit.ts",
+    "test:a11y:contrast": "pnpm --filter @workspace/scripts exec tsx ./src/test-priority-contrast-unit.ts",
+    "test:a11y:lighthouse": "powershell -ExecutionPolicy Bypass -File ./scripts/test-a11y-lighthouse.ps1",
     "test:tickets:auto-assign:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-auto-assign-unit.ts",
     "test:tickets:reopen-policy:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-reopen-policy-unit.ts",
     "test:tickets:reassign-policy:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-reassign-policy-unit.ts",

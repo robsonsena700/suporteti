@@ -129,6 +129,15 @@
   --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
   --destructive-border: hsl(var(--destructive));
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  --priority-low-bg: #2BD1AB;
+  --priority-low-fg: #0b1220;
+  --priority-medium-bg: #FCBB36;
+  --priority-medium-fg: #0b1220;
+  --priority-high-bg: #FF6C6C;
+  --priority-high-fg: #0b1220;
+  --priority-critical-bg: #1b0a0a;
+  --priority-critical-fg: #f8fafc;
 }
 
 .dark {
@@ -172,6 +181,15 @@
   --chart-3: 160 84% 39%;
   --chart-4: 43 74% 66%;
   --chart-5: 0 84% 60%;
+
+  --priority-low-bg: #2BD1AB;
+  --priority-low-fg: #0b1220;
+  --priority-medium-bg: #FCBB36;
+  --priority-medium-fg: #0b1220;
+  --priority-high-bg: #FF6C6C;
+  --priority-high-fg: #0b1220;
+  --priority-critical-bg: #1b0a0a;
+  --priority-critical-fg: #f8fafc;
 }
 
 @layer base {

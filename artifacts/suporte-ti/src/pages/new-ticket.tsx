@@ -387,19 +387,19 @@ export default function NewTicket() {
                       <SelectContent>
                         <SelectItem value={TicketPriority.LOW}>
                           <span className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-green-500 inline-block" />
+                            <span className="h-2 w-2 rounded-full bg-[var(--priority-low-bg)] inline-block" />
                             Baixa
                           </span>
                         </SelectItem>
                         <SelectItem value={TicketPriority.MEDIUM}>
                           <span className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />
+                            <span className="h-2 w-2 rounded-full bg-[var(--priority-medium-bg)] inline-block" />
                             Média
                           </span>
                         </SelectItem>
                         <SelectItem value={TicketPriority.HIGH}>
                           <span className="flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-red-500 inline-block" />
+                            <span className="h-2 w-2 rounded-full bg-[var(--priority-high-bg)] inline-block" />
                             Alta
                           </span>
                         </SelectItem>

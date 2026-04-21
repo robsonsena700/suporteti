@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Image as ImageIcon, PlusCircle } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -26,10 +27,20 @@ const UFS = [
   "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
 ];
 const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
+const TYPE_TAB_KEY = "tickets_type_tab";
+
+function getInitialTicketTypeTab(): TicketType {
+  if (typeof window === "undefined") return TicketType.SOFTWARE;
+  const raw = window.localStorage.getItem(TYPE_TAB_KEY);
+  if (raw === TicketType.SOFTWARE || raw === TicketType.HARDWARE) return raw as TicketType;
+  return TicketType.SOFTWARE;
+}
 
 export default function Tickets() {
   const { user } = useAuth();
-  const [filters, setFilters] = useState<ListTicketsParams>({});
+  const initialTypeTab = getInitialTicketTypeTab();
+  const [typeTab, setTypeTab] = useState<TicketType>(initialTypeTab);
+  const [filters, setFilters] = useState<ListTicketsParams>({ type: initialTypeTab });
   const [userFilter, setUserFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [responsibleFilter, setResponsibleFilter] = useState("");
@@ -76,6 +87,32 @@ export default function Tickets() {
         </Button>
       </div>
 
+      <div className="flex items-center justify-between gap-3">
+        <Tabs
+          value={typeTab}
+          onValueChange={(v) => {
+            const next = v as TicketType;
+            setTypeTab(next);
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem(TYPE_TAB_KEY, next);
+            }
+            setFilters((f) => ({ ...f, type: next }));
+          }}
+        >
+          <TabsList className="h-11 p-1">
+            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-4">
+              Software
+            </TabsTrigger>
+            <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-4">
+              Hardware
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="text-xs text-muted-foreground">
+          {typeTab === TicketType.SOFTWARE ? "Exibindo chamados de Software" : "Exibindo chamados de Hardware"}
+        </div>
+      </div>
+
       <Card>
         <CardContent className="p-4">
           <Accordion
@@ -103,7 +140,7 @@ export default function Tickets() {
               </AccordionTrigger>
               <AccordionContent className="pt-2">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Status</label>
                       <Select
@@ -119,23 +156,6 @@ export default function Tickets() {
                           <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
                           <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
                           <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Tipo</label>
-                      <Select
-                        value={filters.type || "all"}
-                        onValueChange={(v) => setFilters(f => ({ ...f, type: v === "all" ? undefined : v as TicketType }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Todos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todos</SelectItem>
-                          <SelectItem value={TicketType.SOFTWARE}>Software</SelectItem>
-                          <SelectItem value={TicketType.HARDWARE}>Hardware</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -246,7 +266,7 @@ export default function Tickets() {
               Nenhum chamado encontrado com os filtros atuais.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div key={typeTab} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
               {visibleTickets.map((ticket) => (
                 <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
                   <div className="rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors">
