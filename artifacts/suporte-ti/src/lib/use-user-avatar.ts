@@ -15,6 +15,14 @@ export function useUserAvatarDataUrl(userId: number | null | undefined) {
         return `data:${payload.mimeType};base64,${payload.data}`;
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
+        if (
+          typeof e === "object"
+          && e
+          && "name" in e
+          && (e as any).name === "AbortError"
+        ) {
+          return null;
+        }
         throw e;
       }
     },

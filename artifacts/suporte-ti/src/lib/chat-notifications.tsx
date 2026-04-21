@@ -88,6 +88,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   const metricsRef = useRef({ groupPolls: 0, groupAvgMs: 0, dmPolls: 0, dmAvgMs: 0 });
   const streamMetricsRef = useRef({ events: 0, avgLatencyMs: 0 });
   const [streamConnected, setStreamConnected] = useState(false);
+  const enableStream = import.meta.env.PROD || localStorage.getItem("ti_chat_stream") === "1";
 
   const isOnChat = location === "/chat";
   const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
@@ -367,6 +368,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   }, [token, canAccessChat, pollGroup, pollDMs, streamConnected]);
 
   useEffect(() => {
+    if (!enableStream) return;
     if (!token || !canAccessChat) return;
     let stopped = false;
     let backoffMs = 1000;
@@ -392,7 +394,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
     };
-  }, [token, canAccessChat, connectStream]);
+  }, [enableStream, token, canAccessChat, connectStream]);
 
   useEffect(() => {
     if (!token || !canAccessChat) return;
