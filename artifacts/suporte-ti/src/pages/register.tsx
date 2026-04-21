@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link, useLocation } from "wouter";
 import { useRegister } from "@workspace/api-client-react";
-import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,13 +18,26 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
 import { Eye, EyeOff } from "lucide-react";
 import { formatBrazilPhone, formatCpf, isValidBrazilMobile, isValidCpf, onlyDigits } from "@/lib/validators";
+import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 
 const registerSchema = z.object({
   name: z.string().min(2, "Nome é obrigatório"),
   email: z.string().email("E-mail inválido"),
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres"),
+  birthDate: z
+    .string()
+    .min(1, "Data de nascimento é obrigatória")
+    .refine((value) => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      const min = new Date("1900-01-01T00:00:00.000Z");
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      return date >= min && date <= today;
+    }, "Data de nascimento inválida"),
   cpf: z.string().refine(isValidCpf, "CPF inválido"),
   establishment: z.string().min(2, "Estabelecimento/Unidade de Saúde é obrigatório"),
   contactPhone: z.string().refine(isValidBrazilMobile, "Contato inválido"),
@@ -37,11 +49,6 @@ const registerSchema = z.object({
 });
 
 type RegisterForm = z.infer<typeof registerSchema>;
-
-const UFS = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
-  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
-];
 
 export default function Register() {
   const [, setLocation] = useLocation();
@@ -57,6 +64,7 @@ export default function Register() {
       name: "",
       email: "",
       password: "",
+      birthDate: "",
       cpf: "",
       establishment: "",
       contactPhone: "+55 ",
@@ -77,13 +85,26 @@ export default function Register() {
       return;
     }
 
+    const cached = getCachedMunicipalities(uf);
+    if (cached.length > 0) {
+      setMunicipalities(cached);
+    }
+
+    if (typeof navigator !== "undefined" && !navigator.onLine && cached.length > 0) {
+      const current = form.getValues("municipality");
+      if (current && !cached.includes(current)) {
+        form.setValue("municipality", "");
+      }
+      return;
+    }
+
     let cancelled = false;
     setIsLoadingMunicipalities(true);
 
-    customFetch<string[]>(`/api/ibge/ufs/${encodeURIComponent(uf)}/municipalities`)
+    fetchMunicipalitiesByUf(uf)
       .then((data) => {
         if (cancelled) return;
-        setMunicipalities(Array.isArray(data) ? data : []);
+        setMunicipalities(data);
         const current = form.getValues("municipality");
         if (current && !data.includes(current)) {
           form.setValue("municipality", "");
@@ -229,6 +250,19 @@ export default function Register() {
               />
               <FormField
                 control={form.control}
+                name="birthDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Data de nascimento</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
                 name="establishment"
                 render={({ field }) => (
                   <FormItem>
@@ -283,7 +317,7 @@ export default function Register() {
                   )}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="uf"
@@ -312,32 +346,16 @@ export default function Register() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Município</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        disabled={!uf || isLoadingMunicipalities || municipalityOptions.length === 0}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue
-                              placeholder={
-                                !uf
-                                  ? "Selecione a UF"
-                                  : isLoadingMunicipalities
-                                    ? "Carregando..."
-                                    : "Selecione"
-                              }
-                            />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {municipalityOptions.map((name) => (
-                            <SelectItem key={name} value={name}>
-                              {name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormControl>
+                        <MunicipalityCombobox
+                          uf={uf}
+                          value={field.value}
+                          options={municipalityOptions}
+                          loading={isLoadingMunicipalities}
+                          disabled={!uf || municipalityOptions.length === 0}
+                          onChange={field.onChange}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}

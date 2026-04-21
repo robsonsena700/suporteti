@@ -8,7 +8,10 @@ param(
   [switch]$SkipBuild,
   [switch]$AllowDirty,
   [switch]$SkipRestart,
-  [switch]$SkipHealthCheck
+  [switch]$SkipHealthCheck,
+  [switch]$StartAfterDeploy,
+  [string]$StartScriptPath = "",
+  [switch]$SkipMigrations
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +63,8 @@ function ResolveKeyPath {
     return (Resolve-Path $InputKeyPath).Path
   }
 
+  $inputWasEmpty = [string]::IsNullOrWhiteSpace($InputKeyPath)
+
   $sshDir = Join-Path $RepoRoot "lib\ssh"
   $candidates = @(
     (Join-Path $sshDir "id_rsa"),
@@ -81,6 +86,9 @@ function ResolveKeyPath {
     }
   }
 
+  if ($inputWasEmpty) {
+    return ""
+  }
   throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada."
 }
 
@@ -159,7 +167,20 @@ $bundleName = "suporte-ti_$version.tgz"
 $bundlePath = Join-Path $tmp $bundleName
 if (Test-Path $bundlePath) { Remove-Item -Force $bundlePath }
 
-tar -czf "$bundlePath" -C (Get-Location) "artifacts/suporte-ti/dist" "artifacts/api-server/dist" "artifacts/api-server/package.json" "artifacts/suporte-ti/package.json" | Out-Null
+$bundleItems = @(
+  "artifacts/suporte-ti/dist",
+  "artifacts/api-server/dist",
+  "artifacts/api-server/package.json",
+  "artifacts/suporte-ti/package.json"
+)
+if (Test-Path (Join-Path (Get-Location) "lib/db/migrations")) {
+  $bundleItems += "lib/db/migrations"
+}
+if (Test-Path (Join-Path (Get-Location) "scripts/remote/apply_sql_migrations.sh")) {
+  $bundleItems += "scripts/remote/apply_sql_migrations.sh"
+}
+
+& tar -czf "$bundlePath" -C (Get-Location) @bundleItems | Out-Null
 
 $releasesDir = "$RemoteBaseDir/releases"
 $releaseDir = "$releasesDir/$version"
@@ -173,14 +194,29 @@ Ssh "set -e; mkdir -p $releaseDir; tar -xzf /tmp/$bundleName -C $releaseDir; rm 
 $switchCmd = 'set -e; if [ -L "{0}" ]; then rm -f "{1}"; ln -s $(readlink "{0}") "{1}"; fi; rm -f "{0}"; ln -s "{2}" "{0}"' -f $currentLink, $previousLink, $releaseDir
 $serviceCmd = 'set -e; if command -v systemctl >/dev/null 2>&1; then systemctl restart suporte-ti-api || true; systemctl restart suporte-ti-web || true; fi'
 $healthCmd = 'set -e; if command -v curl >/dev/null 2>&1; then curl -fsS "{0}" >/dev/null; fi' -f $ApiHealthUrl
+$shouldStart = if ($PSBoundParameters.ContainsKey("StartAfterDeploy")) { [bool]$StartAfterDeploy } else { $User -ne "root" }
+$resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) { $StartScriptPath } else { "$RemoteBaseDir/shared/start_prod.sh" }
+$startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
+$migrateCmd = 'set -e; if [ -d "{0}/lib/db/migrations" ] && [ -f "{0}/scripts/remote/apply_sql_migrations.sh" ]; then sed -i ''s/\r$//'' "{0}/scripts/remote/apply_sql_migrations.sh"; chmod +x "{0}/scripts/remote/apply_sql_migrations.sh"; "{0}/scripts/remote/apply_sql_migrations.sh" "{0}/lib/db/migrations"; fi' -f $releaseDir
+
+if (!$SkipMigrations) {
+  try {
+    Ssh $migrateCmd
+  } catch {
+    Write-Host "Aviso: falha ao aplicar migrations SQL automaticamente." -ForegroundColor Yellow
+  }
+}
 
 Ssh $switchCmd
-if (!$SkipRestart) {
+if (!$SkipRestart -and !$shouldStart) {
   try {
     Ssh $serviceCmd
   } catch {
     Write-Host "Aviso: falha ao reiniciar servicos via systemctl." -ForegroundColor Yellow
   }
+}
+if ($shouldStart) {
+  Ssh $startCmd
 }
 if (!$SkipHealthCheck) {
   try {

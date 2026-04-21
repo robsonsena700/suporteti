@@ -8,8 +8,11 @@ import ratingsRouter from "./ratings";
 import reportsRouter from "./reports";
 import chatRouter from "./chat";
 import directMessagesRouter from "./direct-messages";
+import chatAttachmentsRouter from "./chat-attachments";
 import ticketAttachmentsRouter from "./ticket-attachments";
 import ibgeRouter from "./ibge";
+import establishmentsRouter from "./establishments";
+import ticketAuditRouter from "./ticket-audit";
 
 const router: IRouter = Router();
 
@@ -23,6 +26,9 @@ router.use(ratingsRouter);
 router.use(reportsRouter);
 router.use(chatRouter);
 router.use(directMessagesRouter);
+router.use(chatAttachmentsRouter);
 router.use(ibgeRouter);
+router.use(establishmentsRouter);
+router.use(ticketAuditRouter);
 
 export default router;

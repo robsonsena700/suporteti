@@ -49,6 +49,8 @@ export default function Login() {
           login(response.token);
           if (response.user.status === "PENDING") {
             setLocation("/pendente");
+          } else if (!response.user.birthDate) {
+            setLocation("/perfil");
           } else {
             setLocation("/dashboard");
           }
@@ -133,6 +135,11 @@ export default function Login() {
             <Link href="/registro" className="text-primary font-medium hover:underline">
               Solicite acesso
             </Link>
+          </div>
+          <div className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <span>Versão {__APP_VERSION__}</span>
+            <span>•</span>
+            <span>{__APP_ENV__ === "production" ? "Produção" : "Desenvolvimento"}</span>
           </div>
         </CardContent>
       </Card>

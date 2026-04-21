@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, pgEnum, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, pgEnum, boolean, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -10,6 +10,7 @@ export const usersTable = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   role: userRoleEnum("role").notNull().default("USER"),
   status: userStatusEnum("status").notNull().default("PENDING"),
   cpf: text("cpf").unique(),
@@ -19,9 +20,13 @@ export const usersTable = pgTable("users", {
   prefersTelegram: boolean("prefers_telegram").notNull().default(false),
   termsAccepted: boolean("terms_accepted").notNull().default(false),
   termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
+  birthDate: date("birth_date", { mode: "date" }),
   uf: text("uf").notNull(),
+  avatarMimeType: text("avatar_mime_type"),
+  avatarData: text("avatar_data"),
   municipality: text("municipality").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

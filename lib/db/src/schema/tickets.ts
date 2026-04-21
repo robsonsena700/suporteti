@@ -17,6 +17,7 @@ export const ticketsTable = pgTable("tickets", {
   priority: ticketPriorityEnum("priority").notNull(),
   uf: text("uf").notNull(),
   municipality: text("municipality").notNull(),
+  establishment: text("establishment"),
   createdById: integer("created_by_id").notNull().references(() => usersTable.id),
   assignedToId: integer("assigned_to_id").references(() => usersTable.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -21,6 +21,7 @@ export interface RegisterBody {
   name: string;
   email: string;
   password: string;
+  birthDate: string;
   cpf: string;
   establishment: string;
   contactPhone: string;
@@ -70,9 +71,13 @@ export interface User {
   termsAccepted: boolean;
   /** @nullable */
   termsAcceptedAt?: string | null;
+  /** @nullable */
+  birthDate?: string | null;
   uf: string;
   municipality: string;
   createdAt: string;
+  /** @nullable */
+  lastLoginAt?: string | null;
 }
 
 export interface AuthResponse {
@@ -89,6 +94,7 @@ export interface UpdateUserBody {
   prefersTelegram?: boolean;
   uf?: string;
   municipality?: string;
+  birthDate?: string;
 }
 
 export type ApproveUserBodyRole =
@@ -151,10 +157,15 @@ export interface Ticket {
   title: string;
   description: string;
   type: TicketType;
+  /** @nullable */
+  hardwareSubtype?: string | null;
   status: TicketStatus;
   priority: TicketPriority;
   uf: string;
   municipality: string;
+  /** @nullable */
+  establishment?: string | null;
+  imageAttachmentsCount?: number;
   createdById: number;
   /** @nullable */
   assignedToId: number | null;
@@ -212,8 +223,11 @@ export const CreateTicketBodyPriority = {
 export interface CreateTicketBody {
   title: string;
   description: string;
+  /** @maxLength 255 */
+  establishment: string;
   type: CreateTicketBodyType;
   priority: CreateTicketBodyPriority;
+  hardwareSubtype?: string;
 }
 
 export type UpdateTicketBodyStatus =
@@ -244,6 +258,11 @@ export interface UpdateTicketBody {
 
 export interface AssignTicketBody {
   assignedToId: number;
+  /**
+   * @minLength 3
+   * @maxLength 500
+   */
+  reason: string;
 }
 
 export interface CreateMessageBody {

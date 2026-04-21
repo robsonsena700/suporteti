@@ -602,6 +602,9 @@ components:
           type: string
         password:
           type: string
+        birthDate:
+          type: string
+          format: date
         cpf:
           type: string
         establishment:
@@ -622,6 +625,7 @@ components:
         - name
         - email
         - password
+        - birthDate
         - cpf
         - establishment
         - contactPhone
@@ -682,12 +686,18 @@ components:
         termsAcceptedAt:
           type: ["string", "null"]
           format: date-time
+        birthDate:
+          type: ["string", "null"]
+          format: date
         uf:
           type: string
         municipality:
           type: string
         createdAt:
           type: string
+          format: date-time
+        lastLoginAt:
+          type: ["string", "null"]
           format: date-time
       required:
         - id
@@ -721,6 +731,9 @@ components:
           type: string
         municipality:
           type: string
+        birthDate:
+          type: string
+          format: date
 
     ApproveUserBody:
       type: object
@@ -744,6 +757,8 @@ components:
         type:
           type: string
           enum: [SOFTWARE, HARDWARE]
+        hardwareSubtype:
+          type: ["string", "null"]
         status:
           type: string
           enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
@@ -754,6 +769,10 @@ components:
           type: string
         municipality:
           type: string
+        establishment:
+          type: ["string", "null"]
+        imageAttachmentsCount:
+          type: integer
         createdById:
           type: integer
         assignedToId:
@@ -824,15 +843,21 @@ components:
           type: string
         description:
           type: string
+        establishment:
+          type: string
+          maxLength: 255
         type:
           type: string
           enum: [SOFTWARE, HARDWARE]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]
+        hardwareSubtype:
+          type: string
       required:
         - title
         - description
+        - establishment
         - type
         - priority
 
@@ -855,8 +880,13 @@ components:
       properties:
         assignedToId:
           type: integer
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
       required:
         - assignedToId
+        - reason
 
     # ─── Message ───
     Message:

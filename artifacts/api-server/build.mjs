@@ -119,6 +119,8 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     },
   });
 
+  // esbuild-plugin-pino may inline an absolute local build path for outputDir.
+  // Replace it with runtime __dirname so artifacts run on Linux/production.
   const entryPath = path.join(distDir, "index.mjs");
   const built = await readFile(entryPath, "utf8");
   const patched = built.replace(/const outputDir = \"[^\"]+\";/g, "const outputDir = globalThis.__dirname;");

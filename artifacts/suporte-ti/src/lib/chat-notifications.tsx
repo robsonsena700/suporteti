@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface ChatNotificationContextType {
   unreadCount: number;
+  dmInbox: DMPreview[];
   markAllRead: () => void;
   requestPermission: () => Promise<void>;
   notifPermission: NotificationPermission | "unsupported";
@@ -21,6 +22,7 @@ interface ChatNotificationContextType {
 
 const ChatNotificationContext = createContext<ChatNotificationContextType>({
   unreadCount: 0,
+  dmInbox: [],
   markAllRead: () => {},
   requestPermission: async () => {},
   notifPermission: "default",
@@ -71,15 +73,22 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   const { toast } = useToast();
 
   const [unreadCount, setUnreadCount] = useState(0);
+  const [dmInbox, setDmInbox] = useState<DMPreview[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification === "undefined" ? "unsupported" : Notification.permission
   );
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const streamStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unreadRef = useRef(0);
   // On first mount, run one silent poll to set the baseline IDs so we
   // don't fire notifications for messages that already existed before login.
   const initializedRef = useRef(false);
+  const metricsRef = useRef({ groupPolls: 0, groupAvgMs: 0, dmPolls: 0, dmAvgMs: 0 });
+  const streamMetricsRef = useRef({ events: 0, avgLatencyMs: 0 });
+  const [streamConnected, setStreamConnected] = useState(false);
+  const enableStream = import.meta.env.PROD || localStorage.getItem("ti_chat_stream") === "1";
 
   const isOnChat = location === "/chat";
   const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
@@ -128,14 +137,20 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   const pollGroup = useCallback(async (silent = false) => {
     if (!token || !canAccessChat) return;
     try {
-      const data = await customFetch<GroupMsg[]>("/api/chat/messages?limit=200");
+      const lastSeen = getStored(KEY_GROUP);
+      const url = silent ? "/api/chat/messages?limit=200" : `/api/chat/messages?limit=200&afterId=${encodeURIComponent(String(lastSeen))}`;
+      const t0 = performance.now();
+      const data = await customFetch<GroupMsg[]>(url);
+      const dt = performance.now() - t0;
+      metricsRef.current.groupPolls += 1;
+      metricsRef.current.groupAvgMs = metricsRef.current.groupAvgMs === 0 ? dt : (metricsRef.current.groupAvgMs * 0.9 + dt * 0.1);
+
       if (!data.length) return;
 
-      const lastSeen = getStored(KEY_GROUP);
-      const maxId = Math.max(...data.map((m) => m.id));
+      const maxId = Math.max(lastSeen, ...data.map((m) => m.id));
 
       if (!silent) {
-        const fresh = data.filter((m) => m.id > lastSeen && m.senderId !== user?.id);
+        const fresh = data.filter((m) => m.senderId !== user?.id);
         if (fresh.length > 0 && !isOnChat) {
           const latest = fresh[fresh.length - 1];
           const label = ROLE_LABELS[latest.sender.role] ?? latest.sender.role;
@@ -154,7 +169,12 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   const pollDMs = useCallback(async (silent = false) => {
     if (!token || !canAccessChat) return;
     try {
+      const t0 = performance.now();
       const inbox = await customFetch<DMPreview[]>("/api/chat/dm-inbox");
+      const dt = performance.now() - t0;
+      metricsRef.current.dmPolls += 1;
+      metricsRef.current.dmAvgMs = metricsRef.current.dmAvgMs === 0 ? dt : (metricsRef.current.dmAvgMs * 0.9 + dt * 0.1);
+      setDmInbox(inbox);
       if (!inbox.length) return;
 
       const lastSeen = getStored(KEY_DM);
@@ -184,6 +204,141 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
     } catch { /* silent */ }
   }, [token, canAccessChat, isOnChat, fireToast, fireBrowserNotif]);
 
+  const applyDmInboxEvent = useCallback((payload: {
+    id: number;
+    senderId: number;
+    senderName: string;
+    senderRole: string;
+    receiverId: number;
+    receiverName: string;
+    receiverRole: string;
+    message: string;
+    createdAt: string;
+  }) => {
+    if (!user) return;
+    const fromMe = payload.senderId === user.id;
+    const partnerId = fromMe ? payload.receiverId : payload.senderId;
+    const partnerName = fromMe ? payload.receiverName : payload.senderName;
+    const partnerRole = fromMe ? payload.receiverRole : payload.senderRole;
+
+    setDmInbox((prev) => {
+      const next: DMPreview[] = [
+        {
+          partnerId,
+          partnerName,
+          partnerRole,
+          lastMessage: payload.message,
+          lastMessageAt: payload.createdAt,
+          lastMessageId: payload.id,
+          fromMe,
+        },
+        ...prev.filter((p) => p.partnerId !== partnerId),
+      ];
+      next.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+      return next;
+    });
+  }, [user]);
+
+  const connectStream = useCallback(async () => {
+    if (!token || !canAccessChat) return;
+
+    const abort = new AbortController();
+    streamAbortRef.current = abort;
+
+    try {
+      const resp = await fetch("/api/chat/stream", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: abort.signal,
+      });
+      if (!resp.ok || !resp.body) throw new Error("stream_unavailable");
+      setStreamConnected(true);
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      const flush = (chunk: string) => {
+        buffer += chunk;
+        while (true) {
+          const idx = buffer.indexOf("\n\n");
+          if (idx === -1) break;
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+
+          const lines = block.split("\n").map((l) => l.trimEnd());
+          let eventName = "";
+          let dataStr = "";
+          for (const line of lines) {
+            if (line.startsWith("event:")) eventName = line.slice("event:".length).trim();
+            if (line.startsWith("data:")) dataStr += line.slice("data:".length).trim();
+          }
+          if (!eventName || !dataStr) continue;
+          if (eventName === "ping" || eventName === "hello") continue;
+
+          let data: any;
+          try { data = JSON.parse(dataStr); } catch { continue; }
+
+          if (eventName === "group_message") {
+            const lastSeen = getStored(KEY_GROUP);
+            if (typeof data.id === "number" && data.id > lastSeen) setStored(KEY_GROUP, data.id);
+            if (!isOnChat && data.senderId !== user?.id) {
+              const label = ROLE_LABELS[data.senderRole] ?? data.senderRole;
+              fireToast(`Grupo: ${data.senderName} (${label})`, data.message);
+              fireBrowserNotif(`Grupo — ${data.senderName} (${label})`, data.message);
+              setUnreadCount((p) => p + 1);
+            }
+            if (typeof data.createdAt === "string") {
+              const created = new Date(data.createdAt).getTime();
+              const latency = Date.now() - created;
+              const m = streamMetricsRef.current;
+              m.events += 1;
+              m.avgLatencyMs = m.avgLatencyMs === 0 ? latency : (m.avgLatencyMs * 0.9 + latency * 0.1);
+            }
+          }
+
+          if (eventName === "dm_message") {
+            const lastSeen = getStored(KEY_DM);
+            if (typeof data.id === "number" && data.id > lastSeen) setStored(KEY_DM, data.id);
+            applyDmInboxEvent(data);
+            const fromMe = data.senderId === user?.id;
+            if (!fromMe && data.id > lastSeen) {
+              const label = ROLE_LABELS[data.senderRole] ?? data.senderRole;
+              if (!isOnChat) {
+                fireToast(`Mensagem de ${data.senderName} (${label})`, data.message);
+                fireBrowserNotif(`Mensagem de ${data.senderName} (${label})`, data.message);
+                setUnreadCount((p) => p + 1);
+              } else {
+                fireBrowserNotif(`Mensagem de ${data.senderName} (${label})`, data.message);
+              }
+            }
+            if (typeof data.createdAt === "string") {
+              const created = new Date(data.createdAt).getTime();
+              const latency = Date.now() - created;
+              const m = streamMetricsRef.current;
+              m.events += 1;
+              m.avgLatencyMs = m.avgLatencyMs === 0 ? latency : (m.avgLatencyMs * 0.9 + latency * 0.1);
+            }
+          }
+
+          if (eventName === "dm_message_edited") {
+            pollDMs(true);
+          }
+        }
+      };
+
+      const reader = resp.body.getReader();
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        flush(decoder.decode(value, { stream: true }));
+      }
+    } catch (e) {
+      if (abort.signal.aborted) return;
+      setStreamConnected(false);
+    } finally {
+      setStreamConnected(false);
+    }
+  }, [token, canAccessChat, isOnChat, user?.id, fireToast, fireBrowserNotif, applyDmInboxEvent, pollDMs]);
+
   // ── Mark all read when entering chat ─────────────────────────────────────
 
   useEffect(() => {
@@ -207,9 +362,66 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
       run(true);
     }
 
-    pollingRef.current = setInterval(() => run(false), 5000);
+    const intervalMs = streamConnected ? 5000 : 1000;
+    pollingRef.current = setInterval(() => run(false), intervalMs);
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
-  }, [token, canAccessChat, pollGroup, pollDMs]);
+  }, [token, canAccessChat, pollGroup, pollDMs, streamConnected]);
+
+  useEffect(() => {
+    if (!enableStream) return;
+    if (!token || !canAccessChat) return;
+    let stopped = false;
+    let backoffMs = 1000;
+
+    const loop = async () => {
+      while (!stopped) {
+        await connectStream();
+        if (stopped) return;
+        await new Promise((r) => setTimeout(r, backoffMs));
+        backoffMs = Math.min(15_000, Math.round(backoffMs * 1.6));
+      }
+    };
+    if (streamStartTimerRef.current) clearTimeout(streamStartTimerRef.current);
+    streamStartTimerRef.current = setTimeout(() => {
+      if (!stopped) loop();
+    }, 250);
+
+    return () => {
+      stopped = true;
+      setStreamConnected(false);
+      if (streamStartTimerRef.current) clearTimeout(streamStartTimerRef.current);
+      streamStartTimerRef.current = null;
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+    };
+  }, [enableStream, token, canAccessChat, connectStream]);
+
+  useEffect(() => {
+    if (!token || !canAccessChat) return;
+    const id = setInterval(() => {
+      const m = metricsRef.current;
+      if (m.groupPolls + m.dmPolls === 0) return;
+      if (import.meta.env.DEV) {
+        console.debug("[chat-notifications] avgMs", {
+          group: Math.round(m.groupAvgMs),
+          dmInbox: Math.round(m.dmAvgMs),
+        });
+      }
+    }, 15000);
+    return () => clearInterval(id);
+  }, [token, canAccessChat]);
+
+  useEffect(() => {
+    if (!token || !canAccessChat) return;
+    const id = setInterval(() => {
+      const m = streamMetricsRef.current;
+      if (m.events === 0) return;
+      if (import.meta.env.DEV) {
+        console.debug("[chat-notifications] stream avgLatencyMs", Math.round(m.avgLatencyMs));
+      }
+    }, 15000);
+    return () => clearInterval(id);
+  }, [token, canAccessChat]);
 
   // ── Update page title ─────────────────────────────────────────────────────
 
@@ -220,7 +432,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
 
   return (
     <ChatNotificationContext.Provider
-      value={{ unreadCount, markAllRead, requestPermission, notifPermission }}
+      value={{ unreadCount, dmInbox, markAllRead, requestPermission, notifPermission }}
     >
       {children}
     </ChatNotificationContext.Provider>

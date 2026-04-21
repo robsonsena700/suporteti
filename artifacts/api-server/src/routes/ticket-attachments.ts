@@ -3,6 +3,7 @@ import multer from "multer";
 import { db, ticketsTable, ticketAttachmentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
+import { enforceTicketAccess } from "../lib/access";
 
 const router: IRouter = Router();
 
@@ -52,8 +53,7 @@ router.post(
       return;
     }
 
-    // Only creator or staff can upload
-    if (user.role === "USER" && ticket.createdById !== user.userId) {
+    if (!(await enforceTicketAccess(user, ticket, "attachments:create"))) {
       res.status(403).json({ error: "Acesso negado" });
       return;
     }
@@ -102,7 +102,7 @@ router.get("/tickets/:id/attachments", requireAuth, requireActive, async (req, r
     return;
   }
 
-  if (user.role === "USER" && ticket.createdById !== user.userId) {
+  if (!(await enforceTicketAccess(user, ticket, "attachments:list"))) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -137,7 +137,7 @@ router.get("/tickets/:id/attachments/:aid", requireAuth, requireActive, async (r
     return;
   }
 
-  if (user.role === "USER" && ticket.createdById !== user.userId) {
+  if (!(await enforceTicketAccess(user, ticket, "attachments:get"))) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -149,8 +149,16 @@ router.get("/tickets/:id/attachments/:aid", requireAuth, requireActive, async (r
   }
 
   const buf = Buffer.from(att.data, "base64");
+  const wantsDownload = req.query.download === "1" || req.query.download === "true";
+  const canInline = att.mimeType.startsWith("image/")
+    || att.mimeType === "application/pdf"
+    || att.mimeType === "text/plain";
+
   res.setHeader("Content-Type", att.mimeType);
-  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(att.filename)}"`);
+  res.setHeader(
+    "Content-Disposition",
+    `${!wantsDownload && canInline ? "inline" : "attachment"}; filename="${encodeURIComponent(att.filename)}"`,
+  );
   res.setHeader("Content-Length", String(buf.length));
   res.send(buf);
 });
@@ -174,7 +182,7 @@ router.delete("/tickets/:id/attachments/:aid", requireAuth, requireActive, async
     return;
   }
 
-  if (user.role === "USER" && ticket.createdById !== user.userId) {
+  if (!(await enforceTicketAccess(user, ticket, "attachments:delete"))) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }

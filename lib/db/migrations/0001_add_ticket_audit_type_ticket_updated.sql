@@ -1,0 +1,2 @@
+ALTER TYPE ticket_audit_type ADD VALUE IF NOT EXISTS 'TICKET_UPDATED';
+

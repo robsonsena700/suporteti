@@ -15,4 +15,5 @@ export interface UpdateUserBody {
   prefersTelegram?: boolean;
   uf?: string;
   municipality?: string;
+  birthDate?: Date;
 }

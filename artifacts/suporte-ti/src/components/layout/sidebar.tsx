@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/user/user-avatar";
+import { getRoleLabel } from "@/lib/role-labels";
 
 const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const { unreadCount } = useChatNotifications();
@@ -26,10 +28,10 @@ export function Sidebar() {
     ...(user?.role && CHAT_ROLES.includes(user.role)
       ? [{ name: "Chat", href: "/chat", icon: MessageSquare, badge: unreadCount }]
       : []),
-    { name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 },
     ...(user?.role === "ADMIN"
-      ? [{ name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 }]
+      ? [{ name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 }]
       : []),
+    { name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 },
   ];
 
   const NAV_LABELS: Record<string, string> = {
@@ -58,11 +60,12 @@ export function Sidebar() {
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={() => onNavigate?.()}
                 className={cn(
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                  "group flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors"
+                  "group flex items-center justify-between rounded-md px-3 py-3 sm:py-2 text-sm font-medium transition-colors tap-target"
                 )}
               >
                 <div className="flex items-center">
@@ -89,9 +92,10 @@ export function Sidebar() {
       </div>
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3 px-3 py-2 text-sm text-sidebar-foreground">
+          <UserAvatar userId={user?.id} name={user?.name ?? "Usuário"} className="h-9 w-9" />
           <div className="flex-1 min-w-0">
             <p className="truncate font-medium">{user?.name}</p>
-            <p className="truncate text-xs text-sidebar-foreground/70">{user?.role}</p>
+            <p className="truncate text-xs text-sidebar-foreground/70">{getRoleLabel(user?.role)}</p>
           </div>
         </div>
         <div className="mt-2 flex gap-2">

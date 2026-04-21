@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation, Link } from "wouter";
 import { useCreateTicket, TicketType, TicketPriority } from "@workspace/api-client-react";
-import { customFetch } from "@workspace/api-client-react/custom-fetch";
+import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Paperclip, X, FileText, Image, Upload } from "lucide-react";
+import { ArrowLeft, Paperclip, X, FileText, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Hardware subtype options ──────────────────────────────────────────────────
@@ -59,6 +59,11 @@ const ticketSchema = z.object({
   type: z.nativeEnum(TicketType),
   title: z.string().min(5, "Título muito curto (mínimo 5 caracteres)"),
   description: z.string().min(10, "Descrição muito curta (mínimo 10 caracteres)"),
+  establishment: z
+    .string()
+    .trim()
+    .min(1, "Estabelecimento / Unidade de saúde é obrigatório")
+    .max(255, "Máximo de 255 caracteres"),
   priority: z.nativeEnum(TicketPriority),
   hardwareSubtype: z.string().optional(),
 });
@@ -94,6 +99,7 @@ function isImage(mime: string) {
 
 export default function NewTicket() {
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
   const { toast } = useToast();
   const createMutation = useCreateTicket();
 
@@ -106,16 +112,24 @@ export default function NewTicket() {
 
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
+    mode: "onChange",
     defaultValues: {
       type: TicketType.SOFTWARE,
       title: "",
       description: "",
+      establishment: user?.establishment ?? "",
       priority: TicketPriority.LOW,
       hardwareSubtype: undefined,
     },
   });
 
   const selectedType = form.watch("type");
+
+  useEffect(() => {
+    if (user?.establishment) {
+      form.setValue("establishment", user.establishment, { shouldValidate: true });
+    }
+  }, [user?.establishment, form]);
 
   // ── File handling ─────────────────────────────────────────────────────────
 
@@ -180,10 +194,21 @@ export default function NewTicket() {
   // ── Submit ────────────────────────────────────────────────────────────────
 
   const onSubmit = async (data: TicketForm) => {
+    if (files.length === 0) {
+      setFileErrors(["Envie ao menos 1 anexo obrigatório antes de abrir o chamado."]);
+      toast({
+        title: "Anexo obrigatório",
+        description: "Adicione pelo menos 1 arquivo anexo para prosseguir.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Clear subtype if not hardware
     const payload = {
       title: data.title,
       description: data.description,
+      establishment: data.establishment,
       type: data.type,
       priority: data.priority,
       hardwareSubtype: data.type === TicketType.HARDWARE ? data.hardwareSubtype : undefined,
@@ -385,12 +410,40 @@ export default function NewTicket() {
                 )}
               />
 
-              {/* 5 — Anexos */}
+              {/* 5 — Estabelecimento / Unidade de saúde */}
+              <FormField
+                control={form.control}
+                name="establishment"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>5. Estabelecimento / Unidade de saúde</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        maxLength={255}
+                        placeholder="Digite o estabelecimento / unidade de saúde"
+                        {...field}
+                        onChange={(e) => field.onChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <div className="text-xs text-muted-foreground flex justify-between">
+                      <span>Obrigatório</span>
+                      <span>{(field.value?.length ?? 0)}/255</span>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* 6 — Anexos */}
               <div className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium leading-none mb-1">5. Anexo</p>
+                  <p className="text-sm font-medium leading-none mb-1">6. Anexo <span className="text-destructive">*</span></p>
                   <p className="text-xs text-muted-foreground">
-                    Imagens ou documentos. Máximo {MAX_FILES} arquivos de até 3 MB cada.
+                    Imagens ou documentos. Obrigatório ao menos 1 arquivo. Máximo {MAX_FILES} arquivos de até 3 MB cada.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {files.length}/{MAX_FILES} arquivo(s) anexado(s)
                   </p>
                 </div>
 

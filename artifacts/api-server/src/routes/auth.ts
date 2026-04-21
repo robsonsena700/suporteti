@@ -23,6 +23,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     password,
     uf,
     municipality,
+    birthDate,
     cpf,
     establishment,
     contactPhone,
@@ -43,6 +44,18 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   if (!isValidBrazilMobile(contactPhone)) {
     res.status(400).json({ error: "Contato inválido" });
+    return;
+  }
+
+  if (!(birthDate instanceof Date) || Number.isNaN(birthDate.getTime())) {
+    res.status(400).json({ error: "Data de nascimento inválida" });
+    return;
+  }
+  const minBirth = new Date("1900-01-01T00:00:00.000Z");
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  if (birthDate < minBirth || birthDate > today) {
+    res.status(400).json({ error: "Data de nascimento inválida" });
     return;
   }
 
@@ -79,6 +92,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     name,
     email,
     passwordHash,
+    birthDate,
     cpf: normalizedCpf,
     establishment,
     contactPhone: normalizedPhone,
@@ -116,9 +130,11 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       prefersTelegram: user.prefersTelegram,
       termsAccepted: user.termsAccepted,
       termsAcceptedAt: user.termsAcceptedAt,
+      birthDate: user.birthDate,
       uf: user.uf,
       municipality: user.municipality,
       createdAt: user.createdAt,
+      mustChangePassword: user.mustChangePassword,
     },
   });
 });
@@ -144,6 +160,9 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  const now = new Date();
+  await db.update(usersTable).set({ lastLoginAt: now }).where(eq(usersTable.id, user.id));
+
   const token = signToken({
     userId: user.id,
     email: user.email,
@@ -168,9 +187,12 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       prefersTelegram: user.prefersTelegram,
       termsAccepted: user.termsAccepted,
       termsAcceptedAt: user.termsAcceptedAt,
+      birthDate: user.birthDate,
       uf: user.uf,
       municipality: user.municipality,
       createdAt: user.createdAt,
+      lastLoginAt: now,
+      mustChangePassword: user.mustChangePassword,
     },
   });
 });
@@ -199,10 +221,47 @@ router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
     prefersTelegram: user.prefersTelegram,
     termsAccepted: user.termsAccepted,
     termsAcceptedAt: user.termsAcceptedAt,
+    birthDate: user.birthDate,
     uf: user.uf,
     municipality: user.municipality,
     createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt,
+    mustChangePassword: user.mustChangePassword,
   });
+});
+
+router.post("/auth/change-password", requireAuth, async (req, res): Promise<void> => {
+  const body = req.body as { currentPassword?: unknown; newPassword?: unknown } | undefined;
+  const currentPassword = body?.currentPassword;
+  const newPassword = body?.newPassword;
+  if (typeof currentPassword !== "string" || currentPassword.length === 0) {
+    res.status(400).json({ error: "Informe a senha atual" });
+    return;
+  }
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    res.status(400).json({ error: "A nova senha deve possuir no mínimo 8 caracteres" });
+    return;
+  }
+
+  const userId = req.user!.userId;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: "Senha atual inválida" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await db.update(usersTable)
+    .set({ passwordHash, mustChangePassword: false })
+    .where(eq(usersTable.id, userId));
+
+  res.json({ message: "Senha atualizada com sucesso" });
 });
 
 export default router;

@@ -1,35 +1,111 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
-import { UpdateUserBody, ApproveUserBody } from "@workspace/api-zod";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
+import multer from "multer";
+import { db, usersTable, userCoordinatorsTable, ticketsTable } from "@workspace/db";
+import { eq, and, inArray } from "drizzle-orm";
+import { UpdateUserBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { signToken } from "../middlewares/auth";
 import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
 import { validateMunicipalityForUf } from "../lib/ibge";
+import { listCoordinatorsForUser } from "../lib/access";
 
 const router: IRouter = Router();
 
-router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
-  const { status, role } = req.query as { status?: string; role?: string };
+const AVATAR_MAX_SIZE = 1 * 1024 * 1024; // 1 MB
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_SIZE, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error(`Tipo de arquivo não permitido: ${file.mimetype}`));
+  },
+});
 
-  let query = db.select({
-    id: usersTable.id,
-    name: usersTable.name,
-    email: usersTable.email,
-    role: usersTable.role,
-    status: usersTable.status,
-    cpf: usersTable.cpf,
-    establishment: usersTable.establishment,
-    contactPhone: usersTable.contactPhone,
-    prefersWhatsapp: usersTable.prefersWhatsapp,
-    prefersTelegram: usersTable.prefersTelegram,
-    termsAccepted: usersTable.termsAccepted,
-    termsAcceptedAt: usersTable.termsAcceptedAt,
-    uf: usersTable.uf,
-    municipality: usersTable.municipality,
-    createdAt: usersTable.createdAt,
-  }).from(usersTable);
+type UserRole = "USER" | "COORDINATOR" | "ANALYST" | "ADMIN";
+type UserStatus = "ACTIVE" | "INACTIVE";
+
+function parseRole(value: unknown): UserRole | null {
+  if (value === "USER" || value === "COORDINATOR" || value === "ANALYST" || value === "ADMIN") {
+    return value;
+  }
+  return null;
+}
+
+function parseStatus(value: unknown): UserStatus | null {
+  if (value === "ACTIVE" || value === "INACTIVE") {
+    return value;
+  }
+  return null;
+}
+
+function parseSingleCoordinatorId(value: unknown): number | null {
+  if (Array.isArray(value)) {
+    if (value.length !== 1) return null;
+    const only = Number(value[0]);
+    return Number.isInteger(only) && only > 0 ? only : null;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function generateTemporaryPassword(length = 12): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*";
+  const bytes = randomBytes(length);
+  let password = "";
+  for (let i = 0; i < length; i += 1) {
+    password += chars[bytes[i] % chars.length];
+  }
+  return password;
+}
+
+router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
+  const { status, role, includeCoordinator } = req.query as { status?: string; role?: string; includeCoordinator?: string };
+
+  const wantsCoordinator = includeCoordinator === "true" || includeCoordinator === "1";
+
+  let query = wantsCoordinator
+    ? db.select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      role: usersTable.role,
+      status: usersTable.status,
+      cpf: usersTable.cpf,
+      establishment: usersTable.establishment,
+      contactPhone: usersTable.contactPhone,
+      prefersWhatsapp: usersTable.prefersWhatsapp,
+      prefersTelegram: usersTable.prefersTelegram,
+      termsAccepted: usersTable.termsAccepted,
+      termsAcceptedAt: usersTable.termsAcceptedAt,
+      birthDate: usersTable.birthDate,
+      uf: usersTable.uf,
+      municipality: usersTable.municipality,
+      createdAt: usersTable.createdAt,
+      coordinatorId: userCoordinatorsTable.coordinatorId,
+    }).from(usersTable).leftJoin(userCoordinatorsTable, eq(userCoordinatorsTable.userId, usersTable.id))
+    : db.select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      role: usersTable.role,
+      status: usersTable.status,
+      cpf: usersTable.cpf,
+      establishment: usersTable.establishment,
+      contactPhone: usersTable.contactPhone,
+      prefersWhatsapp: usersTable.prefersWhatsapp,
+      prefersTelegram: usersTable.prefersTelegram,
+      termsAccepted: usersTable.termsAccepted,
+      termsAcceptedAt: usersTable.termsAcceptedAt,
+      birthDate: usersTable.birthDate,
+      uf: usersTable.uf,
+      municipality: usersTable.municipality,
+      createdAt: usersTable.createdAt,
+    }).from(usersTable);
 
   const conditions = [];
   if (status) conditions.push(eq(usersTable.status, status as any));
@@ -40,6 +116,35 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
     : await query;
 
   res.json(users);
+});
+
+router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (_req, res): Promise<void> => {
+  const assignable = await db.select({
+    id: usersTable.id,
+    name: usersTable.name,
+    email: usersTable.email,
+    role: usersTable.role,
+    status: usersTable.status,
+  }).from(usersTable).where(
+    and(
+      eq(usersTable.status, "ACTIVE"),
+      inArray(usersTable.role, ["ADMIN", "ANALYST", "COORDINATOR"]),
+    ),
+  );
+
+  const openStatuses = ["OPEN", "IN_PROGRESS"] as const;
+  const withLoad = await Promise.all(assignable.map(async (u) => {
+    const assigned = await db.select({ id: ticketsTable.id }).from(ticketsTable).where(
+      and(eq(ticketsTable.assignedToId, u.id), inArray(ticketsTable.status, [...openStatuses])),
+    );
+    return {
+      ...u,
+      assignedOpenTickets: assigned.length,
+    };
+  }));
+
+  withLoad.sort((a, b) => a.assignedOpenTickets - b.assignedOpenTickets || a.name.localeCompare(b.name, "pt-BR"));
+  res.json(withLoad);
 });
 
 router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<void> => {
@@ -64,6 +169,7 @@ router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<v
     prefersTelegram: usersTable.prefersTelegram,
     termsAccepted: usersTable.termsAccepted,
     termsAcceptedAt: usersTable.termsAcceptedAt,
+    birthDate: usersTable.birthDate,
     uf: usersTable.uf,
     municipality: usersTable.municipality,
     createdAt: usersTable.createdAt,
@@ -75,6 +181,83 @@ router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<v
   }
 
   res.json(user);
+});
+
+router.get("/users/:id/coordinators", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const currentUser = req.user!;
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  if (
+    currentUser.userId !== id
+    && currentUser.role !== "ADMIN"
+    && currentUser.role !== "ANALYST"
+  ) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const coordinators = await listCoordinatorsForUser(id);
+  res.json(coordinators);
+});
+
+router.put("/users/:id/coordinators", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const coordinatorId = parseSingleCoordinatorId(
+    (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
+    ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds,
+  );
+  if (!coordinatorId) {
+    res.status(400).json({ error: "Informe um coordenador válido" });
+    return;
+  }
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!targetUser) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const coordinators = await db
+    .select({
+      id: usersTable.id,
+      role: usersTable.role,
+      status: usersTable.status,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, coordinatorId));
+
+  if (coordinators.length !== 1) {
+    res.status(400).json({ error: "Coordenador não encontrado" });
+    return;
+  }
+
+  const invalidCoordinator = coordinators.find(c => c.role !== "COORDINATOR" || c.status !== "ACTIVE");
+  if (invalidCoordinator) {
+    res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
+    return;
+  }
+
+  await db.transaction(async tx => {
+    await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    await tx.insert(userCoordinatorsTable).values(
+      [{ userId: id, coordinatorId }],
+    );
+  });
+
+  const updated = await listCoordinatorsForUser(id);
+  res.json(updated);
 });
 
 router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise<void> => {
@@ -108,6 +291,7 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
   const nextCpf = parsed.data.cpf ?? existing.cpf ?? "";
   const nextEstablishment = parsed.data.establishment ?? existing.establishment ?? "";
   const nextContactPhone = parsed.data.contactPhone ?? existing.contactPhone ?? "";
+  const nextBirthDate = parsed.data.birthDate ?? existing.birthDate ?? null;
   const nextUf = parsed.data.uf ?? existing.uf;
   const nextMunicipality = parsed.data.municipality ?? existing.municipality;
 
@@ -124,6 +308,21 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
       res.status(400).json({ error: "Contato inválido" });
       return;
     }
+    if (!nextBirthDate) {
+      res.status(400).json({ error: "Data de nascimento é obrigatória" });
+      return;
+    }
+    const min = new Date("1900-01-01T00:00:00.000Z");
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (!(nextBirthDate instanceof Date) || Number.isNaN(nextBirthDate.getTime())) {
+      res.status(400).json({ error: "Data de nascimento inválida" });
+      return;
+    }
+    if (nextBirthDate < min || nextBirthDate > today) {
+      res.status(400).json({ error: "Data de nascimento inválida" });
+      return;
+    }
   } else {
     if (parsed.data.cpf && !isValidCpf(parsed.data.cpf)) {
       res.status(400).json({ error: "CPF inválido" });
@@ -132,6 +331,15 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
     if (parsed.data.contactPhone && !isValidBrazilMobile(parsed.data.contactPhone)) {
       res.status(400).json({ error: "Contato inválido" });
       return;
+    }
+    if (parsed.data.birthDate) {
+      const min = new Date("1900-01-01T00:00:00.000Z");
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      if (Number.isNaN(parsed.data.birthDate.getTime()) || parsed.data.birthDate < min || parsed.data.birthDate > today) {
+        res.status(400).json({ error: "Data de nascimento inválida" });
+        return;
+      }
     }
   }
 
@@ -183,6 +391,7 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
       prefersTelegram: usersTable.prefersTelegram,
       termsAccepted: usersTable.termsAccepted,
       termsAcceptedAt: usersTable.termsAcceptedAt,
+      birthDate: usersTable.birthDate,
       uf: usersTable.uf,
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
@@ -196,7 +405,8 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
   res.json(user);
 });
 
-router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+router.post("/users/:id/reset-password", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (req, res): Promise<void> => {
+  const currentUser = req.user!;
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);
 
@@ -205,14 +415,77 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
     return;
   }
 
-  const parsed = ApproveUserBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const providedPassword = (req.body as { temporaryPassword?: unknown } | undefined)?.temporaryPassword;
+  if (providedPassword != null && (typeof providedPassword !== "string" || providedPassword.length < 8)) {
+    res.status(400).json({ error: "A senha provisória deve possuir no mínimo 8 caracteres" });
+    return;
+  }
+  const temporaryPassword = typeof providedPassword === "string"
+    ? providedPassword
+    : generateTemporaryPassword();
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!targetUser) {
+    res.status(404).json({ error: "Usuário não encontrado" });
     return;
   }
 
+  if (currentUser.role === "COORDINATOR" && currentUser.userId !== id) {
+    const [link] = await db
+      .select()
+      .from(userCoordinatorsTable)
+      .where(and(
+        eq(userCoordinatorsTable.coordinatorId, currentUser.userId),
+        eq(userCoordinatorsTable.userId, id),
+      ));
+
+    if (!link) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+  }
+
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  await db.update(usersTable)
+    .set({ passwordHash, mustChangePassword: true })
+    .where(eq(usersTable.id, id));
+
+  res.json({
+    message: "Senha provisória atualizada com sucesso",
+    temporaryPassword,
+  });
+});
+
+router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const status = parseStatus((req.body as { status?: unknown } | undefined)?.status);
+  if (!status) {
+    res.status(400).json({ error: "Status inválido" });
+    return;
+  }
+
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  if (status === "ACTIVE" && existing.role === "USER") {
+    const [link] = await db.select().from(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    if (!link) {
+      res.status(400).json({ error: "Usuário ativo deve possuir ao menos um coordenador" });
+      return;
+    }
+  }
+
   const [user] = await db.update(usersTable)
-    .set({ role: parsed.data.role as any, status: "ACTIVE" })
+    .set({ status })
     .where(eq(usersTable.id, id))
     .returning({
       id: usersTable.id,
@@ -232,12 +505,261 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
       createdAt: usersTable.createdAt,
     });
 
+  res.json(user);
+});
+
+router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const role = parseRole((req.body as { role?: unknown } | undefined)?.role);
+  if (!role) {
+    res.status(400).json({ error: "Perfil inválido" });
+    return;
+  }
+
+  const coordinatorValue = (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
+    ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
+  const coordinatorId = coordinatorValue == null ? null : parseSingleCoordinatorId(coordinatorValue);
+  if (coordinatorValue != null && !coordinatorId) {
+    res.status(400).json({ error: "Coordenador inválido" });
+    return;
+  }
+
+  if (role === "USER" && !coordinatorId) {
+    res.status(400).json({ error: "Usuário ativo deve possuir ao menos um coordenador" });
+    return;
+  }
+
+  if (coordinatorId) {
+    const coordinators = await db
+      .select({
+        id: usersTable.id,
+        role: usersTable.role,
+        status: usersTable.status,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, coordinatorId));
+    if (coordinators.length !== 1) {
+      res.status(400).json({ error: "Coordenador não encontrado" });
+      return;
+    }
+    const invalid = coordinators.find(c => c.role !== "COORDINATOR" || c.status !== "ACTIVE");
+    if (invalid) {
+      res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
+      return;
+    }
+  }
+
+  const user = await db.transaction(async tx => {
+    const [approvedUser] = await tx.update(usersTable)
+      .set({ role, status: "ACTIVE" })
+      .where(eq(usersTable.id, id))
+      .returning({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        role: usersTable.role,
+        status: usersTable.status,
+        cpf: usersTable.cpf,
+        establishment: usersTable.establishment,
+        contactPhone: usersTable.contactPhone,
+        prefersWhatsapp: usersTable.prefersWhatsapp,
+        prefersTelegram: usersTable.prefersTelegram,
+        termsAccepted: usersTable.termsAccepted,
+        termsAcceptedAt: usersTable.termsAcceptedAt,
+        uf: usersTable.uf,
+        municipality: usersTable.municipality,
+        createdAt: usersTable.createdAt,
+      });
+
+    await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    if (coordinatorId) {
+      await tx.insert(userCoordinatorsTable).values({ userId: id, coordinatorId });
+    }
+
+    return approvedUser;
+  });
+
   if (!user) {
     res.status(404).json({ error: "Usuário não encontrado" });
     return;
   }
 
   res.json(user);
+});
+
+router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const role = parseRole((req.body as { role?: unknown } | undefined)?.role);
+  if (!role) {
+    res.status(400).json({ error: "Perfil inválido" });
+    return;
+  }
+
+  const currentUser = req.user!;
+  if (currentUser.userId === id && role !== "ADMIN") {
+    res.status(400).json({ error: "Não é permitido remover seu próprio perfil de administrador" });
+    return;
+  }
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!targetUser) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const coordinatorValue = (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
+    ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
+  const coordinatorId = coordinatorValue != null ? parseSingleCoordinatorId(coordinatorValue) : null;
+
+  if (role === "USER") {
+    const existing = await db.select().from(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    const hasCoordinator = existing.length > 0;
+    const shouldAttach = coordinatorId != null;
+    if (!hasCoordinator && !shouldAttach) {
+      res.status(400).json({ error: "Selecione um coordenador para o usuário" });
+      return;
+    }
+
+    if (shouldAttach) {
+      const coordinators = await db
+        .select({
+          id: usersTable.id,
+          role: usersTable.role,
+          status: usersTable.status,
+        })
+        .from(usersTable)
+        .where(eq(usersTable.id, coordinatorId));
+
+      if (coordinators.length !== 1) {
+        res.status(400).json({ error: "Coordenador não encontrado" });
+        return;
+      }
+
+      const invalidCoordinator = coordinators.find(c => c.role !== "COORDINATOR" || c.status !== "ACTIVE");
+      if (invalidCoordinator) {
+        res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
+        return;
+      }
+    }
+  }
+
+  const result = await db.transaction(async tx => {
+    const [updated] = await tx.update(usersTable)
+      .set({ role })
+      .where(eq(usersTable.id, id))
+      .returning({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        role: usersTable.role,
+        status: usersTable.status,
+        cpf: usersTable.cpf,
+        establishment: usersTable.establishment,
+        contactPhone: usersTable.contactPhone,
+        prefersWhatsapp: usersTable.prefersWhatsapp,
+        prefersTelegram: usersTable.prefersTelegram,
+        termsAccepted: usersTable.termsAccepted,
+        termsAcceptedAt: usersTable.termsAcceptedAt,
+        uf: usersTable.uf,
+        municipality: usersTable.municipality,
+        createdAt: usersTable.createdAt,
+      });
+
+    if (!updated) return null;
+
+    if (role !== "USER") {
+      await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    } else if (coordinatorId != null) {
+      await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+      await tx.insert(userCoordinatorsTable).values({ userId: id, coordinatorId });
+    }
+
+    return updated;
+  });
+
+  if (!result) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  res.json(result);
+});
+
+router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const currentUser = req.user!;
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  if (
+    currentUser.userId !== id
+    && currentUser.role !== "ADMIN"
+    && currentUser.role !== "ANALYST"
+    && currentUser.role !== "COORDINATOR"
+  ) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const [u] = await db.select({
+    id: usersTable.id,
+    avatarMimeType: usersTable.avatarMimeType,
+    avatarData: usersTable.avatarData,
+  }).from(usersTable).where(eq(usersTable.id, id));
+
+  if (!u || !u.avatarMimeType || !u.avatarData) {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(204).end();
+    return;
+  }
+
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ mimeType: u.avatarMimeType, data: u.avatarData });
+});
+
+router.post(
+  "/users/me/avatar",
+  requireAuth,
+  requireActive,
+  avatarUpload.single("file"),
+  async (req, res): Promise<void> => {
+    const currentUser = req.user!;
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) {
+      res.status(400).json({ error: "Arquivo não enviado" });
+      return;
+    }
+
+    const base64 = file.buffer.toString("base64");
+    await db.update(usersTable).set({
+      avatarMimeType: file.mimetype,
+      avatarData: base64,
+    }).where(eq(usersTable.id, currentUser.userId));
+
+    res.json({ message: "Avatar atualizado com sucesso" });
+  },
+);
+
+router.delete("/users/me/avatar", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const currentUser = req.user!;
+  await db.update(usersTable).set({ avatarMimeType: null, avatarData: null }).where(eq(usersTable.id, currentUser.userId));
+  res.json({ message: "Avatar removido com sucesso" });
 });
 
 export default router;
