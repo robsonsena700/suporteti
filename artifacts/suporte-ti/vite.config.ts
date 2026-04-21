@@ -90,6 +90,20 @@ export default defineConfig(async () => {
         "/api": {
           target: apiProxyTarget,
           changeOrigin: true,
+          timeout: 0,
+          proxyTimeout: 0,
+          configure: (proxy) => {
+            proxy.on("proxyReq", (proxyReq) => {
+              try {
+                proxyReq.setHeader("Connection", "keep-alive");
+              } catch {}
+            });
+            proxy.on("proxyRes", (proxyRes) => {
+              try {
+                (proxyRes.headers as any)["connection"] = "keep-alive";
+              } catch {}
+            });
+          },
         },
       },
     },

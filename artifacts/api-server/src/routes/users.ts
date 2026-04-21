@@ -724,7 +724,8 @@ router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Pr
   }).from(usersTable).where(eq(usersTable.id, id));
 
   if (!u || !u.avatarMimeType || !u.avatarData) {
-    res.status(404).json({ error: "Avatar não encontrado" });
+    res.setHeader("Cache-Control", "no-store");
+    res.status(204).end();
     return;
   }
 

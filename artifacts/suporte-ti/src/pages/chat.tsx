@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { useChatNotifications } from "@/lib/chat-notifications";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Button } from "@/components/ui/button";
-import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft, Paperclip, Download, Trash2, FileText, FileImage, Music, Eye, EyeOff } from "lucide-react";
+import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft, Paperclip, Download, Trash2, FileText, FileImage, Music, Eye, EyeOff, Reply, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { UserAvatar } from "@/components/user/user-avatar";
@@ -25,6 +25,9 @@ interface GroupMsg {
   id: number;
   senderId: number;
   message: string;
+  replyTo: ReplyRef | null;
+  editedAt?: string | null;
+  editHistory?: Array<{ message: string; editedAt: string }>;
   createdAt: string;
   sender: { id: number; name: string; role: string };
   attachments: ChatAttachment[];
@@ -35,10 +38,21 @@ interface DM {
   senderId: number;
   receiverId: number;
   message: string;
+  replyTo: ReplyRef | null;
+  editedAt?: string | null;
+  editHistory?: Array<{ message: string; editedAt: string }>;
   createdAt: string;
   sender: { id: number; name: string; role: string };
   receiver: { id: number; name: string; role: string };
   attachments: ChatAttachment[];
+}
+
+interface ReplyRef {
+  id: number;
+  senderId: number;
+  message: string;
+  createdAt: string;
+  sender: { id: number; name: string; role: string };
 }
 
 interface ChatAttachment {
@@ -128,33 +142,45 @@ function formatPreviewTime(iso: string) {
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
-async function fetchGroupMessages(): Promise<GroupMsg[]> {
-  return customFetch<GroupMsg[]>("/api/chat/messages?limit=200");
+async function fetchGroupMessages(afterId?: number): Promise<GroupMsg[]> {
+  const qs = afterId && afterId > 0 ? `&afterId=${encodeURIComponent(String(afterId))}` : "";
+  return customFetch<GroupMsg[]>(`/api/chat/messages?limit=200${qs}`);
 }
 
-async function fetchDMs(userId: number): Promise<DM[]> {
-  return customFetch<DM[]>(`/api/chat/dm/${userId}`);
+async function fetchDMs(userId: number, afterId?: number): Promise<DM[]> {
+  const qs = afterId && afterId > 0 ? `?afterId=${encodeURIComponent(String(afterId))}` : "";
+  return customFetch<DM[]>(`/api/chat/dm/${userId}${qs}`);
 }
 
 async function fetchParticipants(): Promise<Participant[]> {
   return customFetch<Participant[]>("/api/chat/participants");
 }
 
-async function fetchDMInbox(): Promise<DMPreview[]> {
-  return customFetch<DMPreview[]>("/api/chat/dm-inbox");
-}
-
-async function postGroupMessage(message: string, attachmentIds: number[]): Promise<GroupMsg> {
+async function postGroupMessage(message: string, attachmentIds: number[], replyToId: number | null): Promise<GroupMsg> {
   return customFetch<GroupMsg>("/api/chat/messages", {
     method: "POST",
-    body: JSON.stringify({ message, attachmentIds }),
+    body: JSON.stringify({ message, attachmentIds, replyToId }),
   });
 }
 
-async function postDM(userId: number, message: string, attachmentIds: number[]): Promise<DM> {
+async function postDM(userId: number, message: string, attachmentIds: number[], replyToId: number | null): Promise<DM> {
   return customFetch<DM>(`/api/chat/dm/${userId}`, {
     method: "POST",
-    body: JSON.stringify({ message, attachmentIds }),
+    body: JSON.stringify({ message, attachmentIds, replyToId }),
+  });
+}
+
+async function patchGroupMessage(messageId: number, message: string): Promise<GroupMsg> {
+  return customFetch<GroupMsg>(`/api/chat/messages/${messageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ message }),
+  });
+}
+
+async function patchDMMessage(messageId: number, message: string): Promise<DM> {
+  return customFetch<DM>(`/api/chat/dm/message/${messageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ message }),
   });
 }
 
@@ -162,10 +188,14 @@ async function postDM(userId: number, message: string, attachmentIds: number[]):
 
 function MessageBubble({
   isOwn,
+  highlighted,
   senderId,
   senderName,
   senderRole,
   message,
+  replyTo,
+  editedAt,
+  editHistory,
   createdAt,
   showSender,
   attachments,
@@ -174,12 +204,23 @@ function MessageBubble({
   canDeleteAttachment,
   getPreviewState,
   onTogglePreview,
+  onReply,
+  onJumpToReply,
+  canEdit,
+  editRemainingLabel,
+  onEdit,
+  showEditHistory,
+  onToggleEditHistory,
 }: {
   isOwn: boolean;
+  highlighted: boolean;
   senderId: number;
   senderName: string;
   senderRole: string;
   message: string;
+  replyTo: ReplyRef | null;
+  editedAt?: string | null;
+  editHistory?: Array<{ message: string; editedAt: string }>;
   createdAt: string;
   showSender: boolean;
   attachments: ChatAttachment[];
@@ -188,6 +229,13 @@ function MessageBubble({
   canDeleteAttachment: (att: ChatAttachment) => boolean;
   getPreviewState: (id: number) => AttachmentPreviewState | undefined;
   onTogglePreview: (att: ChatAttachment) => void;
+  onReply: () => void;
+  onJumpToReply: (() => void) | null;
+  canEdit: boolean;
+  editRemainingLabel: string | null;
+  onEdit: () => void;
+  showEditHistory: boolean;
+  onToggleEditHistory: () => void;
 }) {
   return (
     <div className={cn("flex items-end gap-2 mb-1.5", isOwn ? "flex-row-reverse" : "flex-row")}>
@@ -197,6 +245,7 @@ function MessageBubble({
       <div
         className={cn(
           "relative max-w-[65%] rounded-2xl px-3 py-2 shadow-sm",
+          highlighted ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-transparent" : "",
           isOwn
             ? "bg-[#d9fdd3] dark:bg-[#005c4b] rounded-br-sm text-gray-800 dark:text-white"
             : "bg-white dark:bg-[#202c33] rounded-bl-sm text-gray-800 dark:text-white"
@@ -210,10 +259,64 @@ function MessageBubble({
             </span>
           </p>
         )}
+        {replyTo ? (
+          <button
+            type="button"
+            onClick={onJumpToReply ?? undefined}
+            className={cn(
+              "mb-2 w-full text-left rounded-lg border-l-4 border-primary/60 bg-black/5 px-2 py-1.5 dark:bg-white/5",
+              onJumpToReply ? "cursor-pointer hover:bg-black/10 dark:hover:bg-white/10" : "cursor-default"
+            )}
+            aria-label={onJumpToReply ? "Ir para a mensagem original" : "Mensagem original"}
+            disabled={!onJumpToReply}
+          >
+            <p className="text-[11px] font-semibold leading-none" style={{ color: ROLE_COLOR[replyTo.sender.role] ?? "#1B3B6E" }}>
+              {replyTo.sender.name}
+              <span className="ml-1.5 font-normal text-[10px] text-gray-500 dark:text-gray-400">
+                ({ROLE_LABELS[replyTo.sender.role] ?? replyTo.sender.role})
+              </span>
+            </p>
+            <p className="mt-1 text-[11px] text-gray-700 dark:text-gray-200 line-clamp-2">
+              {replyTo.message || "(sem texto)"}
+            </p>
+          </button>
+        ) : null}
         {message ? (
           <p className="text-[13px] leading-snug break-words whitespace-pre-wrap pr-10">
             {message}
           </p>
+        ) : null}
+        {editedAt ? (
+          editHistory ? (
+            <button
+              type="button"
+              className="mt-1 text-[10px] text-muted-foreground hover:underline underline-offset-2"
+              onClick={onToggleEditHistory}
+              aria-label={showEditHistory ? "Ocultar histórico de edições" : "Ver histórico de edições"}
+            >
+              editada
+            </button>
+          ) : (
+            <span className="mt-1 block text-[10px] text-muted-foreground">editada</span>
+          )
+        ) : null}
+
+        {showEditHistory && editHistory && editHistory.length > 0 ? (
+          <div className="mt-2 rounded-lg border border-black/5 bg-white/60 p-2 text-[11px] dark:border-white/10 dark:bg-white/5">
+            <p className="font-semibold text-[11px] mb-1">Histórico de edições</p>
+            <div className="grid gap-1">
+              {editHistory.slice().reverse().map((h, idx) => (
+                <div key={`${createdAt}_${idx}`} className="text-muted-foreground">
+                  <span className="font-medium">{new Date(h.editedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="ml-2">{h.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : showEditHistory ? (
+          <div className="mt-2 rounded-lg border border-black/5 bg-white/60 p-2 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
+            Histórico indisponível.
+          </div>
         ) : null}
 
         {attachments.length > 0 ? (
@@ -315,6 +418,34 @@ function MessageBubble({
         <span className="absolute bottom-1.5 right-2.5 text-[10px] text-gray-400">
           {formatTime(createdAt)}
         </span>
+
+        <div className={cn("absolute top-2 right-2 flex items-center gap-1", isOwn ? "flex-row" : "flex-row")}>
+          {editRemainingLabel ? (
+            <span className="text-[10px] text-gray-400" aria-label={`Tempo restante para edição ${editRemainingLabel}`}>
+              {editRemainingLabel}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
+            onClick={onReply}
+            aria-label="Responder"
+            title="Responder"
+          >
+            <Reply className="h-4 w-4" />
+          </button>
+          {canEdit ? (
+            <button
+              type="button"
+              className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
+              onClick={onEdit}
+              aria-label="Editar"
+              title="Editar"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -324,7 +455,7 @@ function MessageBubble({
 
 export default function Chat() {
   const { user, token } = useAuth();
-  const { markAllRead, requestPermission, notifPermission } = useChatNotifications();
+  const { markAllRead, requestPermission, notifPermission, dmInbox } = useChatNotifications();
   const isMobile = useIsMobile();
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
 
@@ -332,12 +463,16 @@ export default function Chat() {
   const [groupMessages, setGroupMessages] = useState<GroupMsg[]>([]);
   const [dmMessages, setDmMessages] = useState<DM[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [dmInbox, setDmInbox] = useState<DMPreview[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatDenied, setChatDenied] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [replyDraft, setReplyDraft] = useState<ReplyRef | null>(null);
+  const [editingDraft, setEditingDraft] = useState<{ type: "group" | "dm"; messageId: number; original: string } | null>(null);
+  const [openEditHistory, setOpenEditHistory] = useState<Record<number, boolean>>({});
+  const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [draftAttachments, setDraftAttachments] = useState<Array<{
     localId: string;
     file: File;
@@ -354,6 +489,7 @@ export default function Chat() {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastGroupIdRef = useRef<number>(0);
   const lastDmIdRef = useRef<number>(0);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -362,16 +498,35 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior });
   }, []);
 
+  const jumpToMessage = useCallback((messageId: number) => {
+    const el = document.getElementById(`chat_msg_${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedMessageId(messageId);
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedMessageId((prev) => (prev === messageId ? null : prev));
+    }, 1500);
+  }, []);
+
   // ── Data loading ─────────────────────────────────────────────────────────
 
   const loadGroupMessages = useCallback(async (initial = false) => {
     try {
-      const data = await fetchGroupMessages();
-      setGroupMessages(data);
-      const lastId = data.length > 0 ? data[data.length - 1].id : 0;
-      if (initial) scrollToBottom("instant");
-      else if (lastId !== lastGroupIdRef.current) scrollToBottom("smooth");
-      lastGroupIdRef.current = lastId;
+      if (initial) {
+        const data = await fetchGroupMessages();
+        setGroupMessages(data);
+        const lastId = data.length > 0 ? data[data.length - 1].id : 0;
+        lastGroupIdRef.current = lastId;
+        scrollToBottom("instant");
+      } else {
+        const data = await fetchGroupMessages(lastGroupIdRef.current);
+        if (data.length > 0) {
+          setGroupMessages((prev) => [...prev, ...data]);
+          lastGroupIdRef.current = data[data.length - 1].id;
+          scrollToBottom("smooth");
+        }
+      }
     } catch (e) {
       if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
         setChatDenied(true);
@@ -381,22 +536,26 @@ export default function Chat() {
 
   const loadDMMessages = useCallback(async (userId: number, initial = false) => {
     try {
-      const data = await fetchDMs(userId);
-      setDmMessages(data);
-      const lastId = data.length > 0 ? data[data.length - 1].id : 0;
-      if (initial) scrollToBottom("instant");
-      else if (lastId !== lastDmIdRef.current) scrollToBottom("smooth");
-      lastDmIdRef.current = lastId;
+      if (initial) {
+        const data = await fetchDMs(userId);
+        setDmMessages(data);
+        const lastId = data.length > 0 ? data[data.length - 1].id : 0;
+        lastDmIdRef.current = lastId;
+        scrollToBottom("instant");
+      } else {
+        const data = await fetchDMs(userId, lastDmIdRef.current);
+        if (data.length > 0) {
+          setDmMessages((prev) => [...prev, ...data]);
+          lastDmIdRef.current = data[data.length - 1].id;
+          scrollToBottom("smooth");
+        }
+      }
     } catch (e) {
       if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
         setError("Você não tem permissão para visualizar esta conversa.");
       }
     }
   }, [scrollToBottom]);
-
-  const refreshInbox = useCallback(() => {
-    fetchDMInbox().then(setDmInbox).catch(() => {});
-  }, []);
 
   // ── Effects ───────────────────────────────────────────────────────────────
 
@@ -412,8 +571,7 @@ export default function Chat() {
           setChatDenied(true);
         }
       });
-    refreshInbox();
-  }, [markAllRead, refreshInbox]);
+  }, [markAllRead]);
 
   useEffect(() => {
     if (pollingRef.current) clearInterval(pollingRef.current);
@@ -422,22 +580,20 @@ export default function Chat() {
       loadGroupMessages(true);
       pollingRef.current = setInterval(() => {
         loadGroupMessages();
-        refreshInbox();
-      }, 4000);
+      }, 1000);
     } else {
       const uid = conversation.participant.id;
       lastDmIdRef.current = 0;
       loadDMMessages(uid, true);
       pollingRef.current = setInterval(() => {
         loadDMMessages(uid);
-        refreshInbox();
-      }, 4000);
+      }, 1000);
     }
 
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [conversation, loadGroupMessages, loadDMMessages, refreshInbox]);
+  }, [conversation, loadGroupMessages, loadDMMessages]);
 
   // Close emoji picker on outside click
   useEffect(() => {
@@ -449,6 +605,17 @@ export default function Chat() {
     if (showEmoji) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showEmoji]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -693,10 +860,30 @@ export default function Chat() {
     const text = input.trim();
     if (sending) return;
     const hasReady = draftAttachments.some((a) => a.status === "ready" || a.status === "uploaded");
-    if (!text && !hasReady) return;
+    if (editingDraft && !text) return;
+    if (!editingDraft && !text && !hasReady) return;
+    if (conversation.type === "dm" && user && conversation.participant.id === user.id) {
+      setError("Não é possível enviar mensagem para si mesmo.");
+      return;
+    }
     setSending(true);
     setError(null);
     try {
+      if (editingDraft) {
+        if (editingDraft.type === "group") {
+          const updated = await patchGroupMessage(editingDraft.messageId, text);
+          setGroupMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+        } else {
+          const updated = await patchDMMessage(editingDraft.messageId, text);
+          setDmMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+        }
+        setEditingDraft(null);
+        setInput("");
+        setTimeout(() => scrollToBottom("smooth"), 50);
+        inputRef.current?.focus();
+        return;
+      }
+
       const toUpload = draftAttachments.filter((a) => a.status === "ready" && !a.serverId);
       if (toUpload.length > 0) {
         setDraftAttachments((prev) => prev.map((p) => (p.status === "ready" && !p.serverId ? { ...p, status: "uploading", progress: 0 } : p)));
@@ -719,26 +906,32 @@ export default function Chat() {
       const attachmentIds = draftAttachments
         .filter((a) => a.status === "uploaded" && a.serverId)
         .map((a) => a.serverId!) as number[];
+      const replyToId = replyDraft?.id ?? null;
 
       if (conversation.type === "group") {
-        const msg = await postGroupMessage(text, attachmentIds);
+        const msg = await postGroupMessage(text, attachmentIds, replyToId);
         setGroupMessages((p) => [...p, msg]);
         lastGroupIdRef.current = msg.id;
       } else {
-        const msg = await postDM(conversation.participant.id, text, attachmentIds);
+        const msg = await postDM(conversation.participant.id, text, attachmentIds, replyToId);
         setDmMessages((p) => [...p, msg]);
         lastDmIdRef.current = msg.id;
-        refreshInbox();
       }
       setInput("");
+      setReplyDraft(null);
       setDraftAttachments((prev) => {
         for (const p of prev) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
         return [];
       });
       setTimeout(() => scrollToBottom("smooth"), 50);
       inputRef.current?.focus();
-    } catch {
-      setError("Não foi possível enviar. Tente novamente.");
+    } catch (e: any) {
+      const data = e && typeof e === "object" && "data" in e ? (e as any).data : null;
+      const specific = data && typeof data === "object"
+        ? (typeof (data as any).error === "string" ? (data as any).error : typeof (data as any).message === "string" ? (data as any).message : null)
+        : null;
+      const msg = specific ?? (typeof e?.message === "string" ? e.message.replace(/^HTTP\s+\d+\s+[^:]+:\s*/i, "") : null);
+      setError(msg || "Não foi possível enviar. Tente novamente.");
     } finally {
       setSending(false);
     }
@@ -851,6 +1044,58 @@ export default function Chat() {
     }
   };
 
+  const formatRemaining = (ms: number) => {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  const getEditRemainingLabel = (createdAtIso: string, senderId: number) => {
+    if (!user) return null;
+    if (senderId !== user.id) return null;
+    const created = new Date(createdAtIso).getTime();
+    const expires = created + 2 * 60 * 1000;
+    const remaining = expires - nowTick;
+    if (remaining <= 0) return null;
+    return formatRemaining(remaining);
+  };
+
+  const handleReplyToMessage = (msg: { id: number; senderId: number; senderName: string; senderRole: string; message: string; createdAt: string }) => {
+    setEditingDraft(null);
+    setReplyDraft({
+      id: msg.id,
+      senderId: msg.senderId,
+      message: msg.message,
+      createdAt: msg.createdAt,
+      sender: { id: msg.senderId, name: msg.senderName, role: msg.senderRole },
+    });
+    inputRef.current?.focus();
+  };
+
+  const handleEditMessage = (msg: { id: number; senderId: number; message: string; createdAt: string }) => {
+    if (!user) return;
+    if (msg.senderId !== user.id) return;
+    const created = new Date(msg.createdAt).getTime();
+    const expires = created + 2 * 60 * 1000;
+    if (nowTick >= expires) {
+      setError("Tempo de edição expirado.");
+      return;
+    }
+    setReplyDraft(null);
+    setDraftAttachments((prev) => {
+      for (const p of prev) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      return [];
+    });
+    setEditingDraft({ type: conversation.type === "group" ? "group" : "dm", messageId: msg.id, original: msg.message });
+    setInput(msg.message);
+    inputRef.current?.focus();
+  };
+
+  const toggleEditHistory = (messageId: number) => {
+    setOpenEditHistory((prev) => ({ ...prev, [messageId]: !prev[messageId] }));
+  };
+
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const inboxByPartner = new Map(dmInbox.map((d) => [d.partnerId, d]));
@@ -864,6 +1109,9 @@ export default function Chat() {
     id: number;
     senderId: number;
     message: string;
+    replyTo: ReplyRef | null;
+    editedAt?: string | null;
+    editHistory?: Array<{ message: string; editedAt: string }>;
     createdAt: string;
     senderName: string;
     senderRole: string;
@@ -980,6 +1228,15 @@ export default function Chat() {
           {/* ── DM list ── */}
           {participants
             .filter((p) => p.id !== user?.id)
+            .slice()
+            .sort((a, b) => {
+              const pa = inboxByPartner.get(a.id);
+              const pb = inboxByPartner.get(b.id);
+              const ta = pa ? new Date(pa.lastMessageAt).getTime() : 0;
+              const tb = pb ? new Date(pb.lastMessageAt).getTime() : 0;
+              if (ta !== tb) return tb - ta;
+              return a.name.localeCompare(b.name);
+            })
             .map((p) => {
               const preview = inboxByPartner.get(p.id);
               const isSelected = selectedParticipantId === p.id;
@@ -1089,8 +1346,12 @@ export default function Chat() {
               const showDate = dateLabel !== renderLastDate;
               renderLastDate = dateLabel;
               const isOwn = msg.senderId === user?.id;
+              const editRemainingLabel = getEditRemainingLabel(msg.createdAt, msg.senderId);
+              const canEdit = Boolean(editRemainingLabel);
+              const showHistory = Boolean(openEditHistory[msg.id]);
+              const replyId = msg.replyTo?.id ?? null;
               return (
-                <div key={msg.id}>
+                <div key={msg.id} id={`chat_msg_${msg.id}`} className="scroll-mt-24">
                   {showDate && (
                     <div className="flex justify-center my-3">
                       <span className="bg-white/80 dark:bg-[#182229]/80 text-xs text-gray-600 px-3 py-1 rounded-full shadow-sm">
@@ -1100,10 +1361,14 @@ export default function Chat() {
                   )}
                   <MessageBubble
                     isOwn={isOwn}
+                    highlighted={highlightedMessageId === msg.id}
                     senderId={msg.senderId}
                     senderName={msg.senderName}
                     senderRole={msg.senderRole}
                     message={msg.message}
+                    replyTo={msg.replyTo}
+                    editedAt={msg.editedAt}
+                    editHistory={msg.editHistory}
                     createdAt={msg.createdAt}
                     showSender={isGroupSelected}
                     attachments={msg.attachments}
@@ -1112,6 +1377,13 @@ export default function Chat() {
                     canDeleteAttachment={canDeleteAttachment}
                     getPreviewState={getPreviewState}
                     onTogglePreview={togglePreview}
+                    onReply={() => handleReplyToMessage(msg)}
+                    onJumpToReply={replyId ? () => jumpToMessage(replyId) : null}
+                    canEdit={canEdit}
+                    editRemainingLabel={editRemainingLabel}
+                    onEdit={() => handleEditMessage(msg)}
+                    showEditHistory={showHistory}
+                    onToggleEditHistory={() => toggleEditHistory(msg.id)}
                   />
                 </div>
               );
@@ -1145,6 +1417,40 @@ export default function Chat() {
             </div>
           )}
 
+          {editingDraft ? (
+            <div className="mb-2 rounded-lg border bg-amber-50/80 dark:bg-amber-900/20 px-3 py-2 text-xs flex items-start gap-2">
+              <div className="flex-1">
+                <p className="font-semibold">Editando mensagem</p>
+                <p className="text-muted-foreground mt-0.5 line-clamp-2">{editingDraft.original}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md p-1 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10"
+                onClick={() => { setEditingDraft(null); setInput(""); }}
+                aria-label="Cancelar edição"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+
+          {replyDraft ? (
+            <div className="mb-2 rounded-lg border bg-blue-50/80 dark:bg-blue-900/20 px-3 py-2 text-xs flex items-start gap-2">
+              <div className="flex-1">
+                <p className="font-semibold">Respondendo {replyDraft.sender.name}</p>
+                <p className="text-muted-foreground mt-0.5 line-clamp-2">{replyDraft.message || "(sem texto)"}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md p-1 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10"
+                onClick={() => setReplyDraft(null)}
+                aria-label="Cancelar resposta"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+
           <input
             ref={fileInputRef}
             type="file"
@@ -1154,7 +1460,7 @@ export default function Chat() {
             onChange={(e) => handlePickFiles(e.target.files)}
           />
 
-          {draftAttachments.length > 0 ? (
+          {draftAttachments.length > 0 && !editingDraft ? (
             <div className="mb-2 rounded-lg border bg-white/80 dark:bg-[#2a3942] p-2">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {draftAttachments.map((a) => (
@@ -1233,7 +1539,7 @@ export default function Chat() {
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white dark:bg-[#2a3942] text-muted-foreground hover:text-primary shadow-sm"
               title="Anexar arquivo"
               aria-label="Anexar arquivo"
-              disabled={sending}
+              disabled={sending || Boolean(editingDraft)}
             >
               <Paperclip className="h-5 w-5" />
             </button>
@@ -1249,7 +1555,9 @@ export default function Chat() {
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder={
-                  isGroupSelected
+                  editingDraft
+                    ? "Edite sua mensagem..."
+                    : isGroupSelected
                     ? "Mensagem para o grupo..."
                     : conversation.type === "dm"
                     ? `Mensagem para ${conversation.participant.name.split(" ")[0]}...`
@@ -1267,7 +1575,7 @@ export default function Chat() {
             <Button
               type="button"
               onClick={handleSend}
-              disabled={(sending || (!input.trim() && !draftAttachments.some((a) => a.status === "ready" || a.status === "uploaded")))}
+              disabled={sending || (editingDraft ? !input.trim() : (!input.trim() && !draftAttachments.some((a) => a.status === "ready" || a.status === "uploaded")))}
               size="icon"
               className="rounded-full h-11 w-11 shrink-0 shadow-sm"
             >
