@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
-import { ApiError } from "@workspace/api-client-react/custom-fetch";
 
 type AvatarPayload = { mimeType: string; data: string };
 
@@ -13,17 +12,8 @@ export function useUserAvatarDataUrl(userId: number | null | undefined) {
         const payload = await customFetch<AvatarPayload | null>(`/api/users/${userId}/avatar`);
         if (!payload) return null;
         return `data:${payload.mimeType};base64,${payload.data}`;
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return null;
-        if (
-          typeof e === "object"
-          && e
-          && "name" in e
-          && (e as any).name === "AbortError"
-        ) {
-          return null;
-        }
-        throw e;
+      } catch {
+        return null;
       }
     },
     retry: false,
