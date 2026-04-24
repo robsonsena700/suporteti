@@ -61,7 +61,7 @@ function AdminSettings() {
 
   const approveMutation = useApproveUser();
   const associateCoordinatorMutation = useMutation({
-    mutationFn: async ({ userId, coordinatorId }: { userId: number; coordinatorId: number }) => {
+    mutationFn: async ({ userId, coordinatorId }: { userId: number; coordinatorId: number | null }) => {
       return customFetch(`/api/users/${userId}/coordinators`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -115,10 +115,6 @@ function AdminSettings() {
   const handleApprove = (userId: number) => {
     const role = selectedRoles[userId] || UserRole.USER;
     const coordinatorId = approvalCoordinatorByUser[userId];
-    if (role === UserRole.USER && !coordinatorId) {
-      toast({ title: "Selecione um coordenador para o usuário", variant: "destructive" });
-      return;
-    }
     const payload: { role: UserRole; coordinatorId?: number } = { role };
     if (role === UserRole.USER && coordinatorId) {
       payload.coordinatorId = Number(coordinatorId);
@@ -144,7 +140,7 @@ function AdminSettings() {
   const handleAssociateCoordinator = (userId: number, coordinatorId: string) => {
     setAssociationCoordinatorByUser(prev => ({ ...prev, [userId]: coordinatorId }));
     associateCoordinatorMutation.mutate(
-      { userId, coordinatorId: Number(coordinatorId) },
+      { userId, coordinatorId: coordinatorId === "__none__" ? null : Number(coordinatorId) },
       {
         onSuccess: () => {
           toast({ title: "Coordenador associado com sucesso" });
@@ -361,16 +357,9 @@ function AdminSettings() {
                           const nextRole = v as UserRole;
                           setSelectedRoles((prev) => ({ ...prev, [user.id]: nextRole }));
 
-                          const coordinatorId = effectiveCoordinatorId ? Number(effectiveCoordinatorId) : undefined;
-                          if (nextRole === UserRole.USER && !coordinatorId) {
-                            toast({
-                              title: "Selecione um coordenador",
-                              description: "Para perfil Usuário, associe um coordenador.",
-                              variant: "destructive",
-                            });
-                            return;
-                          }
-
+                          const coordinatorId = effectiveCoordinatorId && effectiveCoordinatorId !== "__none__"
+                            ? Number(effectiveCoordinatorId)
+                            : undefined;
                           changeRoleMutation.mutate(
                             {
                               userId: user.id,
@@ -416,6 +405,7 @@ function AdminSettings() {
                             <SelectValue placeholder="Selecione e associe" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="__none__">Sem coordenador</SelectItem>
                             {activeCoordinators.map(coordinator => (
                               <SelectItem key={coordinator.id} value={String(coordinator.id)}>
                                 {coordinator.name}
