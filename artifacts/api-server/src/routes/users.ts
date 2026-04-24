@@ -723,7 +723,7 @@ router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Pr
 
   if (!u || !u.avatarMimeType || !u.avatarData) {
     res.setHeader("Cache-Control", "no-store");
-    res.status(204).end();
+    res.json(null);
     return;
   }
 
