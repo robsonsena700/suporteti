@@ -783,7 +783,7 @@ export default function TicketDetail() {
                       value={detailsMunicipality}
                       options={municipalityOptions}
                       loading={isLoadingMunicipalities}
-                      disabled={savingDetails || municipalityOptions.length === 0}
+                      disabled={savingDetails || !detailsUf}
                       onChange={setDetailsMunicipality}
                     />
                   </div>

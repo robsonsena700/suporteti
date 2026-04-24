@@ -40,11 +40,19 @@ export async function getMunicipalitiesByUf(
   if (cached && cached.expiresAt > now) return cached.value;
 
   const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(normalizedUf)}/municipios`;
-  const data = await fetchJson<Array<{ nome: string }>>(url);
-  const names = data.map((m) => m.nome).filter(Boolean).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  try {
+    const data = await fetchJson<Array<{ nome: string }>>(url);
+    const names = data
+      .map((m) => m.nome)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "pt-BR"));
 
-  municipalitiesCache.set(normalizedUf, { value: names, expiresAt: now + ttlMs });
-  return names;
+    municipalitiesCache.set(normalizedUf, { value: names, expiresAt: now + ttlMs });
+    return names;
+  } catch {
+    if (cached?.value?.length) return cached.value;
+    throw new Error("IBGE request failed");
+  }
 }
 
 export async function validateMunicipalityForUf(
@@ -58,4 +66,3 @@ export async function validateMunicipalityForUf(
   const municipalities = await getMunicipalitiesByUf(normalizedUf);
   return municipalities.includes(muni);
 }
-
