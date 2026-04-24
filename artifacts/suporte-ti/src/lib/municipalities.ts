@@ -54,19 +54,56 @@ export function getCachedMunicipalities(uf: string): string[] {
   return [];
 }
 
+async function fetchFromIbgeDirect(uf: string): Promise<string[]> {
+  const normalizedUf = uf.trim().toUpperCase();
+  const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(normalizedUf)}/municipios`;
+  const res = await fetch(url, {
+    headers: {
+      accept: "application/json",
+    },
+  });
+  if (!res.ok) throw new Error("IBGE indisponível");
+  const data = (await res.json()) as Array<{ nome?: unknown }>;
+  const municipalities = Array.isArray(data)
+    ? data
+        .map((m) => (typeof m?.nome === "string" ? m.nome : ""))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, "pt-BR"))
+    : [];
+  if (municipalities.length === 0) throw new Error("IBGE retornou lista vazia");
+  return municipalities;
+}
+
 export async function fetchMunicipalitiesByUf(uf: string): Promise<string[]> {
   const normalizedUf = uf.trim().toUpperCase();
-  const data = await customFetch<string[]>(`/api/ibge/ufs/${encodeURIComponent(normalizedUf)}/municipalities`);
-  const municipalities = Array.isArray(data) ? data : [];
+  const cached = getCachedMunicipalities(normalizedUf);
+  let municipalities: string[] = [];
 
-  const entry: CachedMunicipalities = {
-    municipalities,
-    updatedAt: Date.now(),
-  };
-  memoryCache.set(normalizedUf, entry);
-  const storage = readStorageCache();
-  storage[normalizedUf] = entry;
-  writeStorageCache(storage);
+  try {
+    const data = await customFetch<string[]>(
+      `/api/ibge/ufs/${encodeURIComponent(normalizedUf)}/municipalities`,
+    );
+    municipalities = Array.isArray(data) ? data : [];
+  } catch {
+    try {
+      municipalities = await fetchFromIbgeDirect(normalizedUf);
+    } catch {
+      if (cached.length > 0) return cached;
+      throw new Error("Falha ao carregar municípios");
+    }
+  }
+
+  if (municipalities.length > 0) {
+    const entry: CachedMunicipalities = {
+      municipalities,
+      updatedAt: Date.now(),
+    };
+    memoryCache.set(normalizedUf, entry);
+    const storage = readStorageCache();
+    storage[normalizedUf] = entry;
+    writeStorageCache(storage);
+  }
+
   return municipalities;
 }
 
