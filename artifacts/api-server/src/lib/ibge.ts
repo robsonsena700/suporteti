@@ -1,3 +1,6 @@
+import { db, municipalitiesTable } from "@workspace/db";
+import { and, asc, eq } from "drizzle-orm";
+
 type CacheEntry<T> = {
   value: T;
   expiresAt: number;
@@ -39,6 +42,22 @@ export async function getMunicipalitiesByUf(
   const cached = municipalitiesCache.get(normalizedUf);
   if (cached && cached.expiresAt > now) return cached.value;
 
+  try {
+    const rows = await db
+      .select({ name: municipalitiesTable.name })
+      .from(municipalitiesTable)
+      .where(eq(municipalitiesTable.uf, normalizedUf))
+      .orderBy(asc(municipalitiesTable.name));
+
+    if (rows.length > 0) {
+      const names = rows.map((r) => r.name);
+      municipalitiesCache.set(normalizedUf, { value: names, expiresAt: now + ttlMs });
+      return names;
+    }
+  } catch {
+    // Ignore DB lookup errors and fallback to IBGE.
+  }
+
   const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(normalizedUf)}/municipios`;
   try {
     const data = await fetchJson<Array<{ nome: string }>>(url);
@@ -62,6 +81,20 @@ export async function validateMunicipalityForUf(
   const normalizedUf = normalizeUf(uf);
   const muni = municipality.trim();
   if (!isValidUf(normalizedUf) || muni.length < 2) return false;
+
+  try {
+    const [row] = await db
+      .select({ ibgeCode: municipalitiesTable.ibgeCode })
+      .from(municipalitiesTable)
+      .where(and(
+        eq(municipalitiesTable.uf, normalizedUf),
+        eq(municipalitiesTable.name, muni),
+      ))
+      .limit(1);
+    if (row) return true;
+  } catch {
+    // Ignore DB lookup errors and fallback to IBGE.
+  }
 
   const municipalities = await getMunicipalitiesByUf(normalizedUf);
   return municipalities.includes(muni);

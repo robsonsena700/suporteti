@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate:municipalities:migration": "tsx ./src/generate-municipalities-seed-migration.ts",
     "hello": "tsx ./src/hello.ts",
+    "test:municipalities:seed": "tsx ./src/test-municipalities-seed-unit.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
