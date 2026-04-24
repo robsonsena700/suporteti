@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { 
   useListUsers, 
@@ -13,6 +13,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { UserAvatar } from "@/components/user/user-avatar";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -40,6 +42,20 @@ type ResetInfo = {
   temporaryPassword: string;
 };
 
+type UserRow = UserWithCoordinator & {
+  effectiveRole: UserRole;
+  effectiveCoordinatorId: string;
+};
+
+type RoleGroupKey = UserRole;
+
+const ROLE_GROUPS: Array<{ key: RoleGroupKey; label: string }> = [
+  { key: "COORDINATOR" as UserRole, label: "Coordenadores" },
+  { key: "ANALYST" as UserRole, label: "Analistas" },
+  { key: "USER" as UserRole, label: "Usuários" },
+  { key: "ADMIN" as UserRole, label: "Administradores" },
+];
+
 function AdminSettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -47,6 +63,9 @@ function AdminSettings() {
   const [approvalCoordinatorByUser, setApprovalCoordinatorByUser] = useState<Record<number, string>>({});
   const [associationCoordinatorByUser, setAssociationCoordinatorByUser] = useState<Record<number, string>>({});
   const [resetInfo, setResetInfo] = useState<ResetInfo | null>(null);
+  const [openMunicipalities, setOpenMunicipalities] = useState<string[]>([]);
+  const [openRoleGroupsByMunicipality, setOpenRoleGroupsByMunicipality] = useState<Record<string, string[]>>({});
+  const [openCoordinatorGroupsByMunicipality, setOpenCoordinatorGroupsByMunicipality] = useState<Record<string, string[]>>({});
 
   const { data: pendingUsers, isLoading: isLoadingPending } = useListUsers({ status: UserStatus.PENDING }, {
     query: { queryKey: getListUsersQueryKey({ status: UserStatus.PENDING }) }
@@ -102,6 +121,106 @@ function AdminSettings() {
     () => (allUsers ?? []).filter(user => user.role === UserRole.COORDINATOR && user.status === UserStatus.ACTIVE),
     [allUsers],
   );
+
+  const coordinatorById = useMemo(() => {
+    const map: Record<number, UserWithCoordinator> = {};
+    for (const user of allUsers ?? []) {
+      if (user.role === UserRole.COORDINATOR) map[user.id] = user;
+    }
+    return map;
+  }, [allUsers]);
+
+  const groupedByMunicipality = useMemo(() => {
+    const safe = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+    const byKey = new Map<string, { key: string; label: string; usersByRole: Record<RoleGroupKey, UserRow[]>; total: number }>();
+
+    for (const user of allUsers ?? []) {
+      const municipality = safe(user.municipality) || "Sem município";
+      const uf = safe(user.uf) || "--";
+      const key = `${municipality}__${uf}`;
+      const label = `${municipality} - ${uf}`;
+
+      const effectiveRole = selectedRoles[user.id] ?? user.role;
+      const effectiveCoordinatorId = associationCoordinatorByUser[user.id] ?? (user.coordinatorId ? String(user.coordinatorId) : "");
+
+      const row: UserRow = { ...user, effectiveRole, effectiveCoordinatorId };
+
+      let entry = byKey.get(key);
+      if (!entry) {
+        entry = {
+          key,
+          label,
+          total: 0,
+          usersByRole: {
+            [UserRole.COORDINATOR]: [],
+            [UserRole.ANALYST]: [],
+            [UserRole.USER]: [],
+            [UserRole.ADMIN]: [],
+          },
+        };
+        byKey.set(key, entry);
+      }
+
+      entry.total += 1;
+      entry.usersByRole[effectiveRole].push(row);
+    }
+
+    const out = Array.from(byKey.values());
+    out.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    for (const group of out) {
+      for (const { key } of ROLE_GROUPS) {
+        group.usersByRole[key].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      }
+    }
+    return out;
+  }, [allUsers, associationCoordinatorByUser, selectedRoles]);
+
+  const defaultOpenMunicipality = groupedByMunicipality[0]?.key;
+
+  useEffect(() => {
+    if (!defaultOpenMunicipality) return;
+    if (openMunicipalities.length > 0) return;
+    setOpenMunicipalities([defaultOpenMunicipality]);
+  }, [defaultOpenMunicipality, openMunicipalities.length]);
+
+  const handleExpandAll = () => {
+    const municipalityKeys = groupedByMunicipality.map(m => m.key);
+    const roleGroups: Record<string, string[]> = {};
+    const coordinatorGroups: Record<string, string[]> = {};
+    for (const municipality of groupedByMunicipality) {
+      roleGroups[municipality.key] = ROLE_GROUPS
+        .map(r => `${municipality.key}__${r.key}`)
+        .filter((value) => {
+          const roleKey = value.split("__").slice(-1)[0] as RoleGroupKey;
+          return municipality.usersByRole[roleKey]?.length > 0;
+        });
+
+      const users = municipality.usersByRole["USER" as UserRole] ?? [];
+      const coordinatorIds = new Set<number>();
+      for (const user of users) {
+        const raw = user.effectiveCoordinatorId;
+        if (!raw || raw === "__none__") continue;
+        const id = Number(raw);
+        if (Number.isFinite(id) && id > 0) coordinatorIds.add(id);
+      }
+      coordinatorGroups[municipality.key] = Array.from(coordinatorIds)
+        .sort((a, b) => {
+          const aName = coordinatorById[a]?.name ?? `Coordenador #${a}`;
+          const bName = coordinatorById[b]?.name ?? `Coordenador #${b}`;
+          return aName.localeCompare(bName, "pt-BR");
+        })
+        .map(id => `C_${id}`);
+    }
+    setOpenMunicipalities(municipalityKeys);
+    setOpenRoleGroupsByMunicipality(roleGroups);
+    setOpenCoordinatorGroupsByMunicipality(coordinatorGroups);
+  };
+
+  const handleCollapseAll = () => {
+    setOpenMunicipalities([]);
+    setOpenRoleGroupsByMunicipality({});
+    setOpenCoordinatorGroupsByMunicipality({});
+  };
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -185,6 +304,136 @@ function AdminSettings() {
       },
     );
   };
+
+  const renderUsersTable = (rows: UserRow[]) => (
+    <div className="w-full overflow-x-auto">
+      <div className="max-h-[420px] overflow-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nome</TableHead>
+              <TableHead>E-mail</TableHead>
+              <TableHead>Perfil</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Coordenador</TableHead>
+              <TableHead>Ações</TableHead>
+              <TableHead className="text-right">Criado em</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((user) => {
+              const effectiveRole = user.effectiveRole;
+              const effectiveCoordinatorId = user.effectiveCoordinatorId;
+
+              return (
+                <TableRow key={user.id}>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar userId={user.id} name={user.name} className="h-8 w-8" />
+                      <span>{user.name}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>
+                    <Select
+                      value={effectiveRole}
+                      onValueChange={(v) => {
+                        const nextRole = v as UserRole;
+                        setSelectedRoles((prev) => ({ ...prev, [user.id]: nextRole }));
+
+                        const coordinatorId = effectiveCoordinatorId && effectiveCoordinatorId !== "__none__"
+                          ? Number(effectiveCoordinatorId)
+                          : undefined;
+                        changeRoleMutation.mutate(
+                          {
+                            userId: user.id,
+                            role: nextRole,
+                            coordinatorId: nextRole === UserRole.USER ? coordinatorId : undefined,
+                          },
+                          {
+                            onSuccess: () => {
+                              toast({ title: "Perfil atualizado com sucesso" });
+                              queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+                            },
+                            onError: () => {
+                              toast({ title: "Erro ao atualizar perfil", variant: "destructive" });
+                            },
+                          },
+                        );
+                      }}
+                    >
+                      <SelectTrigger className="w-[200px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={UserRole.USER}>Usuário Padrão</SelectItem>
+                        <SelectItem value={UserRole.COORDINATOR}>Coordenador</SelectItem>
+                        <SelectItem value={UserRole.ANALYST}>Analista</SelectItem>
+                        <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={user.status === UserStatus.ACTIVE ? "default" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
+                      {user.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {effectiveRole === UserRole.USER ? (
+                      <Select
+                        value={effectiveCoordinatorId}
+                        onValueChange={(v) => handleAssociateCoordinator(user.id, v)}
+                        disabled={associateCoordinatorMutation.isPending}
+                      >
+                        <SelectTrigger className="w-[250px]">
+                          <SelectValue placeholder="Selecione e associe" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Sem coordenador</SelectItem>
+                          {activeCoordinators.map(coordinator => (
+                            <SelectItem key={coordinator.id} value={String(coordinator.id)}>
+                              {coordinator.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">Não se aplica</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleResetPassword(user)}
+                        disabled={resetPasswordMutation.isPending}
+                      >
+                        Redefinir senha
+                      </Button>
+                      {user.status !== UserStatus.PENDING && (
+                        <Button
+                          size="sm"
+                          variant={user.status === UserStatus.ACTIVE ? "destructive" : "default"}
+                          onClick={() => handleToggleStatus(user.id, user.status)}
+                          disabled={statusMutation.isPending}
+                        >
+                          {user.status === UserStatus.ACTIVE ? "Desativar" : "Ativar"}
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {format(new Date(user.createdAt), "dd/MM/yyyy", { locale: ptBR })}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-8">
@@ -322,130 +571,163 @@ function AdminSettings() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Todos os Usuários</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleExpandAll}>
+              Expandir todos
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleCollapseAll}>
+              Recolher todos
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoadingAll ? (
              <div className="text-center py-4">Carregando...</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>E-mail</TableHead>
-                  <TableHead>Perfil</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Coordenador</TableHead>
-                  <TableHead>Ações</TableHead>
-                  <TableHead className="text-right">Criado em</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {allUsers?.map((user) => {
-                  const effectiveRole = selectedRoles[user.id] ?? user.role;
-                  const effectiveCoordinatorId = associationCoordinatorByUser[user.id] ?? (user.coordinatorId ? String(user.coordinatorId) : "");
-
-                  return (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>
-                      <Select
-                        value={effectiveRole}
-                        onValueChange={(v) => {
-                          const nextRole = v as UserRole;
-                          setSelectedRoles((prev) => ({ ...prev, [user.id]: nextRole }));
-
-                          const coordinatorId = effectiveCoordinatorId && effectiveCoordinatorId !== "__none__"
-                            ? Number(effectiveCoordinatorId)
-                            : undefined;
-                          changeRoleMutation.mutate(
-                            {
-                              userId: user.id,
-                              role: nextRole,
-                              coordinatorId: nextRole === UserRole.USER ? coordinatorId : undefined,
-                            },
-                            {
-                              onSuccess: () => {
-                                toast({ title: "Perfil atualizado com sucesso" });
-                                queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
-                              },
-                              onError: () => {
-                                toast({ title: "Erro ao atualizar perfil", variant: "destructive" });
-                              },
-                            },
-                          );
-                        }}
-                      >
-                        <SelectTrigger className="w-[200px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={UserRole.USER}>Usuário Padrão</SelectItem>
-                          <SelectItem value={UserRole.COORDINATOR}>Coordenador</SelectItem>
-                          <SelectItem value={UserRole.ANALYST}>Analista</SelectItem>
-                          <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={user.status === UserStatus.ACTIVE ? "default" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
-                        {user.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {effectiveRole === UserRole.USER ? (
-                        <Select
-                          value={effectiveCoordinatorId}
-                          onValueChange={(v) => handleAssociateCoordinator(user.id, v)}
-                          disabled={associateCoordinatorMutation.isPending}
-                        >
-                          <SelectTrigger className="w-[250px]">
-                            <SelectValue placeholder="Selecione e associe" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Sem coordenador</SelectItem>
-                            {activeCoordinators.map(coordinator => (
-                              <SelectItem key={coordinator.id} value={String(coordinator.id)}>
-                                {coordinator.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">Não se aplica</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleResetPassword(user)}
-                          disabled={resetPasswordMutation.isPending}
-                        >
-                          Resetar senha
-                        </Button>
-                        {user.status !== UserStatus.PENDING && (
-                          <Button
-                            size="sm"
-                            variant={user.status === UserStatus.ACTIVE ? "destructive" : "default"}
-                            onClick={() => handleToggleStatus(user.id, user.status)}
-                            disabled={statusMutation.isPending}
-                          >
-                            {user.status === UserStatus.ACTIVE ? "Desativar" : "Ativar"}
-                          </Button>
-                        )}
+            <Accordion
+              type="multiple"
+              value={openMunicipalities}
+              onValueChange={setOpenMunicipalities}
+              className="space-y-3"
+            >
+              {groupedByMunicipality.map((municipality) => (
+                <AccordionItem
+                  key={municipality.key}
+                  value={municipality.key}
+                  className="border rounded-lg px-4 data-[state=open]:shadow-sm"
+                >
+                  <AccordionTrigger className="py-3 hover:no-underline">
+                    <div className="flex flex-1 items-center justify-between pr-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-base font-semibold">{municipality.label}</span>
+                        <Badge variant="secondary" className="uppercase tracking-wide">
+                          {municipality.total} usuários
+                        </Badge>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {format(new Date(user.createdAt), "dd/MM/yyyy", { locale: ptBR })}
-                    </TableCell>
-                  </TableRow>
-                )})}
-              </TableBody>
-            </Table>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-1">
+                    <Accordion
+                      type="multiple"
+                      value={openRoleGroupsByMunicipality[municipality.key] ?? []}
+                      onValueChange={(next) => {
+                        setOpenRoleGroupsByMunicipality((prev) => ({
+                          ...prev,
+                          [municipality.key]: next,
+                        }));
+                      }}
+                      className="space-y-2"
+                    >
+                      {ROLE_GROUPS.map((roleGroup) => {
+                        const users = municipality.usersByRole[roleGroup.key];
+                        if (users.length === 0) return null;
+
+                        return (
+                          <AccordionItem
+                            key={`${municipality.key}__${roleGroup.key}`}
+                            value={`${municipality.key}__${roleGroup.key}`}
+                            className="border rounded-md px-3 bg-background"
+                          >
+                            <AccordionTrigger className="py-2 hover:no-underline">
+                              <div className="flex flex-1 items-center justify-between pr-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{roleGroup.label}</span>
+                                  <span className="text-muted-foreground text-xs">({users.length})</span>
+                                </div>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="pt-2">
+                              {(() => {
+                                const isUserGroup = roleGroup.key === ("USER" as UserRole);
+                                if (!isUserGroup) return renderUsersTable(users);
+
+                                const noCoordinator: UserRow[] = [];
+                                const byCoordinator = new Map<number, UserRow[]>();
+
+                                for (const user of users) {
+                                  const raw = user.effectiveCoordinatorId;
+                                  if (!raw || raw === "__none__") {
+                                    noCoordinator.push(user);
+                                    continue;
+                                  }
+
+                                  const coordinatorId = Number(raw);
+                                  if (!Number.isFinite(coordinatorId) || coordinatorId <= 0) {
+                                    noCoordinator.push(user);
+                                    continue;
+                                  }
+
+                                  const list = byCoordinator.get(coordinatorId);
+                                  if (list) list.push(user);
+                                  else byCoordinator.set(coordinatorId, [user]);
+                                }
+
+                                const coordinatorGroups = Array.from(byCoordinator.entries())
+                                  .map(([coordinatorId, rows]) => {
+                                    const label = coordinatorById[coordinatorId]?.name ?? `Coordenador #${coordinatorId}`;
+                                    rows.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+                                    return { coordinatorId, label, rows };
+                                  })
+                                  .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+
+                                noCoordinator.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+                                return (
+                                  <div className="space-y-3">
+                                    {coordinatorGroups.length > 0 ? (
+                                      <Accordion
+                                        type="multiple"
+                                        value={openCoordinatorGroupsByMunicipality[municipality.key] ?? []}
+                                        onValueChange={(next) => {
+                                          setOpenCoordinatorGroupsByMunicipality((prev) => ({
+                                            ...prev,
+                                            [municipality.key]: next,
+                                          }));
+                                        }}
+                                        className="space-y-2"
+                                      >
+                                        {coordinatorGroups.map((group) => (
+                                          <AccordionItem
+                                            key={`${municipality.key}__C_${group.coordinatorId}`}
+                                            value={`C_${group.coordinatorId}`}
+                                            className="border rounded-md px-3 bg-muted/10"
+                                          >
+                                            <AccordionTrigger className="py-2 hover:no-underline">
+                                              <div className="flex flex-1 items-center justify-between pr-2">
+                                                <div className="flex items-center gap-3">
+                                                  <UserAvatar
+                                                    userId={group.coordinatorId}
+                                                    name={group.label}
+                                                    className="h-7 w-7"
+                                                  />
+                                                  <span className="font-medium">{group.label}</span>
+                                                  <span className="text-muted-foreground text-xs">({group.rows.length})</span>
+                                                </div>
+                                              </div>
+                                            </AccordionTrigger>
+                                            <AccordionContent className="pt-2">
+                                              {renderUsersTable(group.rows)}
+                                            </AccordionContent>
+                                          </AccordionItem>
+                                        ))}
+                                      </Accordion>
+                                    ) : null}
+
+                                    {noCoordinator.length > 0 ? renderUsersTable(noCoordinator) : null}
+                                  </div>
+                                );
+                              })()}
+                            </AccordionContent>
+                          </AccordionItem>
+                        );
+                      })}
+                    </Accordion>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
           )}
         </CardContent>
       </Card>
