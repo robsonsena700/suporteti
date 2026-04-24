@@ -12,12 +12,56 @@ import { useChatNotifications } from "@/lib/chat-notifications";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Button } from "@/components/ui/button";
 import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft, Paperclip, Download, Trash2, FileText, FileImage, Music, Eye, EyeOff, Reply, Pencil } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { getRoleLabel } from "@/lib/role-labels";
 
 const EmojiPicker = lazy(() => import("emoji-picker-react"));
+
+const CHAT_STATE_STORAGE_KEY = "suporte-ti:chat:state:v1";
+
+type PersistedConversation =
+  | { type: "group" }
+  | { type: "dm"; participantId: number };
+
+type PersistedChatState = {
+  actorUserId: number;
+  conversation: PersistedConversation;
+  scrollTop: number | null;
+  focusedMessageId: number | null;
+  savedAt: number;
+};
+
+function isPersistedDmConversation(conv: PersistedConversation): conv is Extract<PersistedConversation, { type: "dm" }> {
+  return conv.type === "dm";
+}
+
+function loadChatState(actorUserId: number | null | undefined): PersistedChatState | null {
+  if (typeof window === "undefined") return null;
+  if (!actorUserId) return null;
+  try {
+    const raw = window.localStorage.getItem(CHAT_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedChatState;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.actorUserId !== actorUserId) return null;
+    if (!parsed.conversation || typeof parsed.conversation !== "object") return null;
+    if (parsed.conversation.type !== "group" && parsed.conversation.type !== "dm") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveChatState(next: PersistedChatState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CHAT_STATE_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+  }
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -202,6 +246,7 @@ function MessageBubble({
   onDownloadAttachment,
   onDeleteAttachment,
   canDeleteAttachment,
+  isDeletingAttachment,
   getPreviewState,
   onTogglePreview,
   onReply,
@@ -227,6 +272,7 @@ function MessageBubble({
   onDownloadAttachment: (att: ChatAttachment) => void;
   onDeleteAttachment: (att: ChatAttachment) => void;
   canDeleteAttachment: (att: ChatAttachment) => boolean;
+  isDeletingAttachment: (att: ChatAttachment) => boolean;
   getPreviewState: (id: number) => AttachmentPreviewState | undefined;
   onTogglePreview: (att: ChatAttachment) => void;
   onReply: () => void;
@@ -282,7 +328,7 @@ function MessageBubble({
           </button>
         ) : null}
         {message ? (
-          <p className="text-[13px] leading-snug break-words whitespace-pre-wrap pr-10">
+          <p className="text-[13px] leading-snug break-words whitespace-pre-wrap pr-24">
             {message}
           </p>
         ) : null}
@@ -320,13 +366,14 @@ function MessageBubble({
         ) : null}
 
         {attachments.length > 0 ? (
-          <div className={cn("mt-2 grid gap-2", message ? "" : "pr-10")}>
+          <div className={cn("mt-2 grid gap-2", message ? "" : "pr-24")}>
             {attachments.map((att) => {
               const isImage = att.mimeType.startsWith("image/");
               const isAudio = att.mimeType.startsWith("audio/");
               const Icon = isImage ? FileImage : isAudio ? Music : FileText;
               const canInlinePreview = isImage || isAudio;
               const preview = getPreviewState(att.id);
+              const deleting = isDeletingAttachment(att);
               return (
                 <div
                   key={att.id}
@@ -377,11 +424,15 @@ function MessageBubble({
                   {canDeleteAttachment(att) ? (
                     <button
                       type="button"
-                      className="rounded-md p-1 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-400/10"
+                      className={cn(
+                        "rounded-md p-1 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-400/10",
+                        deleting ? "opacity-60 pointer-events-none" : ""
+                      )}
                       onClick={() => onDeleteAttachment(att)}
+                      disabled={deleting}
                       aria-label={`Excluir ${att.filename}`}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      {deleting ? <Spinner className="h-4 w-4 text-rose-600 dark:text-rose-300" /> : <Trash2 className="h-4 w-4" />}
                     </button>
                   ) : null}
                 </div>
@@ -415,36 +466,37 @@ function MessageBubble({
             })}
           </div>
         ) : null}
-        <span className="absolute bottom-1.5 right-2.5 text-[10px] text-gray-400">
-          {formatTime(createdAt)}
-        </span>
-
-        <div className={cn("absolute top-2 right-2 flex items-center gap-1", isOwn ? "flex-row" : "flex-row")}>
+        <div className="absolute bottom-1.5 right-2.5 z-20 flex items-center gap-4">
           {editRemainingLabel ? (
             <span className="text-[10px] text-gray-400" aria-label={`Tempo restante para edição ${editRemainingLabel}`}>
               {editRemainingLabel}
             </span>
           ) : null}
-          <button
-            type="button"
-            className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
-            onClick={onReply}
-            aria-label="Responder"
-            title="Responder"
-          >
-            <Reply className="h-4 w-4" />
-          </button>
-          {canEdit ? (
+          <div className="flex items-center gap-1">
             <button
               type="button"
               className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
-              onClick={onEdit}
-              aria-label="Editar"
-              title="Editar"
+              onClick={onReply}
+              aria-label="Responder"
+              title="Responder"
             >
-              <Pencil className="h-4 w-4" />
+              <Reply className="h-4 w-4" />
             </button>
-          ) : null}
+            {canEdit ? (
+              <button
+                type="button"
+                className="rounded-md p-1 text-gray-600 hover:bg-black/10 dark:text-gray-200 dark:hover:bg-white/10"
+                onClick={onEdit}
+                aria-label="Editar"
+                title="Editar"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+          <span className="text-[10px] text-gray-400">
+            {formatTime(createdAt)}
+          </span>
         </div>
       </div>
     </div>
@@ -484,12 +536,17 @@ export default function Chat() {
     error: string | null;
   }>>([]);
   const [attachmentPreviews, setAttachmentPreviews] = useState<Record<number, AttachmentPreviewState>>({});
+  const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Record<number, boolean>>({});
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastGroupIdRef = useRef<number>(0);
   const lastDmIdRef = useRef<number>(0);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrollTopRef = useRef<number>(0);
+  const pendingRestoreRef = useRef<PersistedChatState | null>(null);
+  const restoreInFlightRef = useRef<boolean>(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -557,6 +614,89 @@ export default function Chat() {
     }
   }, [scrollToBottom]);
 
+  const applyConversation = useCallback((conv: Conversation) => {
+    setInput("");
+    setError(null);
+    setShowEmoji(false);
+    setConversation(conv);
+    if (isMobile) setMobilePanel("chat");
+  }, [isMobile]);
+
+  const buildPersistedState = useCallback((): PersistedChatState | null => {
+    if (!user) return null;
+    const nextConversation =
+      conversation.type === "group"
+        ? { type: "group" as const }
+        : { type: "dm" as const, participantId: conversation.participant.id };
+    const scrollTop = messagesScrollRef.current?.scrollTop ?? lastScrollTopRef.current ?? null;
+    return {
+      actorUserId: user.id,
+      conversation: nextConversation,
+      scrollTop,
+      focusedMessageId: highlightedMessageId,
+      savedAt: Date.now(),
+    };
+  }, [user, conversation, highlightedMessageId]);
+
+  const saveNow = useCallback(() => {
+    const next = buildPersistedState();
+    if (!next) return;
+    saveChatState(next);
+  }, [buildPersistedState]);
+
+  const applyPersisted = useCallback((next: PersistedChatState | null) => {
+    if (!next) return;
+    pendingRestoreRef.current = next;
+    restoreInFlightRef.current = true;
+
+    const conv = next.conversation;
+    if (conv.type === "group") {
+      applyConversation({ type: "group" });
+      return;
+    }
+
+    if (!isPersistedDmConversation(conv)) return;
+    const participant = participants.find((p) => p.id === conv.participantId);
+    if (participant) applyConversation({ type: "dm", participant });
+  }, [applyConversation, participants]);
+
+  const attemptRestoreUi = useCallback(() => {
+    const start = performance.now();
+    const run = () => {
+      const state = pendingRestoreRef.current;
+      if (!state) {
+        restoreInFlightRef.current = false;
+        return;
+      }
+
+      const scroller = messagesScrollRef.current;
+      if (scroller && state.scrollTop != null) {
+        scroller.scrollTop = state.scrollTop;
+        lastScrollTopRef.current = state.scrollTop;
+      }
+
+      let focusDone = true;
+      if (state.focusedMessageId) {
+        const el = document.getElementById(`chat_msg_${state.focusedMessageId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "auto", block: "center" });
+          setHighlightedMessageId(state.focusedMessageId);
+        } else {
+          focusDone = false;
+        }
+      }
+
+      const elapsed = performance.now() - start;
+      if ((scroller && (state.scrollTop == null || scroller.scrollTop === state.scrollTop) && focusDone) || elapsed >= 500) {
+        restoreInFlightRef.current = false;
+        return;
+      }
+
+      requestAnimationFrame(run);
+    };
+    requestAnimationFrame(run);
+  }, []);
+
   // ── Effects ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -572,6 +712,43 @@ export default function Chat() {
         }
       });
   }, [markAllRead]);
+
+  useEffect(() => {
+    if (!user) return;
+    const state = loadChatState(user.id);
+    if (!state) return;
+    applyPersisted(state);
+    attemptRestoreUi();
+  }, [user, applyPersisted, attemptRestoreUi]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        saveNow();
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      const state = loadChatState(user.id);
+      if (!state) return;
+      applyPersisted(state);
+      attemptRestoreUi();
+    };
+
+    window.addEventListener("beforeunload", saveNow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("beforeunload", saveNow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user, saveNow, applyPersisted, attemptRestoreUi]);
+
+  useEffect(() => {
+    if (!user) return;
+    const id = setTimeout(() => saveNow(), 200);
+    return () => clearTimeout(id);
+  }, [user, conversation, highlightedMessageId, saveNow]);
 
   useEffect(() => {
     if (pollingRef.current) clearInterval(pollingRef.current);
@@ -636,11 +813,7 @@ export default function Chat() {
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   const selectConversation = (conv: Conversation) => {
-    setInput("");
-    setError(null);
-    setShowEmoji(false);
-    setConversation(conv);
-    if (isMobile) setMobilePanel("chat");
+    applyConversation(conv);
   };
 
   const goBackToList = () => {
@@ -970,10 +1143,12 @@ export default function Chat() {
 
   const canDeleteAttachment = (att: ChatAttachment) => {
     if (!user) return false;
-    return user.role === "ADMIN" || att.uploaderId === user.id;
+    return att.uploaderId === user.id;
   };
 
   const deleteAttachment = async (att: ChatAttachment) => {
+    if (deletingAttachmentIds[att.id]) return;
+    setDeletingAttachmentIds((prev) => ({ ...prev, [att.id]: true }));
     try {
       await customFetch(`/api/chat/attachments/${att.id}`, { method: "DELETE" });
       setAttachmentPreviews((prev) => {
@@ -991,8 +1166,17 @@ export default function Chat() {
           prev.map((m) => (m.attachments.some((a) => a.id === att.id) ? { ...m, attachments: m.attachments.filter((a) => a.id !== att.id) } : m))
         );
       }
-    } catch {
-      setError("Não foi possível excluir o anexo.");
+    } catch (e) {
+      if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
+        setError("Você só pode excluir anexos enviados por você.");
+      } else {
+        setError("Não foi possível excluir o anexo.");
+      }
+    } finally {
+      setDeletingAttachmentIds((prev) => {
+        const { [att.id]: _removed, ...rest } = prev;
+        return rest;
+      });
     }
   };
 
@@ -1315,7 +1499,11 @@ export default function Chat() {
 
         {/* Messages area */}
         <div
+          ref={messagesScrollRef}
           className="flex-1 overflow-y-auto px-4 py-3"
+          onScroll={(e) => {
+            lastScrollTopRef.current = e.currentTarget.scrollTop;
+          }}
           style={{
             backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
             backgroundColor: "#e5ddd5",
@@ -1375,6 +1563,7 @@ export default function Chat() {
                     onDownloadAttachment={downloadAttachment}
                     onDeleteAttachment={deleteAttachment}
                     canDeleteAttachment={canDeleteAttachment}
+                    isDeletingAttachment={(att) => Boolean(deletingAttachmentIds[att.id])}
                     getPreviewState={getPreviewState}
                     onTogglePreview={togglePreview}
                     onReply={() => handleReplyToMessage(msg)}
