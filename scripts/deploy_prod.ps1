@@ -1,9 +1,9 @@
 param(
   [string]$HostName = "177.104.190.211",
   [int]$Port = 22002,
-  [string]$User = "root",
+  [string]$User = "whs",
   [string]$KeyPath = "",
-  [string]$RemoteBaseDir = "/opt/suporte-ti",
+  [string]$RemoteBaseDir = "/home/whs/suporte-ti",
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
   [switch]$SkipBuild,
   [switch]$AllowDirty,
@@ -64,31 +64,6 @@ function ResolveKeyPath {
   }
 
   $inputWasEmpty = [string]::IsNullOrWhiteSpace($InputKeyPath)
-
-  $sshDir = Join-Path $RepoRoot "lib\ssh"
-  $userSshDir = Join-Path $env:USERPROFILE ".ssh"
-  $candidates = @(
-    (Join-Path $sshDir "id_rsa"),
-    (Join-Path $sshDir "suporteTi"),
-    (Join-Path $sshDir "id_ed25519"),
-    (Join-Path $userSshDir "id_ed25519"),
-    (Join-Path $userSshDir "id_rsa"),
-    (Join-Path $userSshDir "id_ecdsa")
-  )
-
-  foreach ($candidate in $candidates) {
-    if (Test-Path $candidate) {
-      Write-Host "Aviso: usando chave SSH encontrada automaticamente: $candidate" -ForegroundColor Yellow
-      return (Resolve-Path $candidate).Path
-    }
-  }
-
-  if (Test-Path $sshDir) {
-    $files = Get-ChildItem -Path $sshDir -File | Select-Object -ExpandProperty FullName
-    if ($files.Count -gt 0) {
-      throw "Chave SSH inválida/não encontrada em '$InputKeyPath'. Arquivos disponíveis em lib\\ssh:`n$($files -join "`n")"
-    }
-  }
 
   if ($inputWasEmpty) {
     return ""

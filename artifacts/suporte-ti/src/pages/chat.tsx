@@ -32,6 +32,7 @@ type PersistedChatState = {
   conversation: PersistedConversation;
   scrollTop: number | null;
   focusedMessageId: number | null;
+  draftMessage: string;
   savedAt: number;
 };
 
@@ -45,12 +46,23 @@ function loadChatState(actorUserId: number | null | undefined): PersistedChatSta
   try {
     const raw = window.localStorage.getItem(CHAT_STATE_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedChatState;
+    const parsed = JSON.parse(raw) as Partial<PersistedChatState>;
     if (!parsed || typeof parsed !== "object") return null;
     if (parsed.actorUserId !== actorUserId) return null;
     if (!parsed.conversation || typeof parsed.conversation !== "object") return null;
     if (parsed.conversation.type !== "group" && parsed.conversation.type !== "dm") return null;
-    return parsed;
+    if (parsed.scrollTop != null && typeof parsed.scrollTop !== "number") return null;
+    if (parsed.focusedMessageId != null && typeof parsed.focusedMessageId !== "number") return null;
+    if (parsed.draftMessage != null && typeof parsed.draftMessage !== "string") return null;
+    if (parsed.savedAt != null && typeof parsed.savedAt !== "number") return null;
+    return {
+      actorUserId: parsed.actorUserId as number,
+      conversation: parsed.conversation as PersistedConversation,
+      scrollTop: (parsed.scrollTop ?? null) as number | null,
+      focusedMessageId: (parsed.focusedMessageId ?? null) as number | null,
+      draftMessage: (parsed.draftMessage ?? "") as string,
+      savedAt: (parsed.savedAt ?? Date.now()) as number,
+    };
   } catch {
     return null;
   }
@@ -734,8 +746,8 @@ export default function Chat() {
     }
   }, [scrollToBottom, user, isNearBottom]);
 
-  const applyConversation = useCallback((conv: Conversation) => {
-    setInput("");
+  const applyConversation = useCallback((conv: Conversation, opts?: { preserveInput?: boolean }) => {
+    if (!opts?.preserveInput) setInput("");
     setError(null);
     setShowEmoji(false);
     setConversation(conv);
@@ -754,9 +766,10 @@ export default function Chat() {
       conversation: nextConversation,
       scrollTop,
       focusedMessageId: highlightedMessageId,
+      draftMessage: input,
       savedAt: Date.now(),
     };
-  }, [user, conversation, highlightedMessageId]);
+  }, [user, conversation, highlightedMessageId, input]);
 
   const saveNow = useCallback(() => {
     const next = buildPersistedState();
@@ -766,18 +779,21 @@ export default function Chat() {
 
   const applyPersisted = useCallback((next: PersistedChatState | null) => {
     if (!next) return;
+    setInput(next.draftMessage || "");
     pendingRestoreRef.current = next;
     restoreInFlightRef.current = true;
 
     const conv = next.conversation;
     if (conv.type === "group") {
-      applyConversation({ type: "group" });
+      applyConversation({ type: "group" }, { preserveInput: true });
       return;
     }
 
     if (!isPersistedDmConversation(conv)) return;
     const participant = participants.find((p) => p.id === conv.participantId);
-    if (participant) applyConversation({ type: "dm", participant });
+    if (participant) {
+      applyConversation({ type: "dm", participant }, { preserveInput: true });
+    }
   }, [applyConversation, participants]);
 
   const attemptRestoreUi = useCallback(() => {
@@ -840,6 +856,18 @@ export default function Chat() {
     applyPersisted(state);
     attemptRestoreUi();
   }, [user, applyPersisted, attemptRestoreUi]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!restoreInFlightRef.current) return;
+    const pending = pendingRestoreRef.current;
+    if (!pending) return;
+    const conv = pending.conversation;
+    if (!isPersistedDmConversation(conv)) return;
+    const has = participants.some((p) => p.id === conv.participantId);
+    if (!has) return;
+    applyPersisted(pending);
+  }, [user, participants, applyPersisted]);
 
   useEffect(() => {
     if (!user) return;

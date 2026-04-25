@@ -5,6 +5,7 @@ param(
   [string]$HeadBranch = "",
   [ValidateSet("merge", "rebase")][string]$SyncMode = "merge",
   [switch]$Yes,
+  [switch]$SkipBump,
   [switch]$SkipPr,
   [switch]$SkipDeploy,
   [switch]$SkipBuild,
@@ -140,18 +141,23 @@ if (-not $SkipBuild) {
 $appPkgPath = Join-Path (Get-Location) "artifacts\suporte-ti\package.json"
 $appPkg = Get-Content -Raw -Path $appPkgPath | ConvertFrom-Json
 $currentVersion = [string]$appPkg.version
-$newVersion = BumpSemver -Semver (ParseSemver -Version $currentVersion) -Bump $Bump
-Write-Host "Versão: $currentVersion -> $newVersion" -ForegroundColor Yellow
-ConfirmOrThrow -Message "Confirmar bump de versão?"
-$appPkg.version = $newVersion
-$json = $appPkg | ConvertTo-Json -Depth 100
-$json = ($json -replace "\r?\n", "`n") + "`n"
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($appPkgPath, $json, $utf8NoBom)
+$newVersion = $currentVersion
+if (-not $SkipBump) {
+  $newVersion = BumpSemver -Semver (ParseSemver -Version $currentVersion) -Bump $Bump
+  Write-Host "Versão: $currentVersion -> $newVersion" -ForegroundColor Yellow
+  ConfirmOrThrow -Message "Confirmar bump de versão?"
+  $appPkg.version = $newVersion
+  $json = $appPkg | ConvertTo-Json -Depth 100
+  $json = ($json -replace "\r?\n", "`n") + "`n"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($appPkgPath, $json, $utf8NoBom)
 
-ExecGit @("add", "artifacts/suporte-ti/package.json") | Out-Null
-ExecGit @("commit", "-m", "chore(release): v$newVersion") | Out-Null
-ExecGit @("push", $Remote, $HeadBranch) | Out-Null
+  ExecGit @("add", "artifacts/suporte-ti/package.json") | Out-Null
+  ExecGit @("commit", "-m", "chore(release): v$newVersion") | Out-Null
+  ExecGit @("push", $Remote, $HeadBranch) | Out-Null
+} else {
+  Write-Host "Aviso: SkipBump ativo - mantendo versão atual: v$newVersion" -ForegroundColor Yellow
+}
 
 if (-not $SkipPr) {
   $hasGh = $false
