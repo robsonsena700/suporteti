@@ -21,6 +21,7 @@ import { getRoleLabel } from "@/lib/role-labels";
 const EmojiPicker = lazy(() => import("emoji-picker-react"));
 
 const CHAT_STATE_STORAGE_KEY = "suporte-ti:chat:state:v1";
+const CHAT_MESSAGES_CACHE_KEY = "suporte-ti:chat:messages-cache:v1";
 
 type PersistedConversation =
   | { type: "group" }
@@ -61,6 +62,77 @@ function saveChatState(next: PersistedChatState): void {
     window.localStorage.setItem(CHAT_STATE_STORAGE_KEY, JSON.stringify(next));
   } catch {
   }
+}
+
+type CachedMessages = {
+  savedAt: number;
+  group: GroupMsg[] | null;
+  dms: Record<number, DM[]>;
+};
+
+function loadCachedMessages(actorUserId: number | null | undefined): CachedMessages | null {
+  if (typeof window === "undefined") return null;
+  if (!actorUserId) return null;
+  try {
+    const raw = window.localStorage.getItem(CHAT_MESSAGES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedMessages & { actorUserId?: number };
+    if (!parsed || typeof parsed !== "object") return null;
+    if ((parsed as any).actorUserId && (parsed as any).actorUserId !== actorUserId) return null;
+    if (!parsed.savedAt || typeof parsed.savedAt !== "number") return null;
+    if (!("group" in parsed) || !("dms" in parsed)) return null;
+    if (parsed.dms && typeof parsed.dms !== "object") return null;
+    return { savedAt: parsed.savedAt, group: parsed.group ?? null, dms: parsed.dms ?? {} };
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedMessages(actorUserId: number, next: Omit<CachedMessages, "savedAt">): void {
+  if (typeof window === "undefined") return;
+  const value: CachedMessages & { actorUserId: number } = {
+    actorUserId,
+    savedAt: Date.now(),
+    group: next.group,
+    dms: next.dms,
+  };
+  try {
+    window.localStorage.setItem(CHAT_MESSAGES_CACHE_KEY, JSON.stringify(value));
+  } catch {
+  }
+}
+
+function debounce<T extends (...args: any[]) => void>(fn: T, waitMs: number): T {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  return ((...args: any[]) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn(...args), waitMs);
+  }) as T;
+}
+
+function throttle<T extends (...args: any[]) => void>(fn: T, waitMs: number): T {
+  let last = 0;
+  let trailing: ReturnType<typeof setTimeout> | null = null;
+  let lastArgs: any[] | null = null;
+  return ((...args: any[]) => {
+    const now = Date.now();
+    const remaining = waitMs - (now - last);
+    lastArgs = args;
+    if (remaining <= 0) {
+      if (trailing) clearTimeout(trailing);
+      trailing = null;
+      last = now;
+      fn(...args);
+      return;
+    }
+    if (trailing) return;
+    trailing = setTimeout(() => {
+      trailing = null;
+      last = Date.now();
+      if (lastArgs) fn(...lastArgs);
+      lastArgs = null;
+    }, remaining);
+  }) as T;
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -507,7 +579,7 @@ function MessageBubble({
 
 export default function Chat() {
   const { user, token } = useAuth();
-  const { markAllRead, requestPermission, notifPermission, dmInbox } = useChatNotifications();
+  const { markAllRead, requestPermission, notifPermission, dmInbox, realtimeStatus, subscribeRealtime } = useChatNotifications();
   const isMobile = useIsMobile();
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
 
@@ -540,7 +612,7 @@ export default function Chat() {
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastGroupIdRef = useRef<number>(0);
   const lastDmIdRef = useRef<number>(0);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -550,9 +622,25 @@ export default function Chat() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageCacheRef = useRef<CachedMessages | null>(null);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentAtRef = useRef(0);
+  const typingSentRef = useRef(false);
+  const lastReadSentAtRef = useRef(0);
+  const lastReadMessageIdRef = useRef(0);
+
+  const [typingByUserId, setTypingByUserId] = useState<Record<number, { name: string; at: number; scope: "group" | "dm"; partnerId?: number }>>({});
+  const [dmReadByPartnerId, setDmReadByPartnerId] = useState<Record<number, number>>({});
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     bottomRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  const isNearBottom = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return true;
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    return remaining < 180;
   }, []);
 
   const jumpToMessage = useCallback((messageId: number) => {
@@ -568,51 +656,83 @@ export default function Chat() {
 
   // ── Data loading ─────────────────────────────────────────────────────────
 
-  const loadGroupMessages = useCallback(async (initial = false) => {
+  const loadGroupMessages = useCallback(async (initial = false): Promise<boolean> => {
     try {
       if (initial) {
         const data = await fetchGroupMessages();
         setGroupMessages(data);
         const lastId = data.length > 0 ? data[data.length - 1].id : 0;
         lastGroupIdRef.current = lastId;
+        if (user) {
+          const existing = messageCacheRef.current ?? loadCachedMessages(user.id) ?? { savedAt: Date.now(), group: null, dms: {} };
+          messageCacheRef.current = { ...existing, group: data };
+          saveCachedMessages(user.id, { group: data, dms: existing.dms });
+        }
         scrollToBottom("instant");
+        return true;
       } else {
         const data = await fetchGroupMessages(lastGroupIdRef.current);
         if (data.length > 0) {
+          const shouldStick = isNearBottom();
           setGroupMessages((prev) => [...prev, ...data]);
           lastGroupIdRef.current = data[data.length - 1].id;
-          scrollToBottom("smooth");
+          if (user) {
+            const existing = messageCacheRef.current ?? loadCachedMessages(user.id) ?? { savedAt: Date.now(), group: null, dms: {} };
+            const merged = [...(existing.group ?? []), ...data].slice(-200);
+            messageCacheRef.current = { ...existing, group: merged };
+            saveCachedMessages(user.id, { group: merged, dms: existing.dms });
+          }
+          if (shouldStick) scrollToBottom("smooth");
         }
+        return true;
       }
     } catch (e) {
       if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
         setChatDenied(true);
       }
+      return false;
     }
-  }, [scrollToBottom]);
+  }, [scrollToBottom, user, isNearBottom]);
 
-  const loadDMMessages = useCallback(async (userId: number, initial = false) => {
+  const loadDMMessages = useCallback(async (userId: number, initial = false): Promise<boolean> => {
     try {
       if (initial) {
         const data = await fetchDMs(userId);
         setDmMessages(data);
         const lastId = data.length > 0 ? data[data.length - 1].id : 0;
         lastDmIdRef.current = lastId;
+        if (user) {
+          const existing = messageCacheRef.current ?? loadCachedMessages(user.id) ?? { savedAt: Date.now(), group: null, dms: {} };
+          const nextDms = { ...existing.dms, [userId]: data.slice(-200) };
+          messageCacheRef.current = { ...existing, dms: nextDms };
+          saveCachedMessages(user.id, { group: existing.group, dms: nextDms });
+        }
         scrollToBottom("instant");
+        return true;
       } else {
         const data = await fetchDMs(userId, lastDmIdRef.current);
         if (data.length > 0) {
+          const shouldStick = isNearBottom();
           setDmMessages((prev) => [...prev, ...data]);
           lastDmIdRef.current = data[data.length - 1].id;
-          scrollToBottom("smooth");
+          if (user) {
+            const existing = messageCacheRef.current ?? loadCachedMessages(user.id) ?? { savedAt: Date.now(), group: null, dms: {} };
+            const merged = [...(existing.dms[userId] ?? []), ...data].slice(-200);
+            const nextDms = { ...existing.dms, [userId]: merged };
+            messageCacheRef.current = { ...existing, dms: nextDms };
+            saveCachedMessages(user.id, { group: existing.group, dms: nextDms });
+          }
+          if (shouldStick) scrollToBottom("smooth");
         }
+        return true;
       }
     } catch (e) {
       if (typeof e === "object" && e && "status" in e && (e as { status: number }).status === 403) {
         setError("Você não tem permissão para visualizar esta conversa.");
       }
+      return false;
     }
-  }, [scrollToBottom]);
+  }, [scrollToBottom, user, isNearBottom]);
 
   const applyConversation = useCallback((conv: Conversation) => {
     setInput("");
@@ -723,6 +843,18 @@ export default function Chat() {
 
   useEffect(() => {
     if (!user) return;
+    const cached = loadCachedMessages(user.id);
+    if (!cached) return;
+    if (Date.now() - cached.savedAt > 5 * 60_000) return;
+    messageCacheRef.current = cached;
+    if (cached.group && cached.group.length > 0) {
+      setGroupMessages(cached.group);
+      lastGroupIdRef.current = cached.group[cached.group.length - 1].id;
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         saveNow();
@@ -751,26 +883,199 @@ export default function Chat() {
   }, [user, conversation, highlightedMessageId, saveNow]);
 
   useEffect(() => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
+    if (!user) return;
+    if (pollingRef.current) clearTimeout(pollingRef.current);
 
-    if (conversation.type === "group") {
-      loadGroupMessages(true);
-      pollingRef.current = setInterval(() => {
-        loadGroupMessages();
-      }, 1000);
-    } else {
-      const uid = conversation.participant.id;
-      lastDmIdRef.current = 0;
-      loadDMMessages(uid, true);
-      pollingRef.current = setInterval(() => {
-        loadDMMessages(uid);
-      }, 1000);
+    if (conversation.type === "dm") {
+      const cached = messageCacheRef.current ?? loadCachedMessages(user.id);
+      const cachedDm = cached?.dms?.[conversation.participant.id] ?? null;
+      if (cachedDm && cachedDm.length > 0) {
+        setDmMessages(cachedDm);
+        lastDmIdRef.current = cachedDm[cachedDm.length - 1].id;
+      }
     }
 
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+    let stopped = false;
+    let first = true;
+    let backoffMs = realtimeStatus === "connected" ? 60_000 : 2_000;
+
+    const loop = async () => {
+      if (stopped) return;
+      const isHidden = document.visibilityState !== "visible";
+      const baseMs = realtimeStatus === "connected" ? 60_000 : (isHidden ? 10_000 : 2_000);
+
+      let ok = true;
+      if (conversation.type === "group") {
+        ok = await loadGroupMessages(first);
+      } else {
+        const uid = conversation.participant.id;
+        if (first) lastDmIdRef.current = 0;
+        ok = await loadDMMessages(uid, first);
+      }
+      first = false;
+      if (stopped) return;
+
+      if (realtimeStatus === "connected") {
+        backoffMs = baseMs;
+      } else {
+        backoffMs = ok ? baseMs : Math.min(30_000, Math.round(backoffMs * 1.6));
+      }
+
+      pollingRef.current = setTimeout(loop, backoffMs);
     };
-  }, [conversation, loadGroupMessages, loadDMMessages]);
+
+    void loop();
+
+    return () => {
+      stopped = true;
+      if (pollingRef.current) clearTimeout(pollingRef.current);
+      pollingRef.current = null;
+    };
+  }, [conversation, loadGroupMessages, loadDMMessages, realtimeStatus, user]);
+
+  useEffect(() => {
+    if (realtimeStatus !== "connected") return;
+    if (!user) return;
+    const unsub = subscribeRealtime(({ type, payload }) => {
+      if (!payload || typeof payload !== "object") return;
+      if (type === "group_message") {
+        const id = Number((payload as any).id);
+        if (!Number.isInteger(id) || id <= 0) return;
+        const msg: GroupMsg = {
+          id,
+          senderId: Number((payload as any).senderId),
+          message: String((payload as any).message ?? ""),
+          replyTo: (payload as any).replyTo ?? null,
+          editedAt: null,
+          editHistory: undefined,
+          createdAt: String((payload as any).createdAt ?? new Date().toISOString()),
+          sender: { id: Number((payload as any).senderId), name: String((payload as any).senderName ?? ""), role: String((payload as any).senderRole ?? "") },
+          attachments: Array.isArray((payload as any).attachments) ? (payload as any).attachments : [],
+        };
+        setGroupMessages((prev) => {
+          if (prev.some((p) => p.id === msg.id)) return prev;
+          const next = [...prev, msg];
+          if (user) {
+            const existing = messageCacheRef.current ?? loadCachedMessages(user.id) ?? { savedAt: Date.now(), group: null, dms: {} };
+            const merged = [...(existing.group ?? []), msg].slice(-200);
+            messageCacheRef.current = { ...existing, group: merged };
+            saveCachedMessages(user.id, { group: merged, dms: existing.dms });
+          }
+          return next;
+        });
+        lastGroupIdRef.current = Math.max(lastGroupIdRef.current, msg.id);
+        if (isNearBottom()) scrollToBottom("smooth");
+        return;
+      }
+
+      if (type === "dm_message") {
+        if (conversation.type !== "dm") return;
+        const id = Number((payload as any).id);
+        if (!Number.isInteger(id) || id <= 0) return;
+        const senderId = Number((payload as any).senderId);
+        const receiverId = Number((payload as any).receiverId);
+        const otherId = senderId === user.id ? receiverId : senderId;
+        if (otherId !== conversation.participant.id) return;
+
+        const msg: DM = {
+          id,
+          senderId,
+          receiverId,
+          message: String((payload as any).message ?? ""),
+          replyTo: (payload as any).replyTo ?? null,
+          editedAt: null,
+          editHistory: undefined,
+          createdAt: String((payload as any).createdAt ?? new Date().toISOString()),
+          sender: { id: senderId, name: String((payload as any).senderName ?? ""), role: String((payload as any).senderRole ?? "") },
+          receiver: { id: receiverId, name: String((payload as any).receiverName ?? ""), role: String((payload as any).receiverRole ?? "") },
+          attachments: Array.isArray((payload as any).attachments) ? (payload as any).attachments : [],
+        };
+
+        setDmMessages((prev) => {
+          if (prev.some((p) => p.id === msg.id)) return prev;
+          const next = [...prev, msg];
+          if (user) {
+            const existing = messageCacheRef.current ?? loadCachedMessages(user.id) ?? { savedAt: Date.now(), group: null, dms: {} };
+            const merged = [...(existing.dms[otherId] ?? []), msg].slice(-200);
+            const nextDms = { ...existing.dms, [otherId]: merged };
+            messageCacheRef.current = { ...existing, dms: nextDms };
+            saveCachedMessages(user.id, { group: existing.group, dms: nextDms });
+          }
+          return next;
+        });
+        lastDmIdRef.current = Math.max(lastDmIdRef.current, msg.id);
+        if (isNearBottom()) scrollToBottom("smooth");
+        return;
+      }
+
+      if (type === "group_message_edited") {
+        const id = Number((payload as any).id);
+        if (!Number.isInteger(id) || id <= 0) return;
+        const editedAt = typeof (payload as any).editedAt === "string" ? (payload as any).editedAt : null;
+        const message = typeof (payload as any).message === "string" ? (payload as any).message : null;
+        const editHistory = Array.isArray((payload as any).editHistory) ? (payload as any).editHistory : undefined;
+        setGroupMessages((prev) => prev.map((m) => m.id === id ? { ...m, message: message ?? m.message, editedAt: editedAt ?? m.editedAt, editHistory: editHistory ?? m.editHistory } : m));
+        return;
+      }
+
+      if (type === "dm_message_edited") {
+        if (conversation.type !== "dm") return;
+        const id = Number((payload as any).id);
+        if (!Number.isInteger(id) || id <= 0) return;
+        const editedAt = typeof (payload as any).editedAt === "string" ? (payload as any).editedAt : null;
+        const message = typeof (payload as any).message === "string" ? (payload as any).message : null;
+        const editHistory = Array.isArray((payload as any).editHistory) ? (payload as any).editHistory : undefined;
+        setDmMessages((prev) => prev.map((m) => m.id === id ? { ...m, message: message ?? m.message, editedAt: editedAt ?? m.editedAt, editHistory: editHistory ?? m.editHistory } : m));
+        return;
+      }
+
+      if (type === "typing") {
+        const scope = (payload as any).scope;
+        const senderId = Number((payload as any).senderId);
+        const isTyping = !!(payload as any).isTyping;
+        const name = String((payload as any).senderName ?? "");
+        const at = Date.now();
+        if (!Number.isInteger(senderId) || senderId <= 0 || senderId === user.id) return;
+
+        if (scope === "group") {
+          setTypingByUserId((prev) => {
+            const next = { ...prev };
+            if (!isTyping) {
+              delete next[senderId];
+              return next;
+            }
+            next[senderId] = { name, at, scope: "group" };
+            return next;
+          });
+          return;
+        }
+        if (scope === "dm") {
+          const receiverId = Number((payload as any).receiverId);
+          if (receiverId !== user.id) return;
+          setTypingByUserId((prev) => {
+            const next = { ...prev };
+            if (!isTyping) {
+              delete next[senderId];
+              return next;
+            }
+            next[senderId] = { name, at, scope: "dm", partnerId: senderId };
+            return next;
+          });
+        }
+        return;
+      }
+
+      if (type === "dm_read") {
+        const readerId = Number((payload as any).readerId);
+        const otherUserId = Number((payload as any).otherUserId);
+        const messageId = Number((payload as any).messageId);
+        if (!Number.isInteger(readerId) || !Number.isInteger(otherUserId) || !Number.isInteger(messageId)) return;
+        const partnerId = readerId === user.id ? otherUserId : readerId;
+        setDmReadByPartnerId((prev) => ({ ...prev, [partnerId]: Math.max(prev[partnerId] ?? 0, messageId) }));
+      }
+    });
+    return unsub;
+  }, [realtimeStatus, subscribeRealtime, conversation, user, isNearBottom, scrollToBottom]);
 
   // Close emoji picker on outside click
   useEffect(() => {
@@ -787,6 +1092,18 @@ export default function Chat() {
     const id = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    setTypingByUserId((prev) => {
+      const next: typeof prev = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const id = Number(k);
+        if (Date.now() - v.at > 2500) continue;
+        next[id] = v;
+      }
+      return next;
+    });
+  }, [nowTick]);
 
   useEffect(() => {
     return () => {
@@ -1280,6 +1597,60 @@ export default function Chat() {
     setOpenEditHistory((prev) => ({ ...prev, [messageId]: !prev[messageId] }));
   };
 
+  const sendTypingEvent = useCallback(async (isTyping: boolean) => {
+    if (!token || !user) return;
+    if (conversation.type === "group") {
+      await customFetch("/api/chat/typing", {
+        method: "POST",
+        body: JSON.stringify({ scope: "group", isTyping }),
+      });
+      return;
+    }
+    if (conversation.type === "dm") {
+      await customFetch("/api/chat/typing", {
+        method: "POST",
+        body: JSON.stringify({ scope: "dm", receiverId: conversation.participant.id, isTyping }),
+      });
+    }
+  }, [token, user, conversation]);
+
+  const onInputChange = (text: string) => {
+    setInput(text);
+    if (!token || !user) return;
+    const now = Date.now();
+    if (!typingSentRef.current || now - lastTypingSentAtRef.current >= 900) {
+      lastTypingSentAtRef.current = now;
+      typingSentRef.current = true;
+      void sendTypingEvent(true);
+    }
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = setTimeout(() => {
+      typingSentRef.current = false;
+      void sendTypingEvent(false);
+    }, 1100);
+  };
+
+  const maybeSendReadReceipt = useCallback(() => {
+    if (!token || !user) return;
+    if (conversation.type !== "dm") return;
+    if (document.visibilityState !== "visible") return;
+    if (!document.hasFocus()) return;
+    if (!isNearBottom()) return;
+    const otherId = conversation.participant.id;
+    const lastOtherMsg = [...dmMessages].reverse().find((m) => m.senderId === otherId);
+    if (!lastOtherMsg) return;
+
+    const now = Date.now();
+    if (now - lastReadSentAtRef.current < 1500) return;
+    if (lastOtherMsg.id <= lastReadMessageIdRef.current) return;
+    lastReadSentAtRef.current = now;
+    lastReadMessageIdRef.current = lastOtherMsg.id;
+    void customFetch("/api/chat/read", {
+      method: "POST",
+      body: JSON.stringify({ otherUserId: otherId, messageId: lastOtherMsg.id }),
+    });
+  }, [token, user, conversation, dmMessages, isNearBottom]);
+
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const inboxByPartner = new Map(dmInbox.map((d) => [d.partnerId, d]));
@@ -1288,6 +1659,45 @@ export default function Chat() {
 
   const isGroupSelected = conversation.type === "group";
   const selectedParticipantId = conversation.type === "dm" ? conversation.participant.id : null;
+  const connectionLabel =
+    realtimeStatus === "connected"
+      ? "Conectado"
+      : realtimeStatus === "connecting"
+      ? "Conectando…"
+      : realtimeStatus === "reconnecting"
+      ? "Reconectando…"
+      : "Tempo real desativado";
+  const connectionDotClass =
+    realtimeStatus === "connected"
+      ? "bg-green-500"
+      : realtimeStatus === "connecting" || realtimeStatus === "reconnecting"
+      ? "bg-amber-500"
+      : "bg-muted-foreground/50";
+
+  const groupTypers = Object.entries(typingByUserId)
+    .filter(([, v]) => v.scope === "group")
+    .slice(0, 3)
+    .map(([, v]) => v.name.split(" ")[0])
+    .filter(Boolean);
+  const dmTyping =
+    conversation.type === "dm" && typingByUserId[conversation.participant.id]?.scope === "dm"
+      ? true
+      : false;
+  const typingLabel = isGroupSelected
+    ? (groupTypers.length === 0 ? "" : groupTypers.length === 1 ? `${groupTypers[0]} digitando…` : `${groupTypers.slice(0, 2).join(", ")} digitando…`)
+    : dmTyping
+    ? "digitando…"
+    : "";
+
+  const dmReadLabel = (() => {
+    if (conversation.type !== "dm") return "";
+    const partnerId = conversation.participant.id;
+    const readId = dmReadByPartnerId[partnerId] ?? 0;
+    const lastOwn = [...dmMessages].reverse().find((m) => m.senderId === user?.id);
+    if (!lastOwn) return "";
+    if (readId >= lastOwn.id) return "Lido";
+    return "";
+  })();
 
   const currentMessages: Array<{
     id: number;
@@ -1489,10 +1899,16 @@ export default function Chat() {
             ) : null}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold leading-none truncate">{headerTitle}</p>
+            <p className="text-sm font-semibold leading-none truncate flex items-center gap-2">
+              <span className="truncate">{headerTitle}</span>
+              <span className="inline-flex items-center gap-1.5 shrink-0">
+                <span className={cn("h-2 w-2 rounded-full", connectionDotClass)} />
+                <span className="text-[10px] text-muted-foreground">{connectionLabel}</span>
+              </span>
+            </p>
             <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
               {!isGroupSelected && <Lock className="h-3 w-3 shrink-0" />}
-              {headerSub}
+              {typingLabel ? `${headerSub} • ${typingLabel}` : headerSub}
             </p>
           </div>
         </div>
@@ -1503,6 +1919,7 @@ export default function Chat() {
           className="flex-1 overflow-y-auto px-4 py-3"
           onScroll={(e) => {
             lastScrollTopRef.current = e.currentTarget.scrollTop;
+            maybeSendReadReceipt();
           }}
           style={{
             backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
@@ -1583,6 +2000,9 @@ export default function Chat() {
 
         {/* Input footer */}
         <div className="relative px-3 py-3 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-border shrink-0">
+          {conversation.type === "dm" && dmReadLabel ? (
+            <div className="mb-1 text-[11px] text-muted-foreground">{dmReadLabel}</div>
+          ) : null}
 
           {/* Emoji Picker */}
           {showEmoji && (

@@ -219,6 +219,27 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
     ? await db.query.directMessagesTable.findFirst({ where: eq(directMessagesTable.id, replyId), with: { sender: true, receiver: true } })
     : null;
 
+  const attachments = ids.length
+    ? await db.update(chatAttachmentsTable)
+      .set({ directMessageId: msg.id })
+      .where(and(
+        inArray(chatAttachmentsTable.id, ids),
+        eq(chatAttachmentsTable.uploaderId, me),
+        eq(chatAttachmentsTable.scope, "DM"),
+        eq(chatAttachmentsTable.dmReceiverId, other),
+        isNull(chatAttachmentsTable.chatMessageId),
+        isNull(chatAttachmentsTable.directMessageId),
+      ))
+      .returning({
+        id: chatAttachmentsTable.id,
+        filename: chatAttachmentsTable.filename,
+        mimeType: chatAttachmentsTable.mimeType,
+        size: chatAttachmentsTable.size,
+        uploaderId: chatAttachmentsTable.uploaderId,
+        createdAt: chatAttachmentsTable.createdAt,
+      })
+    : [];
+
   emitDirectMessage({
     messageId: msg.id,
     message: msg.message,
@@ -229,6 +250,24 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
     receiverId: receiver.id,
     receiverName: receiver.name,
     receiverRole: receiver.role,
+    replyTo: reply
+      ? {
+        id: reply.id,
+        senderId: reply.senderId,
+        receiverId: reply.receiverId,
+        message: reply.message,
+        createdAt: reply.createdAt,
+        sender: { id: reply.sender.id, name: reply.sender.name, role: reply.sender.role },
+      }
+      : null,
+    attachments: attachments.map((a) => ({
+      id: a.id,
+      filename: a.filename,
+      mimeType: a.mimeType,
+      size: a.size,
+      uploaderId: a.uploaderId,
+      createdAt: a.createdAt,
+    })),
   });
 
   res.status(201).json({
@@ -255,26 +294,7 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
     createdAt: msg.createdAt,
     sender: { id: sender.id, name: sender.name, role: sender.role },
     receiver: { id: receiver.id, name: receiver.name, role: receiver.role },
-    attachments: ids.length
-      ? await db.update(chatAttachmentsTable)
-        .set({ directMessageId: msg.id })
-        .where(and(
-          inArray(chatAttachmentsTable.id, ids),
-          eq(chatAttachmentsTable.uploaderId, me),
-          eq(chatAttachmentsTable.scope, "DM"),
-          eq(chatAttachmentsTable.dmReceiverId, other),
-          isNull(chatAttachmentsTable.chatMessageId),
-          isNull(chatAttachmentsTable.directMessageId),
-        ))
-        .returning({
-          id: chatAttachmentsTable.id,
-          filename: chatAttachmentsTable.filename,
-          mimeType: chatAttachmentsTable.mimeType,
-          size: chatAttachmentsTable.size,
-          uploaderId: chatAttachmentsTable.uploaderId,
-          createdAt: chatAttachmentsTable.createdAt,
-        })
-      : [],
+    attachments,
   });
 });
 
@@ -353,7 +373,9 @@ router.patch("/chat/dm/message/:id", requireAuth, requireActive, requireChatAcce
     messageId: updated.id,
     senderId: updated.senderId,
     receiverId: updated.receiverId,
+    message: updated.message,
     editedAt: now,
+    editHistory: historyResult.history,
   });
 
   res.json({
