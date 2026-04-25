@@ -100,7 +100,7 @@ function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
   $sshArgs = @(
     "-p", "$Port",
-    "-o", "BatchMode=yes",
+    "-o", "BatchMode=no",
     "-o", "StrictHostKeyChecking=accept-new",
     "-o", "ConnectTimeout=10",
     "-o", "ServerAliveInterval=15",
@@ -124,7 +124,7 @@ function ScpToRemote {
   }
   $scpArgs = @(
     "-P", "$Port",
-    "-o", "BatchMode=yes",
+    "-o", "BatchMode=no",
     "-o", "StrictHostKeyChecking=accept-new",
     "-o", "ConnectTimeout=10",
     "-o", "ServerAliveInterval=15",
