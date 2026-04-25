@@ -66,10 +66,14 @@ function ResolveKeyPath {
   $inputWasEmpty = [string]::IsNullOrWhiteSpace($InputKeyPath)
 
   $sshDir = Join-Path $RepoRoot "lib\ssh"
+  $userSshDir = Join-Path $env:USERPROFILE ".ssh"
   $candidates = @(
     (Join-Path $sshDir "id_rsa"),
     (Join-Path $sshDir "suporteTi"),
-    (Join-Path $sshDir "id_ed25519")
+    (Join-Path $sshDir "id_ed25519"),
+    (Join-Path $userSshDir "id_ed25519"),
+    (Join-Path $userSshDir "id_rsa"),
+    (Join-Path $userSshDir "id_ecdsa")
   )
 
   foreach ($candidate in $candidates) {
@@ -94,14 +98,22 @@ function ResolveKeyPath {
 
 function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
-  $sshArgs = @("-p", "$Port")
+  $sshArgs = @(
+    "-p", "$Port",
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+    "-o", "ConnectTimeout=10",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=3"
+  )
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    $sshArgs += @("-i", $KeyPath)
+    $sshArgs += @("-i", $KeyPath, "-o", "IdentitiesOnly=yes")
   }
   $sshArgs += @("$User@$HostName", $RemoteCommand)
   & ssh.exe @sshArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "Falha no ssh: $RemoteCommand"
+    $keyInfo = if ([string]::IsNullOrWhiteSpace($KeyPath)) { "(nenhuma chave explicitada)" } else { $KeyPath }
+    throw "Falha no ssh (${User}@${HostName}:$Port, key=$keyInfo): $RemoteCommand"
   }
 }
 
@@ -110,9 +122,16 @@ function ScpToRemote {
   if (!(Test-Path $LocalPath)) {
     throw "Arquivo não encontrado: $LocalPath"
   }
-  $scpArgs = @("-P", "$Port")
+  $scpArgs = @(
+    "-P", "$Port",
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+    "-o", "ConnectTimeout=10",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=3"
+  )
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    $scpArgs += @("-i", $KeyPath)
+    $scpArgs += @("-i", $KeyPath, "-o", "IdentitiesOnly=yes")
   }
   $scpArgs += @("$LocalPath", "${User}@${HostName}:$RemotePath")
   & scp.exe @scpArgs
