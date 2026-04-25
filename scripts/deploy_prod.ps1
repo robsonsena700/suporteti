@@ -1,9 +1,9 @@
 param(
   [string]$HostName = "177.104.190.211",
   [int]$Port = 22002,
-  [string]$User = "root",
+  [string]$User = "whs",
   [string]$KeyPath = "",
-  [string]$RemoteBaseDir = "/opt/suporte-ti",
+  [string]$RemoteBaseDir = "/home/whs/suporte-ti",
   [string]$ApiHealthUrl = "http://127.0.0.1:3001/api/healthz",
   [switch]$SkipBuild,
   [switch]$AllowDirty,
@@ -65,27 +65,6 @@ function ResolveKeyPath {
 
   $inputWasEmpty = [string]::IsNullOrWhiteSpace($InputKeyPath)
 
-  $sshDir = Join-Path $RepoRoot "lib\ssh"
-  $candidates = @(
-    (Join-Path $sshDir "id_rsa"),
-    (Join-Path $sshDir "suporteTi"),
-    (Join-Path $sshDir "id_ed25519")
-  )
-
-  foreach ($candidate in $candidates) {
-    if (Test-Path $candidate) {
-      Write-Host "Aviso: usando chave SSH encontrada automaticamente: $candidate" -ForegroundColor Yellow
-      return (Resolve-Path $candidate).Path
-    }
-  }
-
-  if (Test-Path $sshDir) {
-    $files = Get-ChildItem -Path $sshDir -File | Select-Object -ExpandProperty FullName
-    if ($files.Count -gt 0) {
-      throw "Chave SSH inválida/não encontrada em '$InputKeyPath'. Arquivos disponíveis em lib\\ssh:`n$($files -join "`n")"
-    }
-  }
-
   if ($inputWasEmpty) {
     return ""
   }
@@ -94,14 +73,22 @@ function ResolveKeyPath {
 
 function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
-  $sshArgs = @("-p", "$Port")
+  $sshArgs = @(
+    "-p", "$Port",
+    "-o", "BatchMode=no",
+    "-o", "StrictHostKeyChecking=accept-new",
+    "-o", "ConnectTimeout=10",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=3"
+  )
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    $sshArgs += @("-i", $KeyPath)
+    $sshArgs += @("-i", $KeyPath, "-o", "IdentitiesOnly=yes")
   }
   $sshArgs += @("$User@$HostName", $RemoteCommand)
   & ssh.exe @sshArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "Falha no ssh: $RemoteCommand"
+    $keyInfo = if ([string]::IsNullOrWhiteSpace($KeyPath)) { "(nenhuma chave explicitada)" } else { $KeyPath }
+    throw "Falha no ssh (${User}@${HostName}:$Port, key=$keyInfo): $RemoteCommand"
   }
 }
 
@@ -110,9 +97,16 @@ function ScpToRemote {
   if (!(Test-Path $LocalPath)) {
     throw "Arquivo não encontrado: $LocalPath"
   }
-  $scpArgs = @("-P", "$Port")
+  $scpArgs = @(
+    "-P", "$Port",
+    "-o", "BatchMode=no",
+    "-o", "StrictHostKeyChecking=accept-new",
+    "-o", "ConnectTimeout=10",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=3"
+  )
   if (![string]::IsNullOrWhiteSpace($KeyPath)) {
-    $scpArgs += @("-i", $KeyPath)
+    $scpArgs += @("-i", $KeyPath, "-o", "IdentitiesOnly=yes")
   }
   $scpArgs += @("$LocalPath", "${User}@${HostName}:$RemotePath")
   & scp.exe @scpArgs

@@ -56,17 +56,30 @@ export function getCachedMunicipalities(uf: string): string[] {
 
 export async function fetchMunicipalitiesByUf(uf: string): Promise<string[]> {
   const normalizedUf = uf.trim().toUpperCase();
-  const data = await customFetch<string[]>(`/api/ibge/ufs/${encodeURIComponent(normalizedUf)}/municipalities`);
-  const municipalities = Array.isArray(data) ? data : [];
+  const cached = getCachedMunicipalities(normalizedUf);
+  let municipalities: string[] = [];
 
-  const entry: CachedMunicipalities = {
-    municipalities,
-    updatedAt: Date.now(),
-  };
-  memoryCache.set(normalizedUf, entry);
-  const storage = readStorageCache();
-  storage[normalizedUf] = entry;
-  writeStorageCache(storage);
+  try {
+    const data = await customFetch<string[]>(
+      `/api/ibge/ufs/${encodeURIComponent(normalizedUf)}/municipalities`,
+    );
+    municipalities = Array.isArray(data) ? data : [];
+  } catch {
+    if (cached.length > 0) return cached;
+    throw new Error("Falha ao carregar municípios");
+  }
+
+  if (municipalities.length > 0) {
+    const entry: CachedMunicipalities = {
+      municipalities,
+      updatedAt: Date.now(),
+    };
+    memoryCache.set(normalizedUf, entry);
+    const storage = readStorageCache();
+    storage[normalizedUf] = entry;
+    writeStorageCache(storage);
+  }
+
   return municipalities;
 }
 

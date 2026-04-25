@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { startMunicipalitiesSyncScheduler } from "./lib/municipalities-sync";
 
 const rawPort = process.env["PORT"] ?? "3001";
 
@@ -16,4 +17,5 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  startMunicipalitiesSyncScheduler();
 });

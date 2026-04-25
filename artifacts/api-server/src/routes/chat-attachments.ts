@@ -171,10 +171,9 @@ router.delete("/chat/attachments/:id", requireAuth, requireActive, requireChatAc
   }
 
   const isOwner = att.uploaderId === user.userId;
-  const canModerate = user.role === "ADMIN";
-
-  if (!isOwner && !canModerate) {
-    res.status(403).json({ error: "Acesso negado" });
+  if (!isOwner) {
+    auditChatDenied(user, "chat:attachments:delete", { attachmentId: att.id, uploaderId: att.uploaderId, scope: att.scope });
+    res.status(403).json({ error: "Somente o remetente pode excluir este anexo." });
     return;
   }
 

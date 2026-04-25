@@ -4,14 +4,28 @@ import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import {
   auditChatDenied,
+  canInteractWithChatUser,
   enforceChatModuleAccess,
   getVisibleParticipantIds,
   getVisibleParticipants,
 } from "../lib/chat-access";
 import { appendEditHistory, getEditWindow } from "../lib/chat-message-rules";
-import { emitGroupMessage, emitGroupMessageEdited, subscribeToChatStream } from "../lib/chat-realtime";
+import { emitGroupMessage, emitGroupMessageEdited, subscribeToChatStream, emitTyping, emitDmRead } from "../lib/chat-realtime";
 
 const router: IRouter = Router();
+
+const userNameCache = new Map<number, { name: string; ts: number }>();
+const USER_NAME_TTL_MS = 5 * 60 * 1000;
+
+async function getCachedUserName(userId: number): Promise<string | null> {
+  const cached = userNameCache.get(userId);
+  const now = Date.now();
+  if (cached && now - cached.ts < USER_NAME_TTL_MS) return cached.name;
+  const [row] = await db.select({ name: usersTable.name }).from(usersTable).where(eq(usersTable.id, userId));
+  const name = row?.name ?? null;
+  if (name) userNameCache.set(userId, { name, ts: now });
+  return name;
+}
 
 function parseOptionalPositiveInt(value: unknown): number | null {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
@@ -44,6 +58,70 @@ router.get("/chat/stream", requireAuth, requireActive, requireChatAccess, async 
   const user = req.user!;
   const cleanup = subscribeToChatStream({ userId: user.userId, role: user.role, res });
   req.on("close", cleanup);
+});
+
+router.post("/chat/typing", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const scope = typeof req.body?.scope === "string" ? req.body.scope : "";
+  const isTyping = !!req.body?.isTyping;
+  const receiverId = typeof req.body?.receiverId === "number" ? req.body.receiverId : parseOptionalPositiveInt(req.body?.receiverId);
+
+  if (scope !== "group" && scope !== "dm") {
+    res.status(400).json({ error: "Escopo inválido." });
+    return;
+  }
+
+  if (scope === "dm") {
+    if (!receiverId || receiverId === user.userId) {
+      res.status(400).json({ error: "Destinatário inválido." });
+      return;
+    }
+    const canAccess = await canInteractWithChatUser(user, receiverId);
+    if (!canAccess) {
+      auditChatDenied(user, "chat:typing:dm", { targetUserId: receiverId });
+      res.status(403).json({ error: "Acesso negado." });
+      return;
+    }
+  }
+
+  const senderName = await getCachedUserName(user.userId) ?? user.email;
+
+  emitTyping({
+    scope,
+    senderId: user.userId,
+    senderName,
+    senderRole: user.role,
+    receiverId: scope === "dm" ? receiverId ?? undefined : undefined,
+    isTyping,
+    at: new Date(),
+  });
+
+  res.json({ ok: true });
+});
+
+router.post("/chat/read", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const otherUserId = typeof req.body?.otherUserId === "number" ? req.body.otherUserId : parseOptionalPositiveInt(req.body?.otherUserId);
+  const messageId = typeof req.body?.messageId === "number" ? req.body.messageId : parseOptionalPositiveInt(req.body?.messageId);
+
+  if (!otherUserId || otherUserId === user.userId) {
+    res.status(400).json({ error: "Usuário inválido." });
+    return;
+  }
+  if (!messageId) {
+    res.status(400).json({ error: "Mensagem inválida." });
+    return;
+  }
+
+  const canAccess = await canInteractWithChatUser(user, otherUserId);
+  if (!canAccess) {
+    auditChatDenied(user, "chat:read:dm", { targetUserId: otherUserId });
+    res.status(403).json({ error: "Acesso negado." });
+    return;
+  }
+
+  emitDmRead({ readerId: user.userId, otherUserId, messageId, at: new Date() });
+  res.json({ ok: true });
 });
 
 router.get("/chat/messages", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
@@ -213,6 +291,23 @@ router.post("/chat/messages", requireAuth, requireActive, requireChatAccess, asy
     messageId: msg.id,
     message: msg.message,
     createdAt: msg.createdAt,
+    replyTo: reply
+      ? {
+        id: reply.id,
+        senderId: reply.senderId,
+        message: reply.message,
+        createdAt: reply.createdAt,
+        sender: { id: reply.sender.id, name: reply.sender.name, role: reply.sender.role },
+      }
+      : null,
+    attachments: linked.map((a) => ({
+      id: a.id,
+      filename: a.filename,
+      mimeType: a.mimeType,
+      size: a.size,
+      uploaderId: a.uploaderId,
+      createdAt: a.createdAt,
+    })),
   });
 
   res.status(201).json({
@@ -316,9 +411,12 @@ router.patch("/chat/messages/:id", requireAuth, requireActive, requireChatAccess
 
   emitGroupMessageEdited({
     senderId: updated.senderId,
+    senderName: sender.name,
     senderRole: sender.role,
     messageId: updated.id,
+    message: updated.message,
     editedAt: now,
+    editHistory: historyResult.history,
   });
 
   res.json({

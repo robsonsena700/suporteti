@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { 
@@ -28,6 +28,45 @@ const UFS = [
 ];
 const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
+const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v1";
+
+type TicketsListPersistedState = {
+  actorUserId: number;
+  typeTab: TicketType;
+  filters: ListTicketsParams;
+  userFilter: string;
+  locationFilter: string;
+  responsibleFilter: string;
+  sortBy: "createdAt" | "user" | "location" | "responsible";
+  sortDir: "asc" | "desc";
+  scrollY: number | null;
+  lastActiveTicketId: number | null;
+  savedAt: number;
+};
+
+function loadTicketsListState(actorUserId: number | null | undefined): TicketsListPersistedState | null {
+  if (typeof window === "undefined") return null;
+  if (!actorUserId) return null;
+  try {
+    const raw = window.localStorage.getItem(TICKETS_LIST_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as TicketsListPersistedState;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.actorUserId !== actorUserId) return null;
+    if (!parsed.filters || typeof parsed.filters !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveTicketsListState(next: TicketsListPersistedState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TICKETS_LIST_STATE_KEY, JSON.stringify(next));
+  } catch {
+  }
+}
 
 function getInitialTicketTypeTab(): TicketType {
   if (typeof window === "undefined") return TicketType.SOFTWARE;
@@ -53,6 +92,9 @@ export default function Tickets() {
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageModalTicketId, setImageModalTicketId] = useState<number | null>(null);
   const [imageModalTicketTitle, setImageModalTicketTitle] = useState<string>("");
+  const [lastActiveTicketId, setLastActiveTicketId] = useState<number | null>(null);
+  const pendingScrollYRef = useRef<number | null>(null);
+  const restoreInFlightRef = useRef<boolean>(false);
 
   const { data: tickets, isLoading } = useListTickets(filters, {
     query: {
@@ -69,6 +111,97 @@ export default function Tickets() {
       sortDir,
     });
   }, [tickets, userFilter, locationFilter, responsibleFilter, sortBy, sortDir]);
+
+  const buildPersisted = useCallback((): TicketsListPersistedState | null => {
+    if (!user) return null;
+    return {
+      actorUserId: user.id,
+      typeTab,
+      filters,
+      userFilter,
+      locationFilter,
+      responsibleFilter,
+      sortBy,
+      sortDir,
+      scrollY: typeof window !== "undefined" ? window.scrollY : null,
+      lastActiveTicketId,
+      savedAt: Date.now(),
+    };
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, lastActiveTicketId]);
+
+  const saveNow = useCallback(() => {
+    const next = buildPersisted();
+    if (!next) return;
+    saveTicketsListState(next);
+  }, [buildPersisted]);
+
+  const applyPersisted = useCallback((state: TicketsListPersistedState | null) => {
+    if (!state) return;
+    setTypeTab(state.typeTab);
+    setFilters(state.filters);
+    setUserFilter(state.userFilter);
+    setLocationFilter(state.locationFilter);
+    setResponsibleFilter(state.responsibleFilter);
+    setSortBy(state.sortBy);
+    setSortDir(state.sortDir);
+    setLastActiveTicketId(state.lastActiveTicketId);
+    pendingScrollYRef.current = state.scrollY;
+  }, []);
+
+  const attemptRestoreScroll = useCallback(() => {
+    const start = performance.now();
+    const run = () => {
+      const targetY = pendingScrollYRef.current;
+      if (targetY == null) {
+        restoreInFlightRef.current = false;
+        return;
+      }
+      window.scrollTo({ top: targetY, behavior: "auto" });
+      const elapsed = performance.now() - start;
+      if (Math.abs(window.scrollY - targetY) <= 2 || elapsed >= 500) {
+        restoreInFlightRef.current = false;
+        return;
+      }
+      requestAnimationFrame(run);
+    };
+    restoreInFlightRef.current = true;
+    requestAnimationFrame(run);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const state = loadTicketsListState(user.id);
+    if (!state) return;
+    applyPersisted(state);
+    attemptRestoreScroll();
+  }, [user, applyPersisted, attemptRestoreScroll]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        saveNow();
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      const state = loadTicketsListState(user.id);
+      if (!state) return;
+      applyPersisted(state);
+      attemptRestoreScroll();
+    };
+    window.addEventListener("beforeunload", saveNow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("beforeunload", saveNow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user, saveNow, applyPersisted, attemptRestoreScroll]);
+
+  useEffect(() => {
+    if (!user) return;
+    const id = setTimeout(() => saveNow(), 200);
+    return () => clearTimeout(id);
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, lastActiveTicketId, saveNow]);
 
   return (
     <div className="space-y-6">
@@ -269,7 +402,13 @@ export default function Tickets() {
             <div key={typeTab} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
               {visibleTickets.map((ticket) => (
                 <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
-                  <div className="rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors">
+                  <div
+                    className="rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors"
+                    onClick={() => {
+                      setLastActiveTicketId(ticket.id);
+                      saveNow();
+                    }}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold truncate">#{ticket.id} — {ticket.title}</p>

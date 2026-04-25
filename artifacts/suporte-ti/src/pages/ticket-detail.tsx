@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRoute, Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { 
@@ -36,6 +36,43 @@ import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
 import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 import { getRoleLabel } from "@/lib/role-labels";
+
+const TICKET_DETAIL_STATE_KEY = "suporte-ti:ticket:detail:state:v1";
+
+type TicketDetailPersistedState = {
+  actorUserId: number;
+  ticketId: number;
+  scrollY: number | null;
+  focusedMessageId: number | null;
+  draftMessage: string;
+  selectedAssigneeId: string;
+  assignReason: string;
+  previewAttachmentId: number | null;
+  savedAt: number;
+};
+
+function loadTicketDetailState(actorUserId: number | null | undefined): TicketDetailPersistedState | null {
+  if (typeof window === "undefined") return null;
+  if (!actorUserId) return null;
+  try {
+    const raw = window.localStorage.getItem(TICKET_DETAIL_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as TicketDetailPersistedState;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.actorUserId !== actorUserId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveTicketDetailState(next: TicketDetailPersistedState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TICKET_DETAIL_STATE_KEY, JSON.stringify(next));
+  } catch {
+  }
+}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -103,6 +140,10 @@ export default function TicketDetail() {
   const [municipalityOptions, setMunicipalityOptions] = useState<string[]>([]);
   const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
+  const [focusedMessageId, setFocusedMessageId] = useState<number | null>(null);
+  const pendingRestoreRef = useRef<TicketDetailPersistedState | null>(null);
+  const pendingPreviewAttachmentIdRef = useRef<number | null>(null);
+  const restoreInFlightRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (previewOpen) return;
@@ -186,6 +227,60 @@ export default function TicketDetail() {
   const messageMutation = useCreateMessage();
   const rateMutation = useRateTicket();
   const assignMutation = useAssignTicket();
+  const restoreLoopStartedRef = useRef<boolean>(false);
+
+  const attachmentApiUrl = useCallback((att: Attachment) => `/api/tickets/${ticketId}/attachments/${att.id}`, [ticketId]);
+
+  const fetchAttachmentBlob = useCallback(async (att: Attachment) => {
+    const resp = await fetch(attachmentApiUrl(att), {
+      headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
+    });
+    if (!resp.ok) throw new Error("Falha ao baixar anexo");
+    return resp.blob();
+  }, [attachmentApiUrl]);
+
+  const downloadAttachment = useCallback(async (att: Attachment) => {
+    try {
+      const blob = await fetchAttachmentBlob(att);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({
+        title: "Erro ao baixar anexo",
+        description: "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    }
+  }, [fetchAttachmentBlob, toast]);
+
+  const openPreview = useCallback(async (att: Attachment) => {
+    setPreviewAtt(att);
+    setTextPreview("");
+    setPreviewOpen(true);
+    try {
+      if (att.mimeType === "text/plain") {
+        const resp = await fetch(attachmentApiUrl(att), {
+          headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
+        });
+        setTextPreview(resp.ok ? await resp.text() : "Não foi possível carregar a prévia do arquivo.");
+        return;
+      }
+
+      if (att.mimeType.startsWith("image/") || att.mimeType === "application/pdf") {
+        const blob = await fetchAttachmentBlob(att);
+        const url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
+      }
+    } catch {
+      setTextPreview("Não foi possível carregar a prévia do arquivo.");
+    }
+  }, [attachmentApiUrl, fetchAttachmentBlob]);
 
   useEffect(() => {
     if (!ticket) return;
@@ -251,6 +346,134 @@ export default function TicketDetail() {
       });
     return () => { cancelled = true; };
   }, [isEditingDetails, detailsUf, detailsMunicipality]);
+
+  const buildPersistedState = useCallback((): TicketDetailPersistedState | null => {
+    if (!user) return null;
+    return {
+      actorUserId: user.id,
+      ticketId,
+      scrollY: typeof window !== "undefined" ? window.scrollY : null,
+      focusedMessageId,
+      draftMessage: message,
+      selectedAssigneeId,
+      assignReason,
+      previewAttachmentId: previewOpen && previewAtt ? previewAtt.id : null,
+      savedAt: Date.now(),
+    };
+  }, [user, ticketId, focusedMessageId, message, selectedAssigneeId, assignReason, previewOpen, previewAtt]);
+
+  const saveNow = useCallback(() => {
+    const next = buildPersistedState();
+    if (!next) return;
+    saveTicketDetailState(next);
+  }, [buildPersistedState]);
+
+  const applyPersisted = useCallback((next: TicketDetailPersistedState | null) => {
+    if (!next) return;
+    if (next.ticketId !== ticketId) return;
+    setMessage(next.draftMessage || "");
+    setSelectedAssigneeId(next.selectedAssigneeId || "");
+    setAssignReason(next.assignReason || "");
+    setFocusedMessageId(next.focusedMessageId ?? null);
+    pendingRestoreRef.current = next;
+    pendingPreviewAttachmentIdRef.current = next.previewAttachmentId ?? null;
+    restoreInFlightRef.current = true;
+    restoreLoopStartedRef.current = false;
+  }, [ticketId]);
+
+  const attemptRestoreUi = useCallback(() => {
+    if (restoreLoopStartedRef.current) return;
+    if (!restoreInFlightRef.current) return;
+    const initial = pendingRestoreRef.current;
+    if (!initial) return;
+
+    restoreLoopStartedRef.current = true;
+    const start = performance.now();
+    const run = () => {
+      const state = pendingRestoreRef.current;
+      if (!state) {
+        restoreInFlightRef.current = false;
+        restoreLoopStartedRef.current = false;
+        return;
+      }
+
+      if (state.scrollY != null) {
+        window.scrollTo({ top: state.scrollY, behavior: "auto" });
+      }
+
+      let focusDone = true;
+      if (state.focusedMessageId) {
+        const el = document.getElementById(`ticket_msg_${state.focusedMessageId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "auto", block: "center" });
+          setFocusedMessageId(state.focusedMessageId);
+        } else {
+          focusDone = false;
+        }
+      }
+
+      const elapsed = performance.now() - start;
+      const scrollDone = state.scrollY == null || Math.abs(window.scrollY - state.scrollY) <= 2;
+      if ((scrollDone && focusDone) || elapsed >= 500) {
+        restoreInFlightRef.current = false;
+        restoreLoopStartedRef.current = false;
+        return;
+      }
+      requestAnimationFrame(run);
+    };
+
+    requestAnimationFrame(run);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const state = loadTicketDetailState(user.id);
+    if (!state) return;
+    applyPersisted(state);
+  }, [user, applyPersisted]);
+
+  useEffect(() => {
+    if (!restoreInFlightRef.current) return;
+    if (!ticket) return;
+    attemptRestoreUi();
+  }, [ticket, messages, attemptRestoreUi]);
+
+  useEffect(() => {
+    if (!ticket) return;
+    const attId = pendingPreviewAttachmentIdRef.current;
+    if (!attId) return;
+    const attachments = ((ticket as any).attachments ?? []) as Attachment[];
+    const att = attachments.find((a) => a.id === attId);
+    if (!att) return;
+    pendingPreviewAttachmentIdRef.current = null;
+    openPreview(att);
+  }, [ticket, openPreview]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        saveNow();
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      const state = loadTicketDetailState(user.id);
+      if (!state) return;
+      applyPersisted(state);
+    };
+    window.addEventListener("beforeunload", saveNow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("beforeunload", saveNow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user, saveNow, applyPersisted]);
+
+  useEffect(() => {
+    if (!user) return;
+    const id = setTimeout(() => saveNow(), 200);
+    return () => clearTimeout(id);
+  }, [user, ticketId, message, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt, saveNow]);
 
   const handleUpdateStatus = (status: TicketStatus) => {
     updateMutation.mutate(
@@ -421,7 +644,6 @@ export default function TicketDetail() {
 
   const canManage = canManageRole;
   const isCreator = ticket.createdById === user?.id;
-  const attachmentApiUrl = (att: Attachment) => `/api/tickets/${ticket.id}/attachments/${att.id}`;
   const isAdminOrAnalyst = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const closedAt = new Date(ticket.updatedAt).getTime();
   const withinReopenWindow = Number.isFinite(closedAt) && (Date.now() - closedAt) <= 24 * 60 * 60 * 1000;
@@ -501,57 +723,6 @@ export default function TicketDetail() {
     }
   };
 
-  const fetchAttachmentBlob = async (att: Attachment) => {
-    const resp = await fetch(attachmentApiUrl(att), {
-      headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
-    });
-    if (!resp.ok) throw new Error("Falha ao baixar anexo");
-    return resp.blob();
-  };
-
-  const downloadAttachment = async (att: Attachment) => {
-    try {
-      const blob = await fetchAttachmentBlob(att);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = att.filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast({
-        title: "Erro ao baixar anexo",
-        description: "Tente novamente em instantes.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const openPreview = async (att: Attachment) => {
-    setPreviewAtt(att);
-    setTextPreview("");
-    setPreviewOpen(true);
-    try {
-      if (att.mimeType === "text/plain") {
-        const resp = await fetch(attachmentApiUrl(att), {
-          headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
-        });
-        setTextPreview(resp.ok ? await resp.text() : "Não foi possível carregar a prévia do arquivo.");
-        return;
-      }
-
-      if (att.mimeType.startsWith("image/") || att.mimeType === "application/pdf") {
-        const blob = await fetchAttachmentBlob(att);
-        const url = URL.createObjectURL(blob);
-        setPreviewUrl(url);
-      }
-    } catch {
-      setTextPreview("Não foi possível carregar a prévia do arquivo.");
-    }
-  };
-
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center gap-4">
@@ -619,7 +790,12 @@ export default function TicketDetail() {
                   {messages.map((msg) => {
                     const isMe = msg.senderId === user?.id;
                     return (
-                      <div key={msg.id} className={cn("flex gap-3", isMe ? "flex-row-reverse" : "flex-row")}>
+                      <div
+                        key={msg.id}
+                        id={`ticket_msg_${msg.id}`}
+                        className={cn("flex gap-3", isMe ? "flex-row-reverse" : "flex-row")}
+                        onClick={() => setFocusedMessageId(msg.id)}
+                      >
                         <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0">
                           <UserCircle2 className="w-5 h-5 text-secondary-foreground" />
                         </div>
@@ -630,6 +806,7 @@ export default function TicketDetail() {
                           </div>
                           <div className={cn(
                             "px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap",
+                            focusedMessageId === msg.id ? "ring-2 ring-primary/40 ring-offset-2 ring-offset-background" : null,
                             isMe ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm"
                           )}>
                             {msg.message}
@@ -783,7 +960,7 @@ export default function TicketDetail() {
                       value={detailsMunicipality}
                       options={municipalityOptions}
                       loading={isLoadingMunicipalities}
-                      disabled={savingDetails || municipalityOptions.length === 0}
+                      disabled={savingDetails || !detailsUf}
                       onChange={setDetailsMunicipality}
                     />
                   </div>

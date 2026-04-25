@@ -352,7 +352,7 @@ export default function Register() {
                           value={field.value}
                           options={municipalityOptions}
                           loading={isLoadingMunicipalities}
-                          disabled={!uf || municipalityOptions.length === 0}
+                          disabled={!uf}
                           onChange={field.onChange}
                         />
                       </FormControl>

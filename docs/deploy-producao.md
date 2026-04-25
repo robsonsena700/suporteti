@@ -52,3 +52,37 @@ O script realiza:
 - Deploy por releases + symlink `current` e `previous`
 - Restart de serviços (se `systemctl` existir) e health check
 
+## Base de Municípios (cache local IBGE)
+
+### Objetivo
+
+- Reduzir tráfego e dependência do IBGE durante cadastro/edição (consulta local no banco).
+- Permitir funcionamento offline (desde que o banco tenha sido migrado e populado).
+
+### Estrutura no banco
+
+- Tabelas: `public.municipalities` e `public.municipalities_sync_state`
+- Migrations: `lib/db/migrations/0006_create_municipalities_cache.sql` e `lib/db/migrations/0007_seed_municipalities.sql`
+
+### Primeira carga (produção)
+
+- Aplicar migrations do banco (inclui o seed com 5.570 municípios).
+- Validar integridade do seed local:
+
+```powershell
+pnpm run test:municipalities:seed
+```
+
+### Atualização periódica
+
+- A API executa sincronização automaticamente quando `municipalities_sync_state.next_due_at` estiver vencido (checagem 1x por dia e também no startup).
+- Cadência configurável por variável de ambiente:
+  - `MUNICIPALITIES_SYNC_CADENCE=semiannual` (padrão)
+  - `MUNICIPALITIES_SYNC_CADENCE=quarterly`
+- Para desabilitar: `MUNICIPALITIES_SYNC_ENABLED=false`
+
+### Funcionamento offline
+
+- Rotas e validações de município consultam primeiro `public.municipalities`.
+- O fallback para a API do IBGE só ocorre quando o município/UF não existe localmente.
+

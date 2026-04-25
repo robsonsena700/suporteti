@@ -207,6 +207,7 @@ router.get("/users/:id/coordinators", requireAuth, requireActive, async (req, re
 });
 
 router.put("/users/:id/coordinators", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
+  const currentUser = req.user!;
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);
   if (isNaN(id)) {
@@ -214,11 +215,15 @@ router.put("/users/:id/coordinators", requireAuth, requireActive, requireRoles("
     return;
   }
 
-  const coordinatorId = parseSingleCoordinatorId(
-    (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
-    ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds,
-  );
-  if (!coordinatorId) {
+  const coordinatorValue = (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
+    ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
+  const coordinatorId = coordinatorValue == null ? null : parseSingleCoordinatorId(coordinatorValue);
+
+  if (coordinatorValue != null && !coordinatorId) {
+    res.status(400).json({ error: "Informe um coordenador válido" });
+    return;
+  }
+  if (currentUser.role !== "ADMIN" && !coordinatorId) {
     res.status(400).json({ error: "Informe um coordenador válido" });
     return;
   }
@@ -226,6 +231,12 @@ router.put("/users/:id/coordinators", requireAuth, requireActive, requireRoles("
   const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   if (!targetUser) {
     res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  if (!coordinatorId) {
+    await db.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    res.json([]);
     return;
   }
 
@@ -531,11 +542,6 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
     return;
   }
 
-  if (role === "USER" && !coordinatorId) {
-    res.status(400).json({ error: "Usuário ativo deve possuir ao menos um coordenador" });
-    return;
-  }
-
   if (coordinatorId) {
     const coordinators = await db
       .select({
@@ -625,15 +631,7 @@ router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN")
   const coordinatorId = coordinatorValue != null ? parseSingleCoordinatorId(coordinatorValue) : null;
 
   if (role === "USER") {
-    const existing = await db.select().from(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
-    const hasCoordinator = existing.length > 0;
-    const shouldAttach = coordinatorId != null;
-    if (!hasCoordinator && !shouldAttach) {
-      res.status(400).json({ error: "Selecione um coordenador para o usuário" });
-      return;
-    }
-
-    if (shouldAttach) {
+    if (coordinatorId != null) {
       const coordinators = await db
         .select({
           id: usersTable.id,
@@ -725,7 +723,7 @@ router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Pr
 
   if (!u || !u.avatarMimeType || !u.avatarData) {
     res.setHeader("Cache-Control", "no-store");
-    res.status(204).end();
+    res.json(null);
     return;
   }
 

@@ -4,10 +4,13 @@ import { logger } from "./logger";
 type ChatRole = string;
 
 export type ChatStreamEvent =
-  | { type: "group_message"; payload: { id: number; senderId: number; senderName: string; senderRole: string; message: string; createdAt: string } }
-  | { type: "group_message_edited"; payload: { id: number; senderId: number; editedAt: string } }
-  | { type: "dm_message"; payload: { id: number; senderId: number; senderName: string; senderRole: string; receiverId: number; receiverName: string; receiverRole: string; message: string; createdAt: string } }
-  | { type: "dm_message_edited"; payload: { id: number; senderId: number; receiverId: number; editedAt: string } };
+  | { type: "group_message"; payload: { id: number; senderId: number; senderName: string; senderRole: string; message: string; createdAt: string; replyTo: null | { id: number; senderId: number; message: string; createdAt: string; sender: { id: number; name: string; role: string } }; attachments: Array<{ id: number; filename: string; mimeType: string; size: number; uploaderId: number; createdAt: string }> } }
+  | { type: "group_message_edited"; payload: { id: number; senderId: number; message: string; editedAt: string; editHistory: Array<{ message: string; editedAt: string }> } }
+  | { type: "dm_message"; payload: { id: number; senderId: number; senderName: string; senderRole: string; receiverId: number; receiverName: string; receiverRole: string; message: string; createdAt: string; replyTo: null | { id: number; senderId: number; receiverId: number; message: string; createdAt: string; sender: { id: number; name: string; role: string } }; attachments: Array<{ id: number; filename: string; mimeType: string; size: number; uploaderId: number; createdAt: string }> } }
+  | { type: "dm_message_edited"; payload: { id: number; senderId: number; receiverId: number; message: string; editedAt: string; editHistory: Array<{ message: string; editedAt: string }> } }
+  | { type: "typing"; payload: { scope: "group"; senderId: number; senderName: string; senderRole: string; isTyping: boolean; at: string } }
+  | { type: "typing"; payload: { scope: "dm"; senderId: number; senderName: string; senderRole: string; receiverId: number; isTyping: boolean; at: string } }
+  | { type: "dm_read"; payload: { readerId: number; otherUserId: number; messageId: number; at: string } };
 
 type Client = {
   clientId: string;
@@ -121,7 +124,16 @@ function sendToUser(userId: number, event: ChatStreamEvent): void {
   if (map.size === 0) clientsByUser.delete(userId);
 }
 
-export function emitGroupMessage(args: { senderId: number; senderName: string; senderRole: string; messageId: number; message: string; createdAt: Date }): void {
+export function emitGroupMessage(args: {
+  senderId: number;
+  senderName: string;
+  senderRole: string;
+  messageId: number;
+  message: string;
+  createdAt: Date;
+  replyTo: null | { id: number; senderId: number; message: string; createdAt: Date; sender: { id: number; name: string; role: string } };
+  attachments: Array<{ id: number; filename: string; mimeType: string; size: number; uploaderId: number; createdAt: Date }>;
+}): void {
   recordLag("group", Date.now() - args.createdAt.getTime());
   const event: ChatStreamEvent = {
     type: "group_message",
@@ -132,6 +144,23 @@ export function emitGroupMessage(args: { senderId: number; senderName: string; s
       senderRole: args.senderRole,
       message: args.message,
       createdAt: args.createdAt.toISOString(),
+      replyTo: args.replyTo
+        ? {
+          id: args.replyTo.id,
+          senderId: args.replyTo.senderId,
+          message: args.replyTo.message,
+          createdAt: args.replyTo.createdAt.toISOString(),
+          sender: args.replyTo.sender,
+        }
+        : null,
+      attachments: (args.attachments ?? []).map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploaderId: a.uploaderId,
+        createdAt: a.createdAt.toISOString(),
+      })),
     },
   };
 
@@ -149,14 +178,24 @@ export function emitGroupMessage(args: { senderId: number; senderName: string; s
   }
 }
 
-export function emitGroupMessageEdited(args: { senderId: number; senderRole: string; messageId: number; editedAt: Date }): void {
+export function emitGroupMessageEdited(args: {
+  senderId: number;
+  senderRole: string;
+  senderName: string;
+  messageId: number;
+  message: string;
+  editedAt: Date;
+  editHistory: Array<{ message: string; editedAt: string }>;
+}): void {
   recordLag("group", Date.now() - args.editedAt.getTime());
   const event: ChatStreamEvent = {
     type: "group_message_edited",
     payload: {
       id: args.messageId,
       senderId: args.senderId,
+      message: args.message,
       editedAt: args.editedAt.toISOString(),
+      editHistory: args.editHistory ?? [],
     },
   };
   for (const [userId, userClients] of clientsByUser.entries()) {
@@ -183,6 +222,8 @@ export function emitDirectMessage(args: {
   receiverId: number;
   receiverName: string;
   receiverRole: string;
+  replyTo: null | { id: number; senderId: number; receiverId: number; message: string; createdAt: Date; sender: { id: number; name: string; role: string } };
+  attachments: Array<{ id: number; filename: string; mimeType: string; size: number; uploaderId: number; createdAt: Date }>;
 }): void {
   recordLag("dm", Date.now() - args.createdAt.getTime());
   const event: ChatStreamEvent = {
@@ -197,13 +238,31 @@ export function emitDirectMessage(args: {
       receiverRole: args.receiverRole,
       message: args.message,
       createdAt: args.createdAt.toISOString(),
+      replyTo: args.replyTo
+        ? {
+          id: args.replyTo.id,
+          senderId: args.replyTo.senderId,
+          receiverId: args.replyTo.receiverId,
+          message: args.replyTo.message,
+          createdAt: args.replyTo.createdAt.toISOString(),
+          sender: args.replyTo.sender,
+        }
+        : null,
+      attachments: (args.attachments ?? []).map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        uploaderId: a.uploaderId,
+        createdAt: a.createdAt.toISOString(),
+      })),
     },
   };
   sendToUser(args.senderId, event);
   sendToUser(args.receiverId, event);
 }
 
-export function emitDirectMessageEdited(args: { messageId: number; senderId: number; receiverId: number; editedAt: Date }): void {
+export function emitDirectMessageEdited(args: { messageId: number; senderId: number; receiverId: number; editedAt: Date; message: string; editHistory: Array<{ message: string; editedAt: string }> }): void {
   recordLag("dm", Date.now() - args.editedAt.getTime());
   const event: ChatStreamEvent = {
     type: "dm_message_edited",
@@ -211,11 +270,73 @@ export function emitDirectMessageEdited(args: { messageId: number; senderId: num
       id: args.messageId,
       senderId: args.senderId,
       receiverId: args.receiverId,
+      message: args.message,
       editedAt: args.editedAt.toISOString(),
+      editHistory: args.editHistory ?? [],
     },
   };
   sendToUser(args.senderId, event);
   sendToUser(args.receiverId, event);
+}
+
+export function emitTyping(args: {
+  scope: "group" | "dm";
+  senderId: number;
+  senderName: string;
+  senderRole: string;
+  receiverId?: number;
+  isTyping: boolean;
+  at: Date;
+}): void {
+  const payloadBase = {
+    senderId: args.senderId,
+    senderName: args.senderName,
+    senderRole: args.senderRole,
+    isTyping: args.isTyping,
+    at: args.at.toISOString(),
+  };
+  if (args.scope === "dm") {
+    if (typeof args.receiverId !== "number") return;
+    const event: ChatStreamEvent = {
+      type: "typing",
+      payload: { scope: "dm", ...payloadBase, receiverId: args.receiverId },
+    };
+    sendToUser(args.senderId, event);
+    sendToUser(args.receiverId, event);
+    return;
+  }
+
+  const event: ChatStreamEvent = {
+    type: "typing",
+    payload: { scope: "group", ...payloadBase },
+  };
+  for (const [userId, userClients] of clientsByUser.entries()) {
+    for (const c of userClients.values()) {
+      if (c.userId === args.senderId) continue;
+      if (!canReceiveGroupMessage({ receiverRole: c.role, receiverId: c.userId, senderRole: args.senderRole, senderId: args.senderId })) continue;
+      try {
+        writeEvent(c.res, event.type, event.payload);
+      } catch {
+        clearInterval(c.heartbeatId);
+        userClients.delete(c.clientId);
+      }
+    }
+    if (userClients.size === 0) clientsByUser.delete(userId);
+  }
+}
+
+export function emitDmRead(args: { readerId: number; otherUserId: number; messageId: number; at: Date }): void {
+  const event: ChatStreamEvent = {
+    type: "dm_read",
+    payload: {
+      readerId: args.readerId,
+      otherUserId: args.otherUserId,
+      messageId: args.messageId,
+      at: args.at.toISOString(),
+    },
+  };
+  sendToUser(args.readerId, event);
+  sendToUser(args.otherUserId, event);
 }
 
 export function getChatStreamStats(): { connections: number; users: number } {
