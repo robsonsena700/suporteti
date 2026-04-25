@@ -74,6 +74,11 @@ type TicketForm = z.infer<typeof ticketSchema>;
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3 MB
 const MAX_FILES = 3;
+const TICKET_DRAFT_STATE_KEY = "suporte-ti:tickets:new:draft:v1";
+const TICKET_DRAFT_STATE_BACKUP_KEY = "suporte-ti:tickets:new:draft:v1:bak";
+const TICKET_DRAFT_DB_NAME = "suporte-ti";
+const TICKET_DRAFT_DB_VERSION = 1;
+const TICKET_DRAFT_FILES_STORE = "ticketDraftFiles";
 
 const ALLOWED_MIME = [
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp",
@@ -95,6 +100,170 @@ function isImage(mime: string) {
   return mime.startsWith("image/");
 }
 
+type TicketDraftFileMeta = {
+  key: string;
+  name: string;
+  type: string;
+  size: number;
+  lastModified: number;
+  dataUrl?: string;
+};
+
+type TicketDraftState = {
+  version: 1;
+  actorUserId: number;
+  savedAt: number;
+  form: TicketForm;
+  files: TicketDraftFileMeta[];
+};
+
+type DraftFileRecord = TicketDraftFileMeta & {
+  draftId: string;
+  buffer: ArrayBuffer;
+};
+
+function toDraftId(actorUserId: number): string {
+  return String(actorUserId);
+}
+
+function makeFileKey(f: File): string {
+  return `${f.name}::${f.size}::${f.lastModified}::${f.type}`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function openDraftDb(): Promise<IDBDatabase> {
+  if (typeof indexedDB === "undefined") {
+    return Promise.reject(new Error("indexedDB_unavailable"));
+  }
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(TICKET_DRAFT_DB_NAME, TICKET_DRAFT_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(TICKET_DRAFT_FILES_STORE)) {
+        const store = db.createObjectStore(TICKET_DRAFT_FILES_STORE, { keyPath: "key" });
+        store.createIndex("draftId", "draftId", { unique: false });
+      } else {
+        const tx = req.transaction;
+        const store = tx?.objectStore(TICKET_DRAFT_FILES_STORE);
+        if (store && !store.indexNames.contains("draftId")) {
+          store.createIndex("draftId", "draftId", { unique: false });
+        }
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error("indexeddb_open_failed"));
+  });
+}
+
+function idbTx<T>(db: IDBDatabase, mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(TICKET_DRAFT_FILES_STORE, mode);
+    const store = tx.objectStore(TICKET_DRAFT_FILES_STORE);
+    const req = fn(store);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error("indexeddb_request_failed"));
+  });
+}
+
+async function idbPutDraftFile(db: IDBDatabase, rec: DraftFileRecord): Promise<void> {
+  await idbTx(db, "readwrite", (s) => s.put(rec));
+}
+
+async function idbGetDraftFile(db: IDBDatabase, key: string): Promise<DraftFileRecord | null> {
+  const res = await idbTx<DraftFileRecord | undefined>(db, "readonly", (s) => s.get(key));
+  return res ?? null;
+}
+
+async function idbDeleteDraftFilesNotIn(db: IDBDatabase, draftId: string, keepKeys: Set<string>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(TICKET_DRAFT_FILES_STORE, "readwrite");
+    const store = tx.objectStore(TICKET_DRAFT_FILES_STORE);
+    const idx = store.index("draftId");
+    const cursorReq = idx.openCursor(IDBKeyRange.only(draftId));
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (!cursor) return;
+      const key = String(cursor.primaryKey);
+      if (!keepKeys.has(key)) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+    cursorReq.onerror = () => reject(cursorReq.error ?? new Error("indexeddb_cursor_failed"));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("indexeddb_tx_failed"));
+  });
+}
+
+function safeParseDraft(raw: string | null, actorUserId: number): TicketDraftState | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as TicketDraftState;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.version !== 1) return null;
+    if (parsed.actorUserId !== actorUserId) return null;
+    if (!parsed.form || typeof parsed.form !== "object") return null;
+    if (!Array.isArray(parsed.files)) return null;
+    for (const f of parsed.files) {
+      if (!f || typeof f !== "object") return null;
+      if (typeof (f as any).key !== "string") return null;
+      if (typeof (f as any).name !== "string") return null;
+      if (typeof (f as any).type !== "string") return null;
+      if (typeof (f as any).size !== "number") return null;
+      if (typeof (f as any).lastModified !== "number") return null;
+      if ((f as any).dataUrl != null && typeof (f as any).dataUrl !== "string") return null;
+    }
+    if (typeof parsed.form.title !== "string") return null;
+    if (typeof parsed.form.description !== "string") return null;
+    if (typeof parsed.form.establishment !== "string") return null;
+    if (parsed.form.type !== TicketType.SOFTWARE && parsed.form.type !== TicketType.HARDWARE) return null;
+    if (parsed.form.priority !== TicketPriority.LOW && parsed.form.priority !== TicketPriority.MEDIUM && parsed.form.priority !== TicketPriority.HIGH) return null;
+    if (parsed.form.hardwareSubtype != null && typeof parsed.form.hardwareSubtype !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraftStateWithBackup(next: TicketDraftState): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = window.localStorage.getItem(TICKET_DRAFT_STATE_KEY);
+    if (current) window.localStorage.setItem(TICKET_DRAFT_STATE_BACKUP_KEY, current);
+    window.localStorage.setItem(TICKET_DRAFT_STATE_KEY, JSON.stringify(next));
+  } catch {
+  }
+}
+
+function loadDraftStateWithBackup(actorUserId: number): TicketDraftState | null {
+  if (typeof window === "undefined") return null;
+  const primary = safeParseDraft(window.localStorage.getItem(TICKET_DRAFT_STATE_KEY), actorUserId);
+  if (primary) return primary;
+  return safeParseDraft(window.localStorage.getItem(TICKET_DRAFT_STATE_BACKUP_KEY), actorUserId);
+}
+
+function clearDraftState(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(TICKET_DRAFT_STATE_KEY);
+    window.localStorage.removeItem(TICKET_DRAFT_STATE_BACKUP_KEY);
+  } catch {
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function NewTicket() {
@@ -109,6 +278,12 @@ export default function NewTicket() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [autoSaveDetail, setAutoSaveDetail] = useState<string>("");
+  const saveTimerRef = useRef<number | null>(null);
+  const saveSeqRef = useRef<number>(0);
+  const lastSavedAtRef = useRef<number | null>(null);
+  const restoringRef = useRef<boolean>(false);
 
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
@@ -124,12 +299,247 @@ export default function NewTicket() {
   });
 
   const selectedType = form.watch("type");
+  const selectedPriority = form.watch("priority");
 
   useEffect(() => {
     if (user?.establishment) {
       form.setValue("establishment", user.establishment, { shouldValidate: true });
     }
   }, [user?.establishment, form]);
+
+  useEffect(() => {
+    if (selectedType !== TicketType.SOFTWARE && selectedType !== TicketType.HARDWARE) {
+      form.setValue("type", TicketType.SOFTWARE, { shouldValidate: true, shouldDirty: false });
+      form.setValue("hardwareSubtype", undefined, { shouldValidate: false, shouldDirty: false });
+    }
+  }, [selectedType, form]);
+
+  useEffect(() => {
+    if (
+      selectedPriority !== TicketPriority.LOW &&
+      selectedPriority !== TicketPriority.MEDIUM &&
+      selectedPriority !== TicketPriority.HIGH
+    ) {
+      form.setValue("priority", TicketPriority.LOW, { shouldValidate: true, shouldDirty: false });
+    }
+  }, [selectedPriority, form]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of filePreviews) {
+        if (url) URL.revokeObjectURL(url);
+      }
+    };
+  }, [filePreviews]);
+
+  const runAutoSave = useCallback(async (reason?: string) => {
+    if (!user?.id) return;
+    if (restoringRef.current) return;
+    setAutoSaveStatus("saving");
+    if (reason) setAutoSaveDetail(reason);
+    const seq = ++saveSeqRef.current;
+    try {
+      const actorUserId = user.id;
+      const draftId = toDraftId(actorUserId);
+      const values = form.getValues();
+      const safeType =
+        values.type === TicketType.SOFTWARE || values.type === TicketType.HARDWARE
+          ? values.type
+          : TicketType.SOFTWARE;
+      const safePriority =
+        values.priority === TicketPriority.LOW ||
+        values.priority === TicketPriority.MEDIUM ||
+        values.priority === TicketPriority.HIGH
+          ? values.priority
+          : TicketPriority.LOW;
+      const normalized: TicketForm = {
+        type: safeType,
+        title: values.title ?? "",
+        description: values.description ?? "",
+        establishment: values.establishment ?? "",
+        priority: safePriority,
+        hardwareSubtype: safeType === TicketType.HARDWARE ? values.hardwareSubtype : undefined,
+      };
+
+      let metas: TicketDraftFileMeta[] = files.map((f) => ({
+        key: `${draftId}::${makeFileKey(f)}`,
+        name: f.name,
+        type: f.type,
+        size: f.size,
+        lastModified: f.lastModified,
+      }));
+
+      try {
+        const db = await openDraftDb();
+        const keepKeys = new Set(metas.map((m) => m.key));
+        await Promise.all(
+          files.map(async (f) => {
+            const metaKey = `${draftId}::${makeFileKey(f)}`;
+            const existing = await idbGetDraftFile(db, metaKey);
+            if (existing && existing.size === f.size && existing.lastModified === f.lastModified && existing.type === f.type && existing.name === f.name) {
+              return;
+            }
+            const buffer = await f.arrayBuffer();
+            const rec: DraftFileRecord = {
+              draftId,
+              key: metaKey,
+              name: f.name,
+              type: f.type,
+              size: f.size,
+              lastModified: f.lastModified,
+              buffer,
+            };
+            await idbPutDraftFile(db, rec);
+          })
+        );
+        await idbDeleteDraftFilesNotIn(db, draftId, keepKeys);
+      } catch {
+        metas = await Promise.all(
+          files.map(async (f) => {
+            const buffer = await f.arrayBuffer();
+            const dataUrl = `data:${f.type};base64,${arrayBufferToBase64(buffer)}`;
+            return {
+              key: `${draftId}::${makeFileKey(f)}`,
+              name: f.name,
+              type: f.type,
+              size: f.size,
+              lastModified: f.lastModified,
+              dataUrl,
+            };
+          })
+        );
+      }
+
+      const next: TicketDraftState = {
+        version: 1,
+        actorUserId,
+        savedAt: Date.now(),
+        form: normalized,
+        files: metas,
+      };
+      saveDraftStateWithBackup(next);
+      lastSavedAtRef.current = next.savedAt;
+      if (seq === saveSeqRef.current) {
+        setAutoSaveStatus("saved");
+        setAutoSaveDetail("Salvo automaticamente");
+      }
+    } catch {
+      if (seq === saveSeqRef.current) {
+        setAutoSaveStatus("error");
+        setAutoSaveDetail("Falha ao salvar automaticamente");
+      }
+    }
+  }, [user?.id, form, files]);
+
+  const scheduleAutoSave = useCallback((reason?: string) => {
+    if (!user?.id) return;
+    if (restoringRef.current) return;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    setAutoSaveStatus("saving");
+    if (reason) setAutoSaveDetail(reason);
+    saveTimerRef.current = window.setTimeout(() => {
+      void runAutoSave();
+    }, 250);
+  }, [user?.id, runAutoSave]);
+
+  const restoreDraft = useCallback(async () => {
+    if (!user?.id) return;
+    if (restoringRef.current) return;
+
+    restoringRef.current = true;
+    const state = loadDraftStateWithBackup(user.id);
+    if (!state) {
+      restoringRef.current = false;
+      return;
+    }
+    if (lastSavedAtRef.current != null && state.savedAt <= lastSavedAtRef.current) {
+      restoringRef.current = false;
+      return;
+    }
+
+    try {
+      form.reset(state.form, { keepDefaultValues: true });
+      const restoredFiles: File[] = [];
+      const newPreviews: string[] = [];
+
+      let restoredFromIdb = false;
+      try {
+        const db = await openDraftDb();
+        for (const meta of state.files) {
+          const rec = await idbGetDraftFile(db, meta.key);
+          if (!rec) continue;
+          if (rec.size !== meta.size || rec.type !== meta.type || rec.name !== meta.name) continue;
+          const file = new File([rec.buffer], rec.name, { type: rec.type, lastModified: rec.lastModified });
+          restoredFiles.push(file);
+          newPreviews.push(isImage(file.type) ? URL.createObjectURL(file) : "");
+        }
+        restoredFromIdb = true;
+      } catch {
+      }
+
+      if (!restoredFromIdb) {
+        for (const meta of state.files) {
+          if (!meta.dataUrl) continue;
+          const prefix = `data:${meta.type};base64,`;
+          const raw = meta.dataUrl.startsWith(prefix) ? meta.dataUrl.slice(prefix.length) : null;
+          if (!raw) continue;
+          const buffer = base64ToArrayBuffer(raw);
+          if (buffer.byteLength !== meta.size) continue;
+          const file = new File([buffer], meta.name, { type: meta.type, lastModified: meta.lastModified });
+          restoredFiles.push(file);
+          newPreviews.push(isImage(file.type) ? URL.createObjectURL(file) : "");
+        }
+      }
+
+      for (const url of filePreviews) {
+        if (url) URL.revokeObjectURL(url);
+      }
+      setFiles(restoredFiles);
+      setFilePreviews(newPreviews);
+      lastSavedAtRef.current = state.savedAt;
+      setAutoSaveStatus("saved");
+      setAutoSaveDetail("Rascunho recuperado");
+    } catch {
+      setAutoSaveStatus("error");
+      setAutoSaveDetail("Falha ao recuperar rascunho");
+    } finally {
+      restoringRef.current = false;
+    }
+  }, [user?.id, form, filePreviews]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void restoreDraft();
+  }, [user?.id, restoreDraft]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        void runAutoSave("Salvando...");
+        return;
+      }
+      if (document.visibilityState === "visible") {
+        void restoreDraft();
+      }
+    };
+    const onBeforeUnload = () => { void runAutoSave("Salvando..."); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [user?.id, restoreDraft, runAutoSave]);
+
+  useEffect(() => {
+    const sub = form.watch(() => scheduleAutoSave());
+    return () => sub.unsubscribe();
+  }, [form, scheduleAutoSave]);
+
+  useEffect(() => {
+    scheduleAutoSave();
+  }, [files, scheduleAutoSave]);
 
   // ── File handling ─────────────────────────────────────────────────────────
 
@@ -191,6 +601,36 @@ export default function NewTicket() {
     addFiles(Array.from(e.dataTransfer.files));
   };
 
+  const clearDraftAndForm = async () => {
+    const ok = window.confirm("Deseja limpar o formulário? Esta ação remove também o rascunho salvo localmente.");
+    if (!ok) return;
+    for (const url of filePreviews) {
+      if (url) URL.revokeObjectURL(url);
+    }
+    setFiles([]);
+    setFilePreviews([]);
+    setFileErrors([]);
+    form.reset({
+      type: TicketType.SOFTWARE,
+      title: "",
+      description: "",
+      establishment: user?.establishment ?? "",
+      priority: TicketPriority.LOW,
+      hardwareSubtype: undefined,
+    });
+    clearDraftState();
+    try {
+      if (user?.id) {
+        const db = await openDraftDb();
+        const draftId = toDraftId(user.id);
+        await idbDeleteDraftFilesNotIn(db, draftId, new Set());
+      }
+    } catch {
+    }
+    setAutoSaveStatus("idle");
+    setAutoSaveDetail("Formulário limpo");
+  };
+
   // ── Submit ────────────────────────────────────────────────────────────────
 
   const onSubmit = async (data: TicketForm) => {
@@ -246,6 +686,15 @@ export default function NewTicket() {
             title: "Chamado criado com sucesso",
             description: `Protocolo #${ticket.id} gerado.`,
           });
+          clearDraftState();
+          try {
+            if (user?.id) {
+              const db = await openDraftDb();
+              const draftId = toDraftId(user.id);
+              await idbDeleteDraftFilesNotIn(db, draftId, new Set());
+            }
+          } catch {
+          }
           setLocation(`/chamados/${ticket.id}`);
         },
         onError: () => {
@@ -281,6 +730,20 @@ export default function NewTicket() {
         <CardContent className="pt-6">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs text-muted-foreground">
+                  {autoSaveStatus === "saving"
+                    ? autoSaveDetail || "Salvando automaticamente..."
+                    : autoSaveStatus === "saved"
+                    ? autoSaveDetail || (lastSavedAtRef.current ? `Salvo automaticamente` : "Salvo automaticamente")
+                    : autoSaveStatus === "error"
+                    ? autoSaveDetail || "Falha ao salvar automaticamente"
+                    : autoSaveDetail || " "}
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={clearDraftAndForm}>
+                  Limpar
+                </Button>
+              </div>
 
               {/* 1 — Tipo de Solicitação */}
               <FormField
@@ -291,10 +754,15 @@ export default function NewTicket() {
                     <FormLabel>1. Tipo de Solicitação</FormLabel>
                     <Select
                       onValueChange={(v) => {
+                        if (v !== TicketType.SOFTWARE && v !== TicketType.HARDWARE) return;
                         field.onChange(v);
-                        form.setValue("hardwareSubtype", undefined);
+                        form.setValue("hardwareSubtype", undefined, { shouldValidate: false, shouldDirty: false });
                       }}
-                      value={field.value}
+                      value={
+                        field.value === TicketType.SOFTWARE || field.value === TicketType.HARDWARE
+                          ? field.value
+                          : TicketType.SOFTWARE
+                      }
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -378,7 +846,23 @@ export default function NewTicket() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>4. Prioridade</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select
+                      onValueChange={(v) => {
+                        if (
+                          v !== TicketPriority.LOW &&
+                          v !== TicketPriority.MEDIUM &&
+                          v !== TicketPriority.HIGH
+                        ) return;
+                        field.onChange(v);
+                      }}
+                      value={
+                        field.value === TicketPriority.LOW ||
+                        field.value === TicketPriority.MEDIUM ||
+                        field.value === TicketPriority.HIGH
+                          ? field.value
+                          : TicketPriority.LOW
+                      }
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Selecione a prioridade" />

@@ -44,11 +44,65 @@ function isEnabled(): boolean {
   return raw !== "false" && raw !== "0" && raw !== "no";
 }
 
+function isUndefinedTableError(err: unknown): boolean {
+  const anyErr = err as any;
+  const code = anyErr?.code ?? anyErr?.cause?.code ?? anyErr?.error?.code;
+  if (code === "42P01") return true;
+  const msg = String(anyErr?.message ?? anyErr?.cause?.message ?? "");
+  return msg.includes("municipalities_sync_state") && (msg.includes("does not exist") || msg.includes("não existe") || msg.includes("nao existe"));
+}
+
+async function ensureMunicipalitiesTablesExist(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS public.municipalities (
+      ibge_code integer PRIMARY KEY,
+      name text NOT NULL,
+      name_normalized text NOT NULL,
+      uf text NOT NULL,
+      uf_code integer NOT NULL,
+      region text NOT NULL,
+      region_code integer NOT NULL,
+      population integer NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS municipalities_uf_idx ON public.municipalities (uf);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS municipalities_uf_code_idx ON public.municipalities (uf_code);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS municipalities_name_normalized_idx ON public.municipalities (name_normalized);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS municipalities_uf_name_normalized_idx ON public.municipalities (uf, name_normalized);`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS public.municipalities_sync_state (
+      id integer PRIMARY KEY,
+      last_sync_at timestamptz NULL,
+      last_success_at timestamptz NULL,
+      next_due_at timestamptz NULL,
+      last_error text NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await db.execute(sql`
+    INSERT INTO public.municipalities_sync_state (id)
+    VALUES (1)
+    ON CONFLICT (id) DO NOTHING;
+  `);
+}
+
 async function ensureSyncStateRow(): Promise<void> {
-  await db
-    .insert(municipalitiesSyncStateTable)
-    .values({ id: 1 })
-    .onConflictDoNothing();
+  try {
+    await db
+      .insert(municipalitiesSyncStateTable)
+      .values({ id: 1 })
+      .onConflictDoNothing();
+  } catch (err) {
+    if (!isUndefinedTableError(err)) throw err;
+    await ensureMunicipalitiesTablesExist();
+    await db
+      .insert(municipalitiesSyncStateTable)
+      .values({ id: 1 })
+      .onConflictDoNothing();
+  }
 }
 
 async function fetchMunicipalitiesFromIbge(): Promise<IbgeMunicipality[]> {
