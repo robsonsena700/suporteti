@@ -33,9 +33,11 @@ const UFS = [
 ];
 const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
-const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v1";
+const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v2";
 
 type TicketsMainTab = TicketType | "RESOLVED";
+
+type MineOnlyByTab = Record<TicketsMainTab, boolean>;
 
 type TicketsListPersistedState = {
   actorUserId: number;
@@ -46,7 +48,7 @@ type TicketsListPersistedState = {
   responsibleFilter: string;
   sortBy: "createdAt" | "user" | "location" | "responsible";
   sortDir: "asc" | "desc";
-  mineOnly: boolean;
+  mineOnlyByTab: MineOnlyByTab;
   scrollY: number | null;
   lastActiveTicketId: number | null;
   savedAt: number;
@@ -88,7 +90,11 @@ export default function Tickets() {
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
   const initialTypeTab = getInitialTicketTypeTab();
   const [typeTab, setTypeTab] = useState<TicketsMainTab>(initialTypeTab as any);
-  const [mineOnly, setMineOnly] = useState(true);
+  const [mineOnlyByTab, setMineOnlyByTab] = useState<MineOnlyByTab>({
+    [TicketType.SOFTWARE]: true,
+    [TicketType.HARDWARE]: true,
+    RESOLVED: true,
+  });
   const [filters, setFilters] = useState<ListTicketsParams>(() => {
     const type = initialTypeTab === "RESOLVED" ? undefined : (initialTypeTab as TicketType);
     return { type };
@@ -109,6 +115,8 @@ export default function Tickets() {
   const pendingScrollYRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
 
+  const activeMineOnly = mineOnlyByTab[typeTab] ?? true;
+
   useEffect(() => {
     if (!user) return;
     if (!canManageRole && typeTab === "RESOLVED") {
@@ -121,16 +129,33 @@ export default function Tickets() {
   }, [user, canManageRole, typeTab]);
 
   useEffect(() => {
+    if (typeTab !== "RESOLVED" && (filters.status === TicketStatus.RESOLVED || filters.status === TicketStatus.CLOSED)) {
+      if (canManageRole) {
+        setTypeTab("RESOLVED");
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
+        }
+        setFilters((f) => ({ ...f, type: undefined }));
+      } else {
+        setFilters((f) => ({ ...f, status: undefined }));
+      }
+    }
+    if (typeTab === "RESOLVED" && (filters.status === TicketStatus.OPEN || filters.status === TicketStatus.IN_PROGRESS)) {
+      setFilters((f) => ({ ...f, status: undefined }));
+    }
+  }, [typeTab, filters.status, canManageRole]);
+
+  useEffect(() => {
     setFilters((f) => {
       const next = { ...f };
       if (!canManageRole) {
         delete (next as any).mine;
       } else {
-        next.mine = mineOnly ? true : undefined;
+        next.mine = activeMineOnly ? true : undefined;
       }
       return next;
     });
-  }, [canManageRole, mineOnly]);
+  }, [canManageRole, activeMineOnly]);
 
   const listTicketsQuery = useListTickets(filters, {
     query: {
@@ -171,12 +196,12 @@ export default function Tickets() {
       responsibleFilter,
       sortBy,
       sortDir,
-      mineOnly,
+      mineOnlyByTab,
       scrollY: typeof window !== "undefined" ? window.scrollY : null,
       lastActiveTicketId,
       savedAt: Date.now(),
     };
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnly, lastActiveTicketId]);
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId]);
 
   const saveNow = useCallback(() => {
     const next = buildPersisted();
@@ -193,7 +218,11 @@ export default function Tickets() {
     setResponsibleFilter(state.responsibleFilter);
     setSortBy(state.sortBy);
     setSortDir(state.sortDir);
-    setMineOnly(state.mineOnly ?? true);
+    setMineOnlyByTab(state.mineOnlyByTab ?? {
+      [TicketType.SOFTWARE]: true,
+      [TicketType.HARDWARE]: true,
+      RESOLVED: true,
+    });
     setLastActiveTicketId(state.lastActiveTicketId);
     pendingScrollYRef.current = state.scrollY;
   }, []);
@@ -251,7 +280,7 @@ export default function Tickets() {
     if (!user) return;
     const id = setTimeout(() => saveNow(), 200);
     return () => clearTimeout(id);
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, lastActiveTicketId, saveNow]);
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, saveNow]);
 
   return (
     <div className="space-y-6">
@@ -284,7 +313,8 @@ export default function Tickets() {
                 const nextStatus = f.status === TicketStatus.OPEN || f.status === TicketStatus.IN_PROGRESS ? undefined : f.status;
                 return { ...f, type: undefined, status: nextStatus };
               }
-              return { ...f, type: next, status: f.status };
+              const nextStatus = f.status === TicketStatus.RESOLVED || f.status === TicketStatus.CLOSED ? undefined : f.status;
+              return { ...f, type: next, status: nextStatus };
             });
           }}
         >
@@ -315,11 +345,14 @@ export default function Tickets() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Switch
-              id="tickets_mine_only"
-              checked={mineOnly}
-              onCheckedChange={(checked) => setMineOnly(Boolean(checked))}
+              id={`tickets_mine_only_${typeTab}`}
+              checked={activeMineOnly}
+              onCheckedChange={(checked) => {
+                const next = Boolean(checked);
+                setMineOnlyByTab((p) => ({ ...p, [typeTab]: next }));
+              }}
             />
-            <Label htmlFor="tickets_mine_only">Meus chamados</Label>
+            <Label htmlFor={`tickets_mine_only_${typeTab}`}>Meus chamados</Label>
           </div>
         </div>
       ) : null}
@@ -356,13 +389,34 @@ export default function Tickets() {
                       <label className="text-sm font-medium">Status</label>
                       <Select
                         value={filters.status || "all"}
-                        onValueChange={(v) => setFilters(f => ({ ...f, status: v === "all" ? undefined : v as TicketStatus }))}
+                        onValueChange={(v) => {
+                          if (v === "all") {
+                            setFilters((f) => ({ ...f, status: undefined }));
+                            return;
+                          }
+                          const nextStatus = v as TicketStatus;
+                          if ((nextStatus === TicketStatus.RESOLVED || nextStatus === TicketStatus.CLOSED) && typeTab !== "RESOLVED" && canManageRole) {
+                            setTypeTab("RESOLVED");
+                            if (typeof window !== "undefined") {
+                              window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
+                            }
+                            setFilters((f) => ({ ...f, type: undefined, status: nextStatus }));
+                            return;
+                          }
+                          if ((nextStatus === TicketStatus.OPEN || nextStatus === TicketStatus.IN_PROGRESS) && typeTab === "RESOLVED") {
+                            setFilters((f) => ({ ...f, status: undefined }));
+                            return;
+                          }
+                          setFilters((f) => ({ ...f, status: nextStatus }));
+                        }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Todos" />
+                          <SelectValue placeholder={typeTab === "RESOLVED" ? "Todos (resolvidos/fechados)" : "Abertos e em andamento"} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">Todos</SelectItem>
+                          <SelectItem value="all">
+                            {typeTab === "RESOLVED" ? "Todos (resolvidos/fechados)" : "Abertos e em andamento"}
+                          </SelectItem>
                           {typeTab !== "RESOLVED" ? (
                             <>
                               <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>

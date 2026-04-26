@@ -106,6 +106,10 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     res.status(400).json({ error: "Status inválido" });
     return;
   }
+  if (parsedStatus === "RESOLVED" || parsedStatus === "CLOSED") {
+    res.status(400).json({ error: "Use a aba Resolvidos para listar chamados concluídos." });
+    return;
+  }
 
   const parsedType = type != null ? parseTicketType(type) : null;
   if (type != null && !parsedType) {
@@ -132,7 +136,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
       ),
     );
   }
-  if (parsedStatus) dbWhereClauses.push(eq(ticketsTable.status, parsedStatus));
+  dbWhereClauses.push(inArray(ticketsTable.status, parsedStatus ? [parsedStatus] : ["OPEN", "IN_PROGRESS"]));
   if (parsedType) dbWhereClauses.push(eq(ticketsTable.type, parsedType));
   if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
   if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));

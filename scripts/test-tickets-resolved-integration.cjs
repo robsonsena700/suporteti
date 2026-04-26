@@ -89,6 +89,23 @@ async function updateTicketStatus(token, id, status) {
     fail("Esperado encontrar o ticket resolvido na lista de /tickets/resolved.");
   }
 
+  const adminOpenList = await jsonFetch(`${API_BASE}/api/tickets`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (!adminOpenList.ok || !Array.isArray(adminOpenList.data)) {
+    fail(`Admin deveria listar /tickets. Status: ${adminOpenList.status}`);
+  }
+  if (adminOpenList.data.some((t) => t.id === ticketId)) {
+    fail("Ticket RESOLVED não deveria aparecer em /tickets (deve ir para a aba Resolvidos).");
+  }
+
+  const adminResolvedOnOpenEndpoint = await jsonFetch(`${API_BASE}/api/tickets?status=RESOLVED`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (adminResolvedOnOpenEndpoint.status !== 400) {
+    fail(`Esperado 400 no /tickets?status=RESOLVED. Obtido: ${adminResolvedOnOpenEndpoint.status}`);
+  }
+
   const adminMine = await jsonFetch(`${API_BASE}/api/tickets?mine=true`, {
     headers: { Authorization: `Bearer ${adminToken}` },
   });
