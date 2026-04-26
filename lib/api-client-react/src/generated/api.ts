@@ -885,6 +885,100 @@ export function useListTickets<
 }
 
 /**
+ * @summary Listar chamados resolvidos
+ */
+export const getListResolvedTicketsUrl = (params?: ListTicketsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/tickets/resolved?${stringifiedParams}`
+    : `/api/tickets/resolved`;
+};
+
+export const listResolvedTickets = async (
+  params?: ListTicketsParams,
+  options?: RequestInit,
+): Promise<Ticket[]> => {
+  return customFetch<Ticket[]>(getListResolvedTicketsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListResolvedTicketsQueryKey = (params?: ListTicketsParams) => {
+  return [`/api/tickets/resolved`, ...(params ? [params] : [])] as const;
+};
+
+export const getListResolvedTicketsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listResolvedTickets>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListTicketsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listResolvedTickets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListResolvedTicketsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listResolvedTickets>>> = ({
+    signal,
+  }) => listResolvedTickets(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listResolvedTickets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListResolvedTicketsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listResolvedTickets>>
+>;
+export type ListResolvedTicketsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Listar chamados resolvidos
+ */
+
+export function useListResolvedTickets<
+  TData = Awaited<ReturnType<typeof listResolvedTickets>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListTicketsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listResolvedTickets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListResolvedTicketsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary Abrir novo chamado
  */
 export const getCreateTicketUrl = () => {

@@ -38,6 +38,12 @@ function parseTicketPriority(value: unknown): "LOW" | "MEDIUM" | "HIGH" | null {
   return null;
 }
 
+function parseBooleanQuery(value: unknown): boolean | null {
+  if (value === "1" || value === "true") return true;
+  if (value === "0" || value === "false") return false;
+  return null;
+}
+
 function formatChange(field: string, from: unknown, to: unknown): string {
   const fromText = from == null || from === "" ? "—" : String(from);
   const toText = to == null || to === "" ? "—" : String(to);
@@ -62,7 +68,7 @@ async function auditTicketUpdate(args: {
 
 router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { status, type, priority, uf, municipality } = req.query as Record<string, string | undefined>;
+  const { status, type, priority, uf, municipality, mine } = req.query as Record<string, string | undefined>;
 
   const whereClauses = [];
   if (user.role !== "ADMIN" && user.role !== "ANALYST") {
@@ -83,6 +89,16 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
         ),
       );
     }
+  }
+
+  const parsedMine = mine != null ? parseBooleanQuery(mine) : null;
+  if (mine != null && parsedMine == null) {
+    res.status(400).json({ error: "Filtro inválido" });
+    return;
+  }
+  if (parsedMine === true && !(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR")) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
   }
 
   const parsedStatus = status != null ? parseTicketStatus(status) : null;
@@ -108,6 +124,14 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
 
   const dbWhereClauses: any[] = [];
   if (whereClauses.length > 0) dbWhereClauses.push(and(...whereClauses));
+  if (parsedMine === true) {
+    dbWhereClauses.push(
+      or(
+        eq(ticketsTable.createdById, user.userId),
+        eq(ticketsTable.assignedToId, user.userId),
+      ),
+    );
+  }
   if (parsedStatus) dbWhereClauses.push(eq(ticketsTable.status, parsedStatus));
   if (parsedType) dbWhereClauses.push(eq(ticketsTable.type, parsedType));
   if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
@@ -127,6 +151,125 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     },
     orderBy: [desc(ticketsTable.createdAt)],
   });
+  const result = allTickets.map(t => ({
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    type: t.type,
+    hardwareSubtype: t.hardwareSubtype ?? null,
+    status: t.status,
+    priority: t.priority,
+    uf: t.uf,
+    municipality: t.municipality,
+    establishment: t.establishment ?? null,
+    imageAttachmentsCount: (t.attachments ?? []).filter(a => a.mimeType.startsWith("image/")).length,
+    createdById: t.createdById,
+    assignedToId: t.assignedToId,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    createdBy: t.createdBy ? {
+      id: t.createdBy.id,
+      name: t.createdBy.name,
+      email: t.createdBy.email,
+      role: t.createdBy.role,
+    } : null,
+    assignedTo: t.assignedTo ? {
+      id: t.assignedTo.id,
+      name: t.assignedTo.name,
+      email: t.assignedTo.email,
+      role: t.assignedTo.role,
+    } : null,
+  }));
+
+  res.json(result);
+});
+
+router.get("/tickets/resolved", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (req, res): Promise<void> => {
+  const user = req.user!;
+  const { status, type, priority, uf, municipality, mine } = req.query as Record<string, string | undefined>;
+
+  const whereClauses = [];
+  if (user.role !== "ADMIN" && user.role !== "ANALYST") {
+    if (user.role === "COORDINATOR") {
+      const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
+      const allowedOwners = [user.userId, ...managedUserIds];
+      whereClauses.push(
+        or(
+          inArray(ticketsTable.createdById, allowedOwners),
+          eq(ticketsTable.assignedToId, user.userId),
+        ),
+      );
+    } else {
+      whereClauses.push(
+        or(
+          eq(ticketsTable.createdById, user.userId),
+          eq(ticketsTable.assignedToId, user.userId),
+        ),
+      );
+    }
+  }
+
+  const parsedMine = mine != null ? parseBooleanQuery(mine) : null;
+  if (mine != null && parsedMine == null) {
+    res.status(400).json({ error: "Filtro inválido" });
+    return;
+  }
+
+  const parsedStatus = status != null ? parseTicketStatus(status) : null;
+  if (status != null && !parsedStatus) {
+    res.status(400).json({ error: "Status inválido" });
+    return;
+  }
+  if (parsedStatus && parsedStatus !== "RESOLVED" && parsedStatus !== "CLOSED") {
+    res.status(400).json({ error: "Status inválido" });
+    return;
+  }
+
+  const parsedType = type != null ? parseTicketType(type) : null;
+  if (type != null && !parsedType) {
+    res.status(400).json({ error: "Tipo inválido" });
+    return;
+  }
+
+  const parsedPriority = priority != null ? parseTicketPriority(priority) : null;
+  if (priority != null && !parsedPriority) {
+    res.status(400).json({ error: "Prioridade inválida" });
+    return;
+  }
+
+  const parsedUf = uf != null ? normalizeText(uf)?.toUpperCase() ?? null : null;
+  const parsedMunicipality = municipality != null ? normalizeText(municipality) : null;
+
+  const dbWhereClauses: any[] = [];
+  if (whereClauses.length > 0) dbWhereClauses.push(and(...whereClauses));
+  if (parsedMine === true) {
+    dbWhereClauses.push(
+      or(
+        eq(ticketsTable.createdById, user.userId),
+        eq(ticketsTable.assignedToId, user.userId),
+      ),
+    );
+  }
+  dbWhereClauses.push(inArray(ticketsTable.status, parsedStatus ? [parsedStatus] : ["RESOLVED", "CLOSED"]));
+  if (parsedType) dbWhereClauses.push(eq(ticketsTable.type, parsedType));
+  if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
+  if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));
+  if (parsedMunicipality) dbWhereClauses.push(eq(ticketsTable.municipality, parsedMunicipality));
+
+  const finalWhere = dbWhereClauses.length > 0 ? and(...dbWhereClauses) : undefined;
+
+  const allTickets = await db.query.ticketsTable.findMany({
+    where: finalWhere,
+    with: {
+      createdBy: true,
+      assignedTo: true,
+      attachments: {
+        columns: { id: true, mimeType: true },
+      },
+    },
+    orderBy: [desc(ticketsTable.createdAt)],
+  });
+
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,

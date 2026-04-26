@@ -3,11 +3,14 @@ import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { 
   useListTickets, 
+  useListResolvedTickets,
   getListTicketsQueryKey,
+  getListResolvedTicketsQueryKey,
   TicketStatus,
   TicketType,
   TicketPriority,
-  ListTicketsParams
+  ListTicketsParams,
+  UserRole
 } from "@workspace/api-client-react";
 import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +24,8 @@ import { ptBR } from "date-fns/locale";
 import { filterAndSortTickets } from "@/lib/tickets-utils";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
@@ -30,15 +35,18 @@ const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
 const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v1";
 
+type TicketsMainTab = TicketType | "RESOLVED";
+
 type TicketsListPersistedState = {
   actorUserId: number;
-  typeTab: TicketType;
+  typeTab: TicketsMainTab;
   filters: ListTicketsParams;
   userFilter: string;
   locationFilter: string;
   responsibleFilter: string;
   sortBy: "createdAt" | "user" | "location" | "responsible";
   sortDir: "asc" | "desc";
+  mineOnly: boolean;
   scrollY: number | null;
   lastActiveTicketId: number | null;
   savedAt: number;
@@ -68,18 +76,23 @@ function saveTicketsListState(next: TicketsListPersistedState): void {
   }
 }
 
-function getInitialTicketTypeTab(): TicketType {
+function getInitialTicketTypeTab(): TicketsMainTab {
   if (typeof window === "undefined") return TicketType.SOFTWARE;
   const raw = window.localStorage.getItem(TYPE_TAB_KEY);
-  if (raw === TicketType.SOFTWARE || raw === TicketType.HARDWARE) return raw as TicketType;
+  if (raw === TicketType.SOFTWARE || raw === TicketType.HARDWARE || raw === "RESOLVED") return raw as any;
   return TicketType.SOFTWARE;
 }
 
 export default function Tickets() {
   const { user } = useAuth();
+  const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
   const initialTypeTab = getInitialTicketTypeTab();
-  const [typeTab, setTypeTab] = useState<TicketType>(initialTypeTab);
-  const [filters, setFilters] = useState<ListTicketsParams>({ type: initialTypeTab });
+  const [typeTab, setTypeTab] = useState<TicketsMainTab>(initialTypeTab as any);
+  const [mineOnly, setMineOnly] = useState(true);
+  const [filters, setFilters] = useState<ListTicketsParams>(() => {
+    const type = initialTypeTab === "RESOLVED" ? undefined : (initialTypeTab as TicketType);
+    return { type };
+  });
   const [userFilter, setUserFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [responsibleFilter, setResponsibleFilter] = useState("");
@@ -96,11 +109,46 @@ export default function Tickets() {
   const pendingScrollYRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
 
-  const { data: tickets, isLoading } = useListTickets(filters, {
+  useEffect(() => {
+    if (!user) return;
+    if (!canManageRole && typeTab === "RESOLVED") {
+      setTypeTab(TicketType.SOFTWARE);
+      setFilters((f) => ({ ...f, type: TicketType.SOFTWARE, status: undefined }));
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(TYPE_TAB_KEY, TicketType.SOFTWARE);
+      }
+    }
+  }, [user, canManageRole, typeTab]);
+
+  useEffect(() => {
+    setFilters((f) => {
+      const next = { ...f };
+      if (!canManageRole) {
+        delete (next as any).mine;
+      } else {
+        next.mine = mineOnly ? true : undefined;
+      }
+      return next;
+    });
+  }, [canManageRole, mineOnly]);
+
+  const listTicketsQuery = useListTickets(filters, {
     query: {
+      enabled: typeTab !== "RESOLVED",
       queryKey: getListTicketsQueryKey(filters),
     }
   });
+
+  const listResolvedTicketsQuery = useListResolvedTickets(filters, {
+    query: {
+      enabled: canManageRole && typeTab === "RESOLVED",
+      queryKey: getListResolvedTicketsQueryKey(filters),
+    }
+  });
+
+  const { data: tickets, isLoading } = typeTab === "RESOLVED"
+    ? listResolvedTicketsQuery
+    : listTicketsQuery;
 
   const visibleTickets = useMemo(() => {
     return filterAndSortTickets(tickets ?? [], {
@@ -123,11 +171,12 @@ export default function Tickets() {
       responsibleFilter,
       sortBy,
       sortDir,
+      mineOnly,
       scrollY: typeof window !== "undefined" ? window.scrollY : null,
       lastActiveTicketId,
       savedAt: Date.now(),
     };
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, lastActiveTicketId]);
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnly, lastActiveTicketId]);
 
   const saveNow = useCallback(() => {
     const next = buildPersisted();
@@ -144,6 +193,7 @@ export default function Tickets() {
     setResponsibleFilter(state.responsibleFilter);
     setSortBy(state.sortBy);
     setSortDir(state.sortDir);
+    setMineOnly(state.mineOnly ?? true);
     setLastActiveTicketId(state.lastActiveTicketId);
     pendingScrollYRef.current = state.scrollY;
   }, []);
@@ -224,12 +274,18 @@ export default function Tickets() {
         <Tabs
           value={typeTab}
           onValueChange={(v) => {
-            const next = v as TicketType;
+            const next = v as TicketsMainTab;
             setTypeTab(next);
             if (typeof window !== "undefined") {
               window.localStorage.setItem(TYPE_TAB_KEY, next);
             }
-            setFilters((f) => ({ ...f, type: next }));
+            setFilters((f) => {
+              if (next === "RESOLVED") {
+                const nextStatus = f.status === TicketStatus.OPEN || f.status === TicketStatus.IN_PROGRESS ? undefined : f.status;
+                return { ...f, type: undefined, status: nextStatus };
+              }
+              return { ...f, type: next, status: f.status };
+            });
           }}
         >
           <TabsList className="h-11 p-1">
@@ -239,12 +295,34 @@ export default function Tickets() {
             <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-4">
               Hardware
             </TabsTrigger>
+            {canManageRole ? (
+              <TabsTrigger value="RESOLVED" className="h-9 px-4">
+                Resolvidos
+              </TabsTrigger>
+            ) : null}
           </TabsList>
         </Tabs>
         <div className="text-xs text-muted-foreground">
-          {typeTab === TicketType.SOFTWARE ? "Exibindo chamados de Software" : "Exibindo chamados de Hardware"}
+          {typeTab === "RESOLVED"
+            ? "Exibindo chamados resolvidos"
+            : typeTab === TicketType.SOFTWARE
+              ? "Exibindo chamados de Software"
+              : "Exibindo chamados de Hardware"}
         </div>
       </div>
+
+      {canManageRole ? (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="tickets_mine_only"
+              checked={mineOnly}
+              onCheckedChange={(checked) => setMineOnly(Boolean(checked))}
+            />
+            <Label htmlFor="tickets_mine_only">Meus chamados</Label>
+          </div>
+        </div>
+      ) : null}
 
       <Card>
         <CardContent className="p-4">
@@ -285,10 +363,19 @@ export default function Tickets() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">Todos</SelectItem>
-                          <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>
-                          <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
-                          <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                          <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                          {typeTab !== "RESOLVED" ? (
+                            <>
+                              <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>
+                              <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
+                              <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
+                              <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                            </>
+                          ) : (
+                            <>
+                              <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
+                              <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                            </>
+                          )}
                         </SelectContent>
                       </Select>
                     </div>

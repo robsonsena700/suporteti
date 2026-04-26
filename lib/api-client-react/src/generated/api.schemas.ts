@@ -345,6 +345,7 @@ export type ListTicketsParams = {
   priority?: ListTicketsPriority;
   uf?: string;
   municipality?: string;
+  mine?: boolean;
 };
 
 export type ListTicketsStatus =
