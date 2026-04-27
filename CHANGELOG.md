@@ -1,5 +1,22 @@
 ﻿# Changelog
 
+## v1.0.16 (2026-04-27)
+- Impressão do chamado (94d0314)
+- Chamado - Alterações de permissões entre outas (5dd8bb7)
+- Chat - guardando mensagens digitadas (persistência) (64cc3b0)
+- chore(release): v1.0.15 (4af378d)
+- V1.0.14 (6604cea)
+- chore(release): v1.0.14 (2941182)
+- Merge remote-tracking branch 'origin/main' into V3.0.1 (6611dad)
+- V1.0.13 (75636b8)
+- Merge pull request #4 from robsonsena700/V3.0.2 (0690833)
+- chore(release): v1.0.13 (03115d8)
+- Update 1.0.12 (515654a)
+- chore(release): v1.0.12 (5908a02)
+- Update 1.0.9 (4a5dca6)
+- chore(release): v1.0.11 (92a41a9)
+- Update 1.0.9 (44d66c7)
+
 ## v1.0.10 (2026-04-25)
 warning: refname 'v1.0.0' is ambiguous.
 - Chat - Diminuir o consumo e reduzir requisições (a321658)
@@ -62,6 +79,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
