@@ -38,7 +38,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, Download, Eye, FileText, Paperclip, Pencil, Save, Send, Star, Trash2, UserCircle2, UserPlus, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, FileText, Paperclip, Pencil, Printer, Save, Send, Star, Trash2, UserCircle2, UserPlus, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -960,6 +960,14 @@ export default function TicketDetail() {
             Aberto por {ticket.createdBy.name} em {format(new Date(ticket.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
           </p>
         </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => window.open(`/chamados/${ticket.id}/comprovante`, "_blank", "noopener,noreferrer")}
+        >
+          <Printer className="mr-2 h-4 w-4" />
+          Comprovante
+        </Button>
         {canManage && (
           <div className="flex gap-2">
             {!ticket.assignedToId && ticket.status !== TicketStatus.CLOSED && (

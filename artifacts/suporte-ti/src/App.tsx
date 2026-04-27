@@ -15,6 +15,7 @@ const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Tickets = lazy(() => import("@/pages/tickets"));
 const NewTicket = lazy(() => import("@/pages/new-ticket"));
 const TicketDetail = lazy(() => import("@/pages/ticket-detail"));
+const TicketReceipt = lazy(() => import("@/pages/ticket-receipt"));
 const Reports = lazy(() => import("@/pages/reports"));
 const Settings = lazy(() => import("@/pages/settings"));
 const Profile = lazy(() => import("@/pages/profile"));
@@ -74,6 +75,7 @@ function Router() {
           <ProtectedRoute path="/dashboard" component={Dashboard} />
           <ProtectedRoute path="/chamados" component={Tickets} />
           <ProtectedRoute path="/chamados/novo" component={NewTicket} />
+          <ProtectedRoute path="/chamados/:id/comprovante" component={TicketReceipt} />
           <ProtectedRoute path="/chamados/:id" component={TicketDetail} />
           <ProtectedRoute path="/chat" component={Chat} />
           <ProtectedRoute path="/relatorios" component={Reports} adminOnly />

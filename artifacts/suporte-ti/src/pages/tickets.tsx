@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, PlusCircle } from "lucide-react";
+import { Image as ImageIcon, PlusCircle, Printer } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { filterAndSortTickets } from "@/lib/tickets-utils";
@@ -585,9 +585,24 @@ export default function Tickets() {
                       ) : (
                         <div />
                       )}
-                      <p className="text-xs text-muted-foreground">
-                        {format(new Date(ticket.createdAt), "dd/MM/yyyy", { locale: ptBR })}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label="Imprimir comprovante"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.open(`/chamados/${ticket.id}/comprovante`, "_blank", "noopener,noreferrer");
+                          }}
+                        >
+                          <Printer className="h-4 w-4" />
+                        </Button>
+                        <p className="text-xs text-muted-foreground">
+                          {format(new Date(ticket.createdAt), "dd/MM/yyyy", { locale: ptBR })}
+                        </p>
+                      </div>
                     </div>
 
                     <div className="mt-3 pt-3 border-t text-sm">

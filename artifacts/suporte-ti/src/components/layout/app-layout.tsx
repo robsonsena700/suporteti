@@ -29,8 +29,9 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const isPublicRoute = location === "/" || location === "/registro";
   const isPendingRoute = location === "/pendente";
+  const isReceiptRoute = location.includes("/comprovante");
 
-  if (isPublicRoute || isPendingRoute) {
+  if (isPublicRoute || isPendingRoute || isReceiptRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 

@@ -695,6 +695,13 @@ export default function NewTicket() {
             }
           } catch {
           }
+          const receiptUrl = `/chamados/${ticket.id}/comprovante?autoprint=1`;
+          const opened = window.open(receiptUrl, "_blank", "noopener,noreferrer");
+          if (!opened) {
+            setLocation(receiptUrl);
+            return;
+          }
+
           setLocation(`/chamados/${ticket.id}`);
         },
         onError: () => {
