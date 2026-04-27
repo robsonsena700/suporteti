@@ -224,7 +224,7 @@ export const ApproveUserResponse = zod.object({
  * @summary Listar chamados
  */
 export const ListTicketsQueryParams = zod.object({
-  status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]).optional(),
+  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]).optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
   uf: zod.coerce.string().optional(),
@@ -237,7 +237,7 @@ export const ListTicketsResponseItem = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   hardwareSubtype: zod.string().nullish(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
+  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
@@ -297,7 +297,7 @@ export const GetTicketResponse = zod
     description: zod.string(),
     type: zod.enum(["SOFTWARE", "HARDWARE"]),
     hardwareSubtype: zod.string().nullish(),
-    status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
+    status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
     priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
     uf: zod.string(),
     municipality: zod.string(),
@@ -373,7 +373,7 @@ export const UpdateTicketParams = zod.object({
 export const UpdateTicketBody = zod.object({
   title: zod.string().optional(),
   description: zod.string().optional(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]).optional(),
+  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
 });
 
@@ -383,7 +383,7 @@ export const UpdateTicketResponse = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   hardwareSubtype: zod.string().nullish(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
+  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
@@ -436,7 +436,7 @@ export const AssignTicketResponse = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   hardwareSubtype: zod.string().nullish(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]),
+  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),

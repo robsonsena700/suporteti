@@ -23,7 +23,7 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
   const [ticketCounts] = await db.select({
     total: count(),
     open: sql<number>`count(*) filter (where status = 'OPEN')`,
-    inProgress: sql<number>`count(*) filter (where status = 'IN_PROGRESS')`,
+    inProgress: sql<number>`count(*) filter (where status IN ('IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
     resolved: sql<number>`count(*) filter (where status = 'RESOLVED')`,
     closed: sql<number>`count(*) filter (where status = 'CLOSED')`,
   }).from(ticketsTable).where(ticketScopeWhere);
@@ -117,6 +117,7 @@ router.get("/reports/recent-activity", requireAuth, requireActive, async (req, r
     id: i + 1,
     action: t.status === "OPEN" ? "Chamado aberto" :
             t.status === "IN_PROGRESS" ? "Chamado em andamento" :
+            t.status === "AWAITING_CUSTOMER" ? "Aguardando cliente" :
             t.status === "RESOLVED" ? "Chamado resolvido" : "Chamado encerrado",
     ticketId: t.id,
     ticketTitle: t.title,

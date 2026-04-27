@@ -61,13 +61,52 @@ async function updateTicketStatus(token, id, status) {
   return r.data;
 }
 
+async function resolveTicket(token, id, message) {
+  const r = await jsonFetch(`${API_BASE}/api/tickets/${id}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ message }),
+  });
+  return r;
+}
+
+async function listMessages(token, id) {
+  const r = await jsonFetch(`${API_BASE}/api/tickets/${id}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok || !Array.isArray(r.data)) fail(`Falha ao listar mensagens: ${r.status}`);
+  return r.data;
+}
+
 (async () => {
   const userToken = await login(USER_EMAIL, USER_PASSWORD);
   const adminToken = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
   const title = `ticket-resolved-integration-${Date.now()}`;
   const ticketId = await createTicket(userToken, title);
-  await updateTicketStatus(adminToken, ticketId, "RESOLVED");
+
+  const patchResolved = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ status: "RESOLVED" }),
+  });
+  if (patchResolved.status !== 400) {
+    fail(`Esperado 400 ao resolver via PATCH sem mensagem. Obtido: ${patchResolved.status}`);
+  }
+
+  const resolveEmpty = await resolveTicket(adminToken, ticketId, "   ");
+  if (resolveEmpty.status !== 400) {
+    fail(`Esperado 400 ao resolver sem mensagem. Obtido: ${resolveEmpty.status}`);
+  }
+
+  const solution = `Solução aplicada em ${new Date().toISOString()}`;
+  const resolved = await resolveTicket(adminToken, ticketId, solution);
+  if (!resolved.ok) fail(`Falha ao resolver ticket: ${resolved.status} ${JSON.stringify(resolved.data)}`);
+
+  const msgs = await listMessages(adminToken, ticketId);
+  if (!msgs.some((m) => (m?.message || "").includes(solution))) {
+    fail("Esperado encontrar a mensagem de solução no histórico.");
+  }
 
   const userResolved = await jsonFetch(`${API_BASE}/api/tickets/resolved`, {
     headers: { Authorization: `Bearer ${userToken}` },

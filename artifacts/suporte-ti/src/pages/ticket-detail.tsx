@@ -8,7 +8,6 @@ import {
   useCreateMessage,
   useGetTicketRating,
   useRateTicket,
-  useListUsers,
   useAssignTicket,
   getGetTicketQueryKey,
   getListMessagesQueryKey,
@@ -24,8 +23,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Star, UserCircle2, FileText, Paperclip, Download, Eye, Pencil, Save, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, FileText, Paperclip, Pencil, Save, Send, Star, Trash2, UserCircle2, UserPlus, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -109,6 +122,8 @@ type AssignableUser = {
   assignedOpenTickets: number;
 };
 
+type CollaboratorRef = { id: number; name: string; email: string; role: string };
+
 export default function TicketDetail() {
   const [, params] = useRoute("/chamados/:id");
   const ticketId = Number(params?.id);
@@ -141,6 +156,14 @@ export default function TicketDetail() {
   const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [focusedMessageId, setFocusedMessageId] = useState<number | null>(null);
+  const [collaboratorOpen, setCollaboratorOpen] = useState(false);
+  const [collaboratorQuery, setCollaboratorQuery] = useState("");
+  const [selectedCollaboratorIds, setSelectedCollaboratorIds] = useState<number[]>([]);
+  const [confirmAddCollaboratorsOpen, setConfirmAddCollaboratorsOpen] = useState(false);
+  const [pendingRemoveCollaborator, setPendingRemoveCollaborator] = useState<CollaboratorRef | null>(null);
+  const [reassignConfirmOpen, setReassignConfirmOpen] = useState(false);
+  const [resolveConfirmOpen, setResolveConfirmOpen] = useState(false);
+  const [resolveMessage, setResolveMessage] = useState("");
   const pendingRestoreRef = useRef<TicketDetailPersistedState | null>(null);
   const pendingPreviewAttachmentIdRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
@@ -476,6 +499,11 @@ export default function TicketDetail() {
   }, [user, ticketId, message, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt, saveNow]);
 
   const handleUpdateStatus = (status: TicketStatus) => {
+    if (status === TicketStatus.RESOLVED) {
+      setResolveMessage("");
+      setResolveConfirmOpen(true);
+      return;
+    }
     updateMutation.mutate(
       { id: ticketId, data: { status } },
       {
@@ -509,6 +537,41 @@ export default function TicketDetail() {
         }
       }
     );
+  };
+
+  const handleResolve = async () => {
+    const text = resolveMessage.trim();
+    if (text.length === 0) {
+      toast({ title: "Mensagem obrigatória para resolver", variant: "destructive" });
+      return;
+    }
+    if (text.length > 2000) {
+      toast({ title: "Mensagem muito longa (máx. 2000)", variant: "destructive" });
+      return;
+    }
+    try {
+      const updated = await customFetch<any>(`/api/tickets/${ticketId}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      queryClient.setQueryData(getGetTicketQueryKey(ticketId), updated);
+      queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
+      if (canManageRole) {
+        customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+          .then((rows) => setAuditLogs(Array.isArray(rows) ? rows : []))
+          .catch(() => null);
+      }
+      setResolveConfirmOpen(false);
+      setResolveMessage("");
+      toast({ title: "Chamado marcado como resolvido" });
+    } catch (e: any) {
+      toast({
+        title: "Falha ao resolver chamado",
+        description: e?.data?.error || e?.message || "Não foi possível concluir a operação.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleRate = () => {
@@ -642,14 +705,118 @@ export default function TicketDetail() {
     );
   }
 
+  const collaborators = ((ticket as any).collaborators as CollaboratorRef[] | undefined) ?? [];
+  const collaboratorIdSet = new Set(collaborators.map((c) => c.id));
+
   const canManage = canManageRole;
   const isCreator = ticket.createdById === user?.id;
   const isAdminOrAnalyst = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const closedAt = new Date(ticket.updatedAt).getTime();
   const withinReopenWindow = Number.isFinite(closedAt) && (Date.now() - closedAt) <= 24 * 60 * 60 * 1000;
   const canReopenClosed = ticket.status !== TicketStatus.CLOSED || (isAdminOrAnalyst && withinReopenWindow);
-  const canInteractTicket = ticket.createdById === user?.id || ticket.assignedToId === user?.id;
+  const canInteractTicket =
+    ticket.createdById === user?.id
+    || ticket.assignedToId === user?.id
+    || (user?.id != null && collaboratorIdSet.has(user.id));
   const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
+
+  const q = collaboratorQuery.trim().toLowerCase();
+  const availableCollaborators = assignableUsers
+    .filter((u) => !collaboratorIdSet.has(u.id))
+    .filter((u) => {
+      if (!q) return true;
+      return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+  const selectedSet = new Set(selectedCollaboratorIds);
+  const selectedCollaborators = assignableUsers.filter((u) => selectedSet.has(u.id));
+
+  const addCollaborators = async () => {
+    if (!canManageRole) {
+      toast({ title: "Sem permissão", variant: "destructive" });
+      return;
+    }
+    if (selectedCollaboratorIds.length === 0) {
+      toast({ title: "Selecione ao menos um colaborador", variant: "destructive" });
+      return;
+    }
+    try {
+      const rows = await customFetch<CollaboratorRef[]>(`/api/tickets/${ticketId}/collaborators`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: selectedCollaboratorIds }),
+      });
+      queryClient.setQueryData(getGetTicketQueryKey(ticketId), (prev: any) => prev ? ({ ...prev, collaborators: rows }) : prev);
+      if (canManageRole) {
+        customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+          .then((r) => setAuditLogs(Array.isArray(r) ? r : []))
+          .catch(() => null);
+      }
+      setSelectedCollaboratorIds([]);
+      setCollaboratorQuery("");
+      setCollaboratorOpen(false);
+      toast({ title: "Colaboradores adicionados com sucesso" });
+    } catch (e: any) {
+      toast({
+        title: "Falha ao adicionar colaboradores",
+        description: e?.data?.error || e?.message || "Não foi possível concluir a operação.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const removeCollaborator = async (collaborator: CollaboratorRef) => {
+    if (!canManageRole) {
+      toast({ title: "Sem permissão", variant: "destructive" });
+      return;
+    }
+    try {
+      await customFetch<{ ok: boolean }>(`/api/tickets/${ticketId}/collaborators/${collaborator.id}`, { method: "DELETE" });
+      queryClient.setQueryData(getGetTicketQueryKey(ticketId), (prev: any) => {
+        if (!prev) return prev;
+        const prevList = Array.isArray(prev.collaborators) ? prev.collaborators : [];
+        return { ...prev, collaborators: prevList.filter((c: any) => c?.id !== collaborator.id) };
+      });
+      if (canManageRole) {
+        customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+          .then((r) => setAuditLogs(Array.isArray(r) ? r : []))
+          .catch(() => null);
+      }
+      toast({ title: "Colaborador removido" });
+    } catch (e: any) {
+      toast({
+        title: "Falha ao remover colaborador",
+        description: e?.data?.error || e?.message || "Não foi possível concluir a operação.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const auditTypeLabel = (type: string) => {
+    if (type === "MANUAL_ASSIGN") return "Atribuição manual";
+    if (type === "AUTO_ASSIGN") return "Atribuição automática";
+    if (type === "MESSAGE_SENT") return "Mensagem enviada";
+    if (type === "TICKET_UPDATED") return "Ticket atualizado";
+    if (type === "COLLABORATOR_ADDED") return "Colaborador adicionado";
+    if (type === "COLLABORATOR_REMOVED") return "Colaborador removido";
+    return type;
+  };
+
+  const auditDetailLabel = (l: TicketAuditLog) => {
+    if (l.type !== "COLLABORATOR_ADDED" && l.type !== "COLLABORATOR_REMOVED") return null;
+    if (!l.detail) return null;
+    try {
+      const parsed = JSON.parse(l.detail) as { collaboratorUserId?: number };
+      const id = parsed?.collaboratorUserId;
+      if (!id) return l.detail;
+      const name = collaborators.find((c) => c.id === id)?.name || assignableUsers.find((u) => u.id === id)?.name;
+      return name ? `${name} (#${id})` : `#${id}`;
+    } catch {
+      return l.detail;
+    }
+  };
+
 
   const handleSaveDetails = async () => {
     if (savingDetails) return;
@@ -725,6 +892,37 @@ export default function TicketDetail() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      <AlertDialog open={resolveConfirmOpen} onOpenChange={setResolveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como resolvido</AlertDialogTitle>
+            <AlertDialogDescription>
+              Para concluir o chamado, informe a solução implementada. Esta mensagem ficará no histórico do chamado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Textarea
+              value={resolveMessage}
+              onChange={(e) => setResolveMessage(e.target.value.slice(0, 2000))}
+              placeholder="Descreva a solução aplicada..."
+              rows={4}
+            />
+            <p className="text-xs text-muted-foreground text-right">{resolveMessage.length}/2000</p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleResolve();
+              }}
+            >
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
           <Link href="/chamados">
@@ -755,6 +953,7 @@ export default function TicketDetail() {
                 <SelectContent>
                   {canReopenClosed ? <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem> : null}
+                  {canReopenClosed ? <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem> : null}
                   <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
                 </SelectContent>
@@ -824,7 +1023,7 @@ export default function TicketDetail() {
 
               {!canInteractTicket ? (
                 <p className="text-xs text-muted-foreground">
-                  Apenas o criador do ticket e o responsável atual podem enviar mensagens. Você pode visualizar este chamado.
+                  Apenas o criador do ticket, colaboradores e o responsável atual podem enviar mensagens. Você pode visualizar este chamado.
                 </p>
               ) : null}
 
@@ -1021,6 +1220,167 @@ export default function TicketDetail() {
             </CardContent>
           </Card>
 
+          {canManageRole || collaborators.length > 0 ? (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-lg">Colaboradores</CardTitle>
+                {canManageRole ? (
+                  <Popover open={collaboratorOpen} onOpenChange={setCollaboratorOpen}>
+                    <PopoverTrigger asChild>
+                      <Button type="button" variant="outline" size="sm" disabled={savingDetails}>
+                        <UserPlus className="mr-2 size-4" />
+                        Adicionar
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-[360px] p-0">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          value={collaboratorQuery}
+                          onValueChange={setCollaboratorQuery}
+                          placeholder="Buscar usuário..."
+                          inputMode="search"
+                          enterKeyHint="search"
+                          autoCorrect="off"
+                          autoCapitalize="words"
+                          spellCheck={false}
+                          className="h-11 text-base sm:h-10 sm:text-sm"
+                        />
+                        <CommandList className="max-h-[45vh] touch-pan-y overscroll-contain sm:max-h-72">
+                          <CommandEmpty>Nenhum usuário encontrado.</CommandEmpty>
+                          <CommandGroup>
+                            {availableCollaborators.map((u) => {
+                              const selected = selectedCollaboratorIds.includes(u.id);
+                              return (
+                                <CommandItem
+                                  key={u.id}
+                                  value={`${u.name} ${u.email}`}
+                                  onSelect={() => {
+                                    setSelectedCollaboratorIds((prev) => {
+                                      if (prev.includes(u.id)) return prev.filter((id) => id !== u.id);
+                                      return [...prev, u.id];
+                                    });
+                                  }}
+                                  className="min-h-11 text-sm sm:min-h-9"
+                                >
+                                  <Check className={cn("mr-2 size-4", selected ? "opacity-100" : "opacity-0")} />
+                                  <span className="truncate">{u.name} • {getRoleLabel(u.role)}</span>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                      <div className="border-t p-3 space-y-2">
+                        {selectedCollaborators.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {selectedCollaborators.map((u) => (
+                              <Badge key={u.id} variant="secondary">
+                                {u.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Selecione usuários para adicionar como colaboradores.</p>
+                        )}
+                        <AlertDialog open={confirmAddCollaboratorsOpen} onOpenChange={setConfirmAddCollaboratorsOpen}>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              type="button"
+                              className="w-full"
+                              disabled={selectedCollaboratorIds.length === 0}
+                              onClick={() => setCollaboratorOpen(false)}
+                            >
+                              Confirmar adição ({selectedCollaboratorIds.length})
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Adicionar colaboradores</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Esta ação adiciona {selectedCollaboratorIds.length} colaborador(es) ao chamado #{ticket.id}.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            {selectedCollaborators.length > 0 ? (
+                              <div className="text-sm space-y-1">
+                                {selectedCollaborators.map((u) => (
+                                  <div key={u.id} className="flex items-center justify-between gap-2">
+                                    <span className="truncate">{u.name}</span>
+                                    <span className="text-xs text-muted-foreground shrink-0">{getRoleLabel(u.role)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => {
+                                  void addCollaborators();
+                                }}
+                              >
+                                Adicionar
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                ) : null}
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {collaborators.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Nenhum colaborador adicionado.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {collaborators.map((c) => (
+                      <div key={c.id} className="flex items-center justify-between gap-2 rounded-md border p-2">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{c.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{c.email} • {getRoleLabel(c.role)}</p>
+                        </div>
+                        {canManageRole ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="outline"
+                            onClick={() => setPendingRemoveCollaborator(c)}
+                            aria-label="Remover colaborador"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <AlertDialog open={!!pendingRemoveCollaborator} onOpenChange={(open) => { if (!open) setPendingRemoveCollaborator(null); }}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Remover colaborador</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Remover {pendingRemoveCollaborator?.name ?? "o colaborador"} do chamado #{ticket.id}?
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel onClick={() => setPendingRemoveCollaborator(null)}>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => {
+                          if (!pendingRemoveCollaborator) return;
+                          const target = pendingRemoveCollaborator;
+                          setPendingRemoveCollaborator(null);
+                          void removeCollaborator(target);
+                        }}
+                      >
+                        Remover
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {canAssignTicket ? (
             <Card>
               <CardHeader>
@@ -1060,14 +1420,35 @@ export default function TicketDetail() {
                   />
                   <p className="text-xs text-muted-foreground text-right">{assignReason.length}/500</p>
                 </div>
-                <Button
-                  type="button"
-                  onClick={handleReassign}
-                  disabled={assignMutation.isPending || ticket.status === TicketStatus.CLOSED}
-                  className="w-full"
-                >
-                  {assignMutation.isPending ? "Salvando..." : "Confirmar substituição"}
-                </Button>
+                <AlertDialog open={reassignConfirmOpen} onOpenChange={setReassignConfirmOpen}>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      type="button"
+                      disabled={assignMutation.isPending || ticket.status === TicketStatus.CLOSED}
+                      className="w-full"
+                    >
+                      {assignMutation.isPending ? "Salvando..." : "Confirmar substituição"}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Confirmar reatribuição</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta ação altera o responsável do chamado #{ticket.id}.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => {
+                          handleReassign();
+                        }}
+                      >
+                        Confirmar
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
                 {ticket.status === TicketStatus.CLOSED ? (
                   <p className="text-xs text-muted-foreground">Tickets fechados não podem ser reatribuídos.</p>
                 ) : null}
@@ -1132,7 +1513,7 @@ export default function TicketDetail() {
                     <AccordionTrigger className="py-2 hover:no-underline">
                       <div className="text-left">
                         <p className="text-sm font-semibold">Histórico de interações e mudanças</p>
-                        <p className="text-xs text-muted-foreground">Mensagens, atribuições e reatribuições</p>
+                        <p className="text-xs text-muted-foreground">Mensagens, atribuições, reatribuições e colaboradores</p>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pt-2">
@@ -1149,7 +1530,7 @@ export default function TicketDetail() {
                           {auditLogs.map((l) => (
                             <div key={l.id} className="rounded-lg border p-3 text-sm">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="font-medium">{l.type}</p>
+                                <p className="font-medium">{auditTypeLabel(l.type)}</p>
                                 <p className="text-xs text-muted-foreground">
                                   {format(new Date(l.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                                 </p>
@@ -1162,7 +1543,12 @@ export default function TicketDetail() {
                                   Atribuição: {l.fromAssignedTo ? l.fromAssignedTo.name : "—"} → {l.toAssignedTo ? l.toAssignedTo.name : "—"}
                                 </p>
                               ) : null}
-                              {l.detail ? (
+                              {((l.type === "COLLABORATOR_ADDED" || l.type === "COLLABORATOR_REMOVED") && auditDetailLabel(l)) ? (
+                                <p className="text-xs mt-2">
+                                  Colaborador: {auditDetailLabel(l)}
+                                </p>
+                              ) : null}
+                              {l.detail && l.type !== "COLLABORATOR_ADDED" && l.type !== "COLLABORATOR_REMOVED" ? (
                                 <p className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap break-words">
                                   {l.detail}
                                 </p>

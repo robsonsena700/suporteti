@@ -1,14 +1,14 @@
 type AssignDecision = {
   shouldAssign: boolean;
   nextAssignedToId: number | null;
-  nextStatus: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" | null;
+  nextStatus: "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "RESOLVED" | "CLOSED" | null;
 };
 
 export function computeAutoAssignDecision(args: {
   actorRole: string;
   actorUserId: number;
   currentAssignedToId: number | null;
-  currentStatus: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  currentStatus: "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 }): AssignDecision {
   const { actorRole, actorUserId, currentAssignedToId, currentStatus } = args;
 

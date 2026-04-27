@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable } from "@workspace/db";
-import { eq, and, desc, inArray, or } from "drizzle-orm";
+import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable } from "@workspace/db";
+import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign } from "../lib/ticket-reassign-policy";
 import { validateMunicipalityForUf } from "../lib/ibge";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -28,8 +29,8 @@ function parseTicketType(value: unknown): "SOFTWARE" | "HARDWARE" | null {
   return null;
 }
 
-function parseTicketStatus(value: unknown): "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" | null {
-  if (value === "OPEN" || value === "IN_PROGRESS" || value === "RESOLVED" || value === "CLOSED") return value;
+function parseTicketStatus(value: unknown): "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "RESOLVED" | "CLOSED" | null {
+  if (value === "OPEN" || value === "IN_PROGRESS" || value === "AWAITING_CUSTOMER" || value === "RESOLVED" || value === "CLOSED") return value;
   return null;
 }
 
@@ -79,6 +80,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
         or(
           inArray(ticketsTable.createdById, allowedOwners),
           eq(ticketsTable.assignedToId, user.userId),
+          sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${user.userId})`,
         ),
       );
     } else {
@@ -136,7 +138,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
       ),
     );
   }
-  dbWhereClauses.push(inArray(ticketsTable.status, parsedStatus ? [parsedStatus] : ["OPEN", "IN_PROGRESS"]));
+  dbWhereClauses.push(inArray(ticketsTable.status, parsedStatus ? [parsedStatus] : ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER"]));
   if (parsedType) dbWhereClauses.push(eq(ticketsTable.type, parsedType));
   if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
   if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));
@@ -201,6 +203,7 @@ router.get("/tickets/resolved", requireAuth, requireActive, requireRoles("ADMIN"
         or(
           inArray(ticketsTable.createdById, allowedOwners),
           eq(ticketsTable.assignedToId, user.userId),
+          sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${user.userId})`,
         ),
       );
     } else {
@@ -361,6 +364,10 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
       attachments: {
         columns: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
       },
+      collaborators: {
+        with: { user: true },
+        orderBy: (c, { asc }) => [asc(c.createdAt)],
+      },
     },
   });
 
@@ -422,8 +429,214 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
       size: a.size,
       createdAt: a.createdAt,
     })),
+    collaborators: ticket.collaborators.map((c) => ({
+      id: c.user.id,
+      name: c.user.name,
+      email: c.user.email,
+      role: c.user.role,
+    })),
   });
 });
+
+router.get(
+  "/tickets/:id/collaborators",
+  requireAuth,
+  requireActive,
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  async (req, res): Promise<void> => {
+    const user = req.user!;
+    const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const id = parseInt(raw, 10);
+
+    if (isNaN(id)) {
+      res.status(400).json({ error: "ID inválido" });
+      return;
+    }
+
+    const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, id));
+    if (!ticket) {
+      res.status(404).json({ error: "Chamado não encontrado" });
+      return;
+    }
+
+    if (!(await enforceTicketAccess(user, ticket, "tickets:getById"))) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+
+    const rows = await db
+      .select(userRefSelect)
+      .from(ticketCollaboratorsTable)
+      .innerJoin(usersTable, eq(usersTable.id, ticketCollaboratorsTable.userId))
+      .where(eq(ticketCollaboratorsTable.ticketId, id))
+      .orderBy(asc(usersTable.name));
+
+    res.json(rows);
+  },
+);
+
+router.post(
+  "/tickets/:id/collaborators",
+  requireAuth,
+  requireActive,
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  async (req, res): Promise<void> => {
+    const actor = req.user!;
+    const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const id = parseInt(raw, 10);
+
+    if (isNaN(id)) {
+      res.status(400).json({ error: "ID inválido" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const userIdsRaw = body.userIds;
+    if (!Array.isArray(userIdsRaw) || userIdsRaw.length === 0) {
+      res.status(400).json({ error: "Informe userIds" });
+      return;
+    }
+
+    const userIds = Array.from(
+      new Set(
+        userIdsRaw
+          .map((v) => (typeof v === "number" ? v : Number(v)))
+          .filter((v) => Number.isInteger(v) && v > 0),
+      ),
+    );
+
+    if (userIds.length === 0) {
+      res.status(400).json({ error: "Informe ao menos um usuário válido" });
+      return;
+    }
+
+    const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, id));
+    if (!ticket) {
+      res.status(404).json({ error: "Chamado não encontrado" });
+      return;
+    }
+
+    if (!(await enforceTicketAccess(actor, ticket, "tickets:collaborators"))) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+
+    const targets = await db.select().from(usersTable).where(inArray(usersTable.id, userIds));
+    const targetsById = new Map(targets.map(t => [t.id, t]));
+    const missing = userIds.filter(uid => !targetsById.has(uid));
+    if (missing.length > 0) {
+      res.status(404).json({ error: "Usuário(s) não encontrado(s)", missing });
+      return;
+    }
+
+    const invalidRole = targets.filter(t => !(t.role === "ADMIN" || t.role === "ANALYST" || t.role === "COORDINATOR"));
+    if (invalidRole.length > 0) {
+      res.status(400).json({ error: "Apenas Admin, Analista e Coordenador podem ser colaboradores" });
+      return;
+    }
+
+    const inactive = targets.filter(t => t.status !== "ACTIVE");
+    if (inactive.length > 0) {
+      res.status(400).json({ error: "O colaborador precisa estar ativo" });
+      return;
+    }
+
+    const existingRows = await db
+      .select({ userId: ticketCollaboratorsTable.userId })
+      .from(ticketCollaboratorsTable)
+      .where(and(eq(ticketCollaboratorsTable.ticketId, id), inArray(ticketCollaboratorsTable.userId, userIds)));
+    if (existingRows.length > 0) {
+      res.status(409).json({ error: "Um ou mais usuários já são colaboradores deste chamado", duplicates: existingRows.map(r => r.userId) });
+      return;
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.insert(ticketCollaboratorsTable).values(
+        userIds.map(uid => ({
+          ticketId: id,
+          userId: uid,
+          addedByUserId: actor.userId,
+        })),
+      );
+
+      await tx.insert(ticketAuditLogsTable).values(
+        userIds.map(uid => ({
+          ticketId: id,
+          actorUserId: actor.userId,
+          type: "COLLABORATOR_ADDED" as const,
+          detail: JSON.stringify({ collaboratorUserId: uid }),
+        })),
+      );
+    });
+
+    logger.info({ ticketId: id, actorUserId: actor.userId, collaboratorUserIds: userIds }, "Colaboradores adicionados ao chamado");
+
+    const rows = await db
+      .select(userRefSelect)
+      .from(ticketCollaboratorsTable)
+      .innerJoin(usersTable, eq(usersTable.id, ticketCollaboratorsTable.userId))
+      .where(eq(ticketCollaboratorsTable.ticketId, id))
+      .orderBy(asc(usersTable.name));
+
+    res.json(rows);
+  },
+);
+
+router.delete(
+  "/tickets/:id/collaborators/:userId",
+  requireAuth,
+  requireActive,
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  async (req, res): Promise<void> => {
+    const actor = req.user!;
+    const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const rawUserId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+    const id = parseInt(rawId, 10);
+    const targetUserId = parseInt(rawUserId, 10);
+
+    if (isNaN(id) || isNaN(targetUserId)) {
+      res.status(400).json({ error: "ID inválido" });
+      return;
+    }
+
+    const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, id));
+    if (!ticket) {
+      res.status(404).json({ error: "Chamado não encontrado" });
+      return;
+    }
+
+    if (!(await enforceTicketAccess(actor, ticket, "tickets:collaborators"))) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+
+    const [existing] = await db
+      .select({ userId: ticketCollaboratorsTable.userId })
+      .from(ticketCollaboratorsTable)
+      .where(and(eq(ticketCollaboratorsTable.ticketId, id), eq(ticketCollaboratorsTable.userId, targetUserId)));
+    if (!existing) {
+      res.status(404).json({ error: "Colaborador não encontrado no chamado" });
+      return;
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(ticketCollaboratorsTable)
+        .where(and(eq(ticketCollaboratorsTable.ticketId, id), eq(ticketCollaboratorsTable.userId, targetUserId)));
+
+      await tx.insert(ticketAuditLogsTable).values({
+        ticketId: id,
+        actorUserId: actor.userId,
+        type: "COLLABORATOR_REMOVED",
+        detail: JSON.stringify({ collaboratorUserId: targetUserId }),
+      });
+    });
+
+    logger.info({ ticketId: id, actorUserId: actor.userId, collaboratorUserId: targetUserId }, "Colaborador removido do chamado");
+
+    res.json({ ok: true });
+  },
+);
 
 router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
@@ -458,6 +671,13 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     && existing.status === "CLOSED"
     && requestedStatus !== "CLOSED";
 
+  const awaitingCustomerMessage = "Estamos aguardando seu retorno para dar continuidade ao atendimento. Caso não haja resposta ou interação dentro do período previsto, o chamado poderá ser encerrado automaticamente como 'Cancelado'.";
+
+  if (requestedStatus === "RESOLVED" && existing.status !== "RESOLVED") {
+    res.status(400).json({ error: "Para marcar como Resolvido, envie uma mensagem de solução." });
+    return;
+  }
+
   if (isReopenAction) {
     const allowed = canReopenClosedTicket({
       role: user.role,
@@ -470,11 +690,6 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
       return;
     }
   }
-
-  const [ticket] = await db.update(ticketsTable)
-    .set(parsed.data)
-    .where(eq(ticketsTable.id, id))
-    .returning();
 
   const changes: Array<{ field: string; from: unknown; to: unknown }> = [];
   if (parsed.data.status && parsed.data.status !== existing.status) {
@@ -489,7 +704,131 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
   if (typeof parsed.data.description === "string" && parsed.data.description !== existing.description) {
     changes.push({ field: "description", from: "(texto)", to: "(texto)" });
   }
-  await auditTicketUpdate({ ticketId: id, actorUserId: user.userId, changes });
+  const detail = changes.map(c => formatChange(c.field, c.from, c.to)).join("\n");
+
+  const shouldNotifyAwaitingCustomer =
+    requestedStatus === "AWAITING_CUSTOMER"
+    && existing.status !== "AWAITING_CUSTOMER";
+
+  const [ticket] = shouldNotifyAwaitingCustomer
+    ? await db.transaction(async (tx) => {
+      const [updated] = await tx.update(ticketsTable)
+        .set(parsed.data)
+        .where(eq(ticketsTable.id, id))
+        .returning();
+
+      await tx.insert(messagesTable).values({
+        ticketId: id,
+        senderId: user.userId,
+        message: awaitingCustomerMessage,
+      });
+
+      if (detail) {
+        await tx.insert(ticketAuditLogsTable).values({
+          ticketId: id,
+          actorUserId: user.userId,
+          type: "TICKET_UPDATED",
+          detail,
+        });
+      }
+
+      return [updated];
+    })
+    : await db.update(ticketsTable)
+      .set(parsed.data)
+      .where(eq(ticketsTable.id, id))
+      .returning();
+
+  if (!shouldNotifyAwaitingCustomer) {
+    await auditTicketUpdate({ ticketId: id, actorUserId: user.userId, changes });
+  }
+
+  const [createdBy] = await db.select().from(usersTable).where(eq(usersTable.id, ticket.createdById));
+  const assignedTo = ticket.assignedToId
+    ? (await db.select().from(usersTable).where(eq(usersTable.id, ticket.assignedToId)))[0]
+    : null;
+
+  res.json({
+    ...ticket,
+    createdBy: createdBy ? {
+      id: createdBy.id,
+      name: createdBy.name,
+      email: createdBy.email,
+      role: createdBy.role,
+    } : null,
+    assignedTo: assignedTo ? {
+      id: assignedTo.id,
+      name: assignedTo.name,
+      email: assignedTo.email,
+      role: assignedTo.role,
+    } : null,
+  });
+});
+
+router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const body = (req.body ?? {}) as { message?: unknown };
+  const solutionMessage = typeof body.message === "string" ? body.message.trim() : "";
+  if (solutionMessage.length === 0) {
+    res.status(400).json({ error: "Mensagem obrigatória para resolver o chamado." });
+    return;
+  }
+  if (solutionMessage.length > 2000) {
+    res.status(400).json({ error: "Mensagem muito longa (máx. 2000 caracteres)." });
+    return;
+  }
+
+  const [existing] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+
+  if (existing.status === "CLOSED") {
+    res.status(400).json({ error: "Tickets fechados não podem ser marcados como resolvidos" });
+    return;
+  }
+
+  if (!(await enforceTicketAccess(user, existing, "tickets:update"))) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const [ticket] = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(ticketsTable)
+      .set({ status: "RESOLVED" })
+      .where(eq(ticketsTable.id, id))
+      .returning();
+
+    await tx.insert(messagesTable).values({
+      ticketId: id,
+      senderId: user.userId,
+      message: solutionMessage,
+    });
+
+    await tx.insert(ticketAuditLogsTable).values({
+      ticketId: id,
+      actorUserId: user.userId,
+      type: "TICKET_UPDATED",
+      detail: formatChange("status", existing.status, "RESOLVED"),
+    });
+
+    return [updated];
+  });
+
+  if (!ticket) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
 
   const [createdBy] = await db.select().from(usersTable).where(eq(usersTable.id, ticket.createdById));
   const assignedTo = ticket.assignedToId
@@ -655,6 +994,9 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
 
   const previousAssignedToId = existing.assignedToId ?? null;
 
+  const isSelfAssign = parsed.data.assignedToId === user.userId && previousAssignedToId !== user.userId;
+  const auditType = isSelfAssign && previousAssignedToId == null ? "AUTO_ASSIGN" : "MANUAL_ASSIGN";
+
   const [ticket] = await db.update(ticketsTable)
     .set({ assignedToId: parsed.data.assignedToId, status: "IN_PROGRESS" })
     .where(eq(ticketsTable.id, id))
@@ -673,16 +1015,20 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
   await db.insert(ticketAuditLogsTable).values({
     ticketId: id,
     actorUserId: user.userId,
-    type: "MANUAL_ASSIGN",
+    type: auditType,
     fromAssignedToId: previousAssignedToId,
     toAssignedToId: ticket.assignedToId ?? null,
     detail: parsed.data.reason,
   });
 
+  const notificationMessage = isSelfAssign
+    ? `usuário ${targetUser.name} atribuiu-se ao seu chamado, aguarde...`
+    : `[NOTIFICAÇÃO] Ticket reatribuído para ${targetUser.name}. Motivo: ${parsed.data.reason}`;
+
   await db.insert(messagesTable).values({
     ticketId: id,
     senderId: user.userId,
-    message: `[NOTIFICAÇÃO] Ticket reatribuído para ${targetUser.name}. Motivo: ${parsed.data.reason}`,
+    message: notificationMessage,
   });
 
   res.json({

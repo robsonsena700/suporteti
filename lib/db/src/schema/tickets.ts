@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { usersTable } from "./users";
 
 export const ticketTypeEnum = pgEnum("ticket_type", ["SOFTWARE", "HARDWARE"]);
-export const ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]);
+export const ticketStatusEnum = pgEnum("ticket_status", ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]);
 export const ticketPriorityEnum = pgEnum("ticket_priority", ["LOW", "MEDIUM", "HIGH"]);
 
 export const ticketsTable = pgTable("tickets", {

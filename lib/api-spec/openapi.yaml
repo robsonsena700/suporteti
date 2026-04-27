@@ -386,6 +386,106 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /tickets/{id}/collaborators:
+    get:
+      operationId: listTicketCollaborators
+      tags: [tickets]
+      summary: Listar colaboradores de um chamado
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Lista de colaboradores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserRef"
+        "404":
+          description: Chamado não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: addTicketCollaborators
+      tags: [tickets]
+      summary: Adicionar colaboradores em um chamado
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userIds:
+                  type: array
+                  items:
+                    type: integer
+              required:
+                - userIds
+      responses:
+        "200":
+          description: Lista de colaboradores atualizada
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserRef"
+        "404":
+          description: Chamado não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tickets/{id}/collaborators/{userId}:
+    delete:
+      operationId: removeTicketCollaborator
+      tags: [tickets]
+      summary: Remover colaborador de um chamado
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Colaborador removido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required:
+                  - ok
+        "404":
+          description: Chamado ou colaborador não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ───────── MESSAGES ─────────
   /tickets/{ticketId}/messages:
     get:
@@ -817,6 +917,10 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/Rating"
                 - type: "null"
+            collaborators:
+              type: array
+              items:
+                $ref: "#/components/schemas/UserRef"
 
     UserRef:
       type: object

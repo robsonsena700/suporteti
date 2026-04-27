@@ -12,6 +12,7 @@ export type ListTicketsStatus =
 export const ListTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;

@@ -46,6 +46,18 @@ const { computeAutoAssignDecision } = mod as {
 
 {
   const d = computeAutoAssignDecision({
+    actorRole: "COORDINATOR",
+    actorUserId: 10,
+    currentAssignedToId: 11,
+    currentStatus: "AWAITING_CUSTOMER",
+  });
+  assert.equal(d.shouldAssign, true);
+  assert.equal(d.nextAssignedToId, 10);
+  assert.equal(d.nextStatus, null);
+}
+
+{
+  const d = computeAutoAssignDecision({
     actorRole: "ADMIN",
     actorUserId: 10,
     currentAssignedToId: 10,

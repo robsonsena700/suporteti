@@ -123,6 +123,7 @@ export type TicketStatus = (typeof TicketStatus)[keyof typeof TicketStatus];
 export const TicketStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -201,6 +202,7 @@ export interface Rating {
 export type TicketDetail = Ticket & {
   messages?: Message[];
   rating?: Rating | null;
+  collaborators?: UserRef[];
 };
 
 export type CreateTicketBodyType =
@@ -236,6 +238,7 @@ export type UpdateTicketBodyStatus =
 export const UpdateTicketBodyStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -354,6 +357,7 @@ export type ListTicketsStatus =
 export const ListTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;

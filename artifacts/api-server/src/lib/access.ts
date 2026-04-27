@@ -1,10 +1,18 @@
-import { db, userCoordinatorsTable, usersTable, ticketsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { db, userCoordinatorsTable, usersTable, ticketsTable, ticketCollaboratorsTable } from "@workspace/db";
+import { and, eq, inArray } from "drizzle-orm";
 import type { JwtPayload } from "../middlewares/auth";
 import { logger } from "./logger";
 import { computeTicketAccess } from "./ticket-access-policy";
 
 type TicketRow = typeof ticketsTable.$inferSelect;
+
+async function isTicketCollaborator(userId: number, ticketId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ ticketId: ticketCollaboratorsTable.ticketId })
+    .from(ticketCollaboratorsTable)
+    .where(and(eq(ticketCollaboratorsTable.ticketId, ticketId), eq(ticketCollaboratorsTable.userId, userId)));
+  return Boolean(row?.ticketId);
+}
 
 export async function getCoordinatorIdsForUser(userId: number): Promise<number[]> {
   const links = await db
@@ -56,16 +64,17 @@ export async function canReadTicket(user: JwtPayload, ticket: TicketRow): Promis
 
   if (user.role === "COORDINATOR") {
     const responsibleCoordinatorId = await getResponsibleCoordinatorIdForUser(ticket.createdById);
-    return computeTicketAccess({
+    const viaCoordinator = computeTicketAccess({
       actorRole: user.role,
       actorUserId: user.userId,
       ticketCreatedById: ticket.createdById,
       ticketAssignedToId: ticket.assignedToId ?? null,
       isCoordinatorOfOwner: responsibleCoordinatorId === user.userId,
     }).canView;
+    if (viaCoordinator) return true;
   }
 
-  return false;
+  return isTicketCollaborator(user.userId, ticket.id);
 }
 
 export async function enforceTicketAccess(
@@ -76,6 +85,7 @@ export async function enforceTicketAccess(
   const coordinatorFlag = user.role === "COORDINATOR"
     ? (await getResponsibleCoordinatorIdForUser(ticket.createdById)) === user.userId
     : false;
+  const collaboratorFlag = await isTicketCollaborator(user.userId, ticket.id);
 
   const access = computeTicketAccess({
     actorRole: user.role,
@@ -83,6 +93,7 @@ export async function enforceTicketAccess(
     ticketCreatedById: ticket.createdById,
     ticketAssignedToId: ticket.assignedToId ?? null,
     isCoordinatorOfOwner: coordinatorFlag,
+    isCollaborator: collaboratorFlag,
   });
 
   const requiresInteract =
@@ -93,6 +104,8 @@ export async function enforceTicketAccess(
 
   const allowed = action === "tickets:assign"
     ? access.canAssign && access.canView
+    : action === "tickets:collaborators"
+      ? access.canAssign && access.canView
     : action === "tickets:update"
       ? (
         access.canInteract

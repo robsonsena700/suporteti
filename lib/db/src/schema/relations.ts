@@ -8,6 +8,7 @@ import { directMessagesTable } from "./direct-messages";
 import { chatAttachmentsTable } from "./chat-attachments";
 import { userCoordinatorsTable } from "./user-coordinators";
 import { ticketAuditLogsTable } from "./ticket-audit";
+import { ticketCollaboratorsTable } from "./ticket-collaborators";
 
 export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
@@ -15,6 +16,8 @@ export const usersRelations = relations(usersTable, ({ many }) => ({
   messages: many(messagesTable),
   ratings: many(ratingsTable),
   ticketAuditLogs: many(ticketAuditLogsTable),
+  ticketCollaborations: many(ticketCollaboratorsTable, { relationName: "ticketCollaborator_user" }),
+  addedCollaborations: many(ticketCollaboratorsTable, { relationName: "ticketCollaborator_addedBy" }),
   chatMessages: many(chatMessagesTable),
   chatAttachments: many(chatAttachmentsTable),
   sentDirectMessages: many(directMessagesTable, { relationName: "dmSender" }),
@@ -93,6 +96,24 @@ export const ticketsRelations = relations(ticketsTable, ({ one, many }) => ({
   }),
   attachments: many(ticketAttachmentsTable),
   auditLogs: many(ticketAuditLogsTable),
+  collaborators: many(ticketCollaboratorsTable),
+}));
+
+export const ticketCollaboratorsRelations = relations(ticketCollaboratorsTable, ({ one }) => ({
+  ticket: one(ticketsTable, {
+    fields: [ticketCollaboratorsTable.ticketId],
+    references: [ticketsTable.id],
+  }),
+  user: one(usersTable, {
+    fields: [ticketCollaboratorsTable.userId],
+    references: [usersTable.id],
+    relationName: "ticketCollaborator_user",
+  }),
+  addedBy: one(usersTable, {
+    fields: [ticketCollaboratorsTable.addedByUserId],
+    references: [usersTable.id],
+    relationName: "ticketCollaborator_addedBy",
+  }),
 }));
 
 export const ticketAttachmentsRelations = relations(ticketAttachmentsTable, ({ one }) => ({
