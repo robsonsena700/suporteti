@@ -411,11 +411,11 @@ export default function Tickets() {
                         }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder={typeTab === "RESOLVED" ? "Todos (resolvidos/fechados)" : "Abertos e em andamento"} />
+                          <SelectValue placeholder={typeTab === "RESOLVED" ? "Todos (resolvidos/cancelados)" : "Abertos e em andamento"} />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">
-                            {typeTab === "RESOLVED" ? "Todos (resolvidos/fechados)" : "Abertos e em andamento"}
+                            {typeTab === "RESOLVED" ? "Todos (resolvidos/cancelados)" : "Abertos e em andamento"}
                           </SelectItem>
                           {typeTab !== "RESOLVED" ? (
                             <>
@@ -423,12 +423,12 @@ export default function Tickets() {
                               <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
                               <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem>
                               <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                              <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                              <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
                             </>
                           ) : (
                             <>
                               <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                              <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                              <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
                             </>
                           )}
                         </SelectContent>

@@ -70,6 +70,26 @@ async function resolveTicket(token, id, message) {
   return r;
 }
 
+async function getUserIdByEmail(adminToken, email) {
+  const r = await jsonFetch(`${API_BASE}/api/users/assignable`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (!r.ok || !Array.isArray(r.data)) fail(`Falha ao listar usuários (admin). Status: ${r.status}`);
+  const found = r.data.find((u) => String(u.email || "").toLowerCase() === String(email).toLowerCase());
+  if (!found?.id) fail(`Usuário não encontrado por email: ${email}`);
+  return { id: found.id, name: found.name };
+}
+
+async function assignTicket(adminToken, id, assignedToId) {
+  const r = await jsonFetch(`${API_BASE}/api/tickets/${id}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ assignedToId, reason: "Atribuição obrigatória para testes de status" }),
+  });
+  if (!r.ok) fail(`Falha ao atribuir ticket: ${r.status} ${JSON.stringify(r.data)}`);
+  return r.data;
+}
+
 async function listMessages(token, id) {
   const r = await jsonFetch(`${API_BASE}/api/tickets/${id}/messages`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -84,6 +104,14 @@ async function listMessages(token, id) {
 
   const title = `ticket-resolved-integration-${Date.now()}`;
   const ticketId = await createTicket(userToken, title);
+
+  const resolveWithoutAssignee = await resolveTicket(adminToken, ticketId, "Solução de teste");
+  if (resolveWithoutAssignee.status !== 400) {
+    fail(`Esperado 400 ao resolver sem responsável atribuído. Obtido: ${resolveWithoutAssignee.status}`);
+  }
+
+  const adminUser = await getUserIdByEmail(adminToken, ADMIN_EMAIL);
+  await assignTicket(adminToken, ticketId, adminUser.id);
 
   const patchResolved = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}`, {
     method: "PATCH",

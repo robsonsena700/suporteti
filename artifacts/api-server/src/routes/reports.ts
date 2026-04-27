@@ -118,7 +118,7 @@ router.get("/reports/recent-activity", requireAuth, requireActive, async (req, r
     action: t.status === "OPEN" ? "Chamado aberto" :
             t.status === "IN_PROGRESS" ? "Chamado em andamento" :
             t.status === "AWAITING_CUSTOMER" ? "Aguardando cliente" :
-            t.status === "RESOLVED" ? "Chamado resolvido" : "Chamado encerrado",
+            t.status === "RESOLVED" ? "Chamado resolvido" : "Chamado cancelado",
     ticketId: t.id,
     ticketTitle: t.title,
     userName: t.createdBy?.name ?? "Desconhecido",

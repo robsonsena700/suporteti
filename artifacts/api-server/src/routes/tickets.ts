@@ -5,7 +5,7 @@ import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
-import { canReceiveReassign } from "../lib/ticket-reassign-policy";
+import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { logger } from "../lib/logger";
 
@@ -673,11 +673,6 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
 
   const awaitingCustomerMessage = "Estamos aguardando seu retorno para dar continuidade ao atendimento. Caso não haja resposta ou interação dentro do período previsto, o chamado poderá ser encerrado automaticamente como 'Cancelado'.";
 
-  if (requestedStatus === "RESOLVED" && existing.status !== "RESOLVED") {
-    res.status(400).json({ error: "Para marcar como Resolvido, envie uma mensagem de solução." });
-    return;
-  }
-
   if (isReopenAction) {
     const allowed = canReopenClosedTicket({
       role: user.role,
@@ -685,10 +680,30 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     });
     if (!allowed) {
       res.status(403).json({
-        error: `Reabertura permitida apenas para Admin e Analista em até ${REOPEN_WINDOW_HOURS}h após o fechamento.`,
+        error: `Reabertura permitida apenas para Admin e Analista em até ${REOPEN_WINDOW_HOURS}h após o cancelamento.`,
       });
       return;
     }
+  }
+
+  if (typeof requestedStatus === "string" && requiresStaffAssigneeForStatus(requestedStatus)) {
+    if (!existing.assignedToId) {
+      res.status(400).json({ error: "Para alterar o status, é obrigatório atribuir previamente um responsável (Admin, Coordenador ou Analista)." });
+      return;
+    }
+    const [assignee] = await db
+      .select({ role: usersTable.role, status: usersTable.status })
+      .from(usersTable)
+      .where(eq(usersTable.id, existing.assignedToId));
+    if (!assignee || !canReceiveReassign(assignee.role, assignee.status)) {
+      res.status(400).json({ error: "Para alterar o status, é obrigatório atribuir previamente um responsável (Admin, Coordenador ou Analista)." });
+      return;
+    }
+  }
+
+  if (requestedStatus === "RESOLVED" && existing.status !== "RESOLVED") {
+    res.status(400).json({ error: "Para marcar como Resolvido, envie uma mensagem de solução." });
+    return;
   }
 
   const changes: Array<{ field: string; from: unknown; to: unknown }> = [];
@@ -793,12 +808,25 @@ router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res)
   }
 
   if (existing.status === "CLOSED") {
-    res.status(400).json({ error: "Tickets fechados não podem ser marcados como resolvidos" });
+    res.status(400).json({ error: "Tickets cancelados não podem ser marcados como resolvidos" });
     return;
   }
 
   if (!(await enforceTicketAccess(user, existing, "tickets:update"))) {
     res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  if (!existing.assignedToId) {
+    res.status(400).json({ error: "Para alterar o status, é obrigatório atribuir previamente um responsável (Admin, Coordenador ou Analista)." });
+    return;
+  }
+  const [assignee] = await db
+    .select({ role: usersTable.role, status: usersTable.status })
+    .from(usersTable)
+    .where(eq(usersTable.id, existing.assignedToId));
+  if (!assignee || !canReceiveReassign(assignee.role, assignee.status)) {
+    res.status(400).json({ error: "Para alterar o status, é obrigatório atribuir previamente um responsável (Admin, Coordenador ou Analista)." });
     return;
   }
 
@@ -974,7 +1002,7 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
   }
 
   if (existing.status === "CLOSED") {
-    res.status(400).json({ error: "Tickets fechados não podem ser reatribuídos" });
+    res.status(400).json({ error: "Tickets cancelados não podem ser reatribuídos" });
     return;
   }
 

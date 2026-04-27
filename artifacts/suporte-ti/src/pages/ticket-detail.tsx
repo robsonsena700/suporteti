@@ -499,6 +499,15 @@ export default function TicketDetail() {
   }, [user, ticketId, message, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt, saveNow]);
 
   const handleUpdateStatus = (status: TicketStatus) => {
+    const requiresAssignee =
+      status === TicketStatus.IN_PROGRESS
+      || status === TicketStatus.AWAITING_CUSTOMER
+      || status === TicketStatus.RESOLVED
+      || status === TicketStatus.CLOSED;
+    if (requiresAssignee && !hasValidAssignee) {
+      toast({ title: "Atribua um responsável (Admin/Coordenador/Analista) antes de alterar o status.", variant: "destructive" });
+      return;
+    }
     if (status === TicketStatus.RESOLVED) {
       setResolveMessage("");
       setResolveConfirmOpen(true);
@@ -540,6 +549,10 @@ export default function TicketDetail() {
   };
 
   const handleResolve = async () => {
+    if (!hasValidAssignee) {
+      toast({ title: "Atribua um responsável (Admin/Coordenador/Analista) antes de resolver o chamado.", variant: "destructive" });
+      return;
+    }
     const text = resolveMessage.trim();
     if (text.length === 0) {
       toast({ title: "Mensagem obrigatória para resolver", variant: "destructive" });
@@ -719,6 +732,15 @@ export default function TicketDetail() {
     || ticket.assignedToId === user?.id
     || (user?.id != null && collaboratorIdSet.has(user.id));
   const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
+  const hasValidAssignee = Boolean(
+    ticket.assignedToId
+    && ticket.assignedTo
+    && (
+      ticket.assignedTo.role === UserRole.ADMIN
+      || ticket.assignedTo.role === UserRole.ANALYST
+      || ticket.assignedTo.role === UserRole.COORDINATOR
+    )
+  );
 
   const q = collaboratorQuery.trim().toLowerCase();
   const availableCollaborators = assignableUsers
@@ -946,7 +968,7 @@ export default function TicketDetail() {
                </Button>
             )}
             {canInteractTicket ? (
-              <Select value={ticket.status} onValueChange={(v) => handleUpdateStatus(v as TicketStatus)}>
+              <Select value={ticket.status} onValueChange={(v) => handleUpdateStatus(v as TicketStatus)} disabled={!hasValidAssignee}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Atualizar status" />
                 </SelectTrigger>
@@ -955,7 +977,7 @@ export default function TicketDetail() {
                   {canReopenClosed ? <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem> : null}
-                  <SelectItem value={TicketStatus.CLOSED}>Fechado</SelectItem>
+                  <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
                 </SelectContent>
               </Select>
             ) : null}
@@ -964,7 +986,7 @@ export default function TicketDetail() {
       </div>
       {ticket.status === TicketStatus.CLOSED && !canReopenClosed && canManage ? (
         <p className="text-xs text-muted-foreground">
-          Reabertura permitida apenas para Admin/Analista em até 24h após o fechamento.
+          Reabertura permitida apenas para Admin/Analista em até 24h após o cancelamento.
         </p>
       ) : null}
 
@@ -1450,7 +1472,7 @@ export default function TicketDetail() {
                   </AlertDialogContent>
                 </AlertDialog>
                 {ticket.status === TicketStatus.CLOSED ? (
-                  <p className="text-xs text-muted-foreground">Tickets fechados não podem ser reatribuídos.</p>
+                  <p className="text-xs text-muted-foreground">Tickets cancelados não podem ser reatribuídos.</p>
                 ) : null}
               </CardContent>
             </Card>

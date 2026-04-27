@@ -97,6 +97,15 @@ async function getUserIdByEmail(adminToken, email) {
 
   const adminUser = await getUserIdByEmail(adminToken, ADMIN_EMAIL);
 
+  const patchInProgressWithoutAssignee = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ status: "IN_PROGRESS" }),
+  });
+  if (patchInProgressWithoutAssignee.status !== 400) {
+    fail(`Esperado 400 ao marcar como IN_PROGRESS sem responsável. Obtido: ${patchInProgressWithoutAssignee.status}`);
+  }
+
   const selfAssign = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}/assign`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
