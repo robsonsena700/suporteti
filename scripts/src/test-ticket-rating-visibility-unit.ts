@@ -6,12 +6,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const utilsPath = path.resolve(__dirname, "../../artifacts/suporte-ti/src/lib/tickets-utils.ts");
 const mod = await import(pathToFileURL(utilsPath).href);
 
-const { canViewResolvedTicketRating } = mod as {
+const { canViewResolvedTicketRating, canCreateTicketMessage } = mod as {
   canViewResolvedTicketRating: (opts: {
     isAuthenticated: boolean;
     role?: string | null;
     status?: string | null;
   }) => boolean;
+  canCreateTicketMessage: (opts: { canInteract: boolean; status?: string | null }) => boolean;
 };
 
 assert.equal(
@@ -48,5 +49,10 @@ assert.equal(
   canViewResolvedTicketRating({ isAuthenticated: true, role: null, status: "RESOLVED" }),
   false,
 );
+
+assert.equal(canCreateTicketMessage({ canInteract: true, status: "OPEN" }), true);
+assert.equal(canCreateTicketMessage({ canInteract: true, status: "CLOSED" }), false);
+assert.equal(canCreateTicketMessage({ canInteract: true, status: "RESOLVED" }), false);
+assert.equal(canCreateTicketMessage({ canInteract: false, status: "OPEN" }), false);
 
 console.log("Teste unitário de visibilidade da avaliação por perfil concluído com sucesso.");

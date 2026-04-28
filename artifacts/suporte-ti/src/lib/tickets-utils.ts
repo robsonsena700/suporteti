@@ -21,6 +21,14 @@ export function canViewResolvedTicketRating(opts: {
   return true;
 }
 
+export function canCreateTicketMessage(opts: {
+  canInteract: boolean;
+  status?: string | null;
+}): boolean {
+  if (!opts.canInteract) return false;
+  return opts.status !== "CLOSED" && opts.status !== "RESOLVED";
+}
+
 export function formatUfMunicipality(uf: string, municipality: string): string {
   return `${uf} - ${municipality}`;
 }

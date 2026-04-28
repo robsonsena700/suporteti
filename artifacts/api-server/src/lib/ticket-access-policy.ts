@@ -4,6 +4,10 @@ export type TicketAccessDecision = {
   canAssign: boolean;
 };
 
+export function canCreateTicketMessage(args: { ticketStatus: string }): boolean {
+  return args.ticketStatus !== "CLOSED" && args.ticketStatus !== "RESOLVED";
+}
+
 export function computeTicketAccess(args: {
   actorRole: string;
   actorUserId: number;

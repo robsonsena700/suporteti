@@ -6,8 +6,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const utilPath = path.resolve(__dirname, "../../artifacts/api-server/src/lib/ticket-access-policy.ts");
 const mod = await import(pathToFileURL(utilPath).href);
 
-const { computeTicketAccess } = mod as {
+const { computeTicketAccess, canCreateTicketMessage } = mod as {
   computeTicketAccess: (args: any) => { canView: boolean; canInteract: boolean; canAssign: boolean };
+  canCreateTicketMessage: (args: { ticketStatus: string }) => boolean;
 };
 
 {
@@ -62,5 +63,9 @@ const { computeTicketAccess } = mod as {
   assert.equal(a.canView, true);
   assert.equal(a.canInteract, false);
 }
+
+assert.equal(canCreateTicketMessage({ ticketStatus: "OPEN" }), true);
+assert.equal(canCreateTicketMessage({ ticketStatus: "RESOLVED" }), false);
+assert.equal(canCreateTicketMessage({ ticketStatus: "CLOSED" }), false);
 
 console.log("Teste unitário de política de acesso ao ticket concluído com sucesso.");

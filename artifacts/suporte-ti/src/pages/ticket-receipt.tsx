@@ -5,6 +5,8 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Printer, ArrowLeft } from "lucide-react";
+import { UserAvatar } from "@/components/user/user-avatar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function labelStatus(status: TicketStatus): string {
   if (status === TicketStatus.OPEN) return "Aberto";
@@ -177,16 +179,32 @@ export default function TicketReceipt() {
                   <p className="text-sm text-slate-600">Nenhuma interação registrada.</p>
                 ) : (
                   messages.map((m) => (
-                    <div key={m.id} className="transcript-line">
-                      <div className="flex items-start justify-between gap-4 mb-1">
-                        <span className="text-xs font-bold text-slate-800 truncate">
-                          {m.sender?.name ?? "—"} ({m.sender?.role ?? "—"})
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500 whitespace-nowrap">
-                          {format(new Date(m.createdAt), "dd/MM HH:mm", { locale: ptBR })}
-                        </span>
+                    <div key={m.id} className="transcript-line flex items-start gap-3">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="shrink-0">
+                            <UserAvatar
+                              userId={(m as any).senderId ?? m.sender?.id ?? null}
+                              name={m.sender?.name ?? "—"}
+                              className="h-8 w-8"
+                            />
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <span>{m.sender?.name ?? "—"}</span>
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-4 mb-1">
+                          <span className="text-xs font-bold text-slate-800 truncate">
+                            {m.sender?.name ?? "—"} ({m.sender?.role ?? "—"})
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500 whitespace-nowrap">
+                            {format(new Date(m.createdAt), "dd/MM HH:mm", { locale: ptBR })}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{m.message}</p>
                       </div>
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{m.message}</p>
                     </div>
                   ))
                 )}

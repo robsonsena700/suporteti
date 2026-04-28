@@ -5,6 +5,7 @@ import { CreateMessageBody } from "@workspace/api-zod";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { enforceTicketAccess } from "../lib/access";
 import { autoAssignTicketOnMessageInteraction } from "../lib/ticket-auto-assign";
+import { canCreateTicketMessage } from "../lib/ticket-access-policy";
 
 const router: IRouter = Router();
 
@@ -72,6 +73,10 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, async (re
   }
   if (!(await enforceTicketAccess(user, ticket, "messages:create"))) {
     res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+  if (!canCreateTicketMessage({ ticketStatus: ticket.status })) {
+    res.status(400).json({ error: "Não é possível adicionar mensagens em chamados resolvidos ou concluídos" });
     return;
   }
 

@@ -39,7 +39,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, Download, Eye, FileText, Paperclip, Pencil, Printer, Save, Send, Star, Trash2, UserCircle2, UserPlus, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, FileText, Paperclip, Pencil, Printer, Save, Send, Star, Trash2, UserPlus, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -50,6 +50,9 @@ import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
 import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 import { getRoleLabel } from "@/lib/role-labels";
+import { UserAvatar } from "@/components/user/user-avatar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { canCreateTicketMessage as canCreateTicketMessageUI } from "@/lib/tickets-utils";
 
 const TICKET_DETAIL_STATE_KEY = "suporte-ti:ticket:detail:state:v1";
 
@@ -548,6 +551,14 @@ export default function TicketDetail() {
 
   const handleSendMessage = () => {
     if (!message.trim()) return;
+    if (!canCreateTicketMessageUI({ canInteract: true, status: ticket?.status })) {
+      toast({
+        title: "Chamado finalizado",
+        description: "Não é possível adicionar interações em chamados resolvidos ou concluídos.",
+        variant: "destructive",
+      });
+      return;
+    }
     messageMutation.mutate(
       { ticketId, data: { message: message.trim() } },
       {
@@ -769,6 +780,7 @@ export default function TicketDetail() {
     ticket.createdById === user?.id
     || ticket.assignedToId === user?.id
     || (user?.id != null && collaboratorIdSet.has(user.id));
+  const canSendNewMessage = canCreateTicketMessageUI({ canInteract: canInteractTicket, status: ticket.status });
   const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
   const hasValidAssignee = Boolean(
     ticket.assignedToId
@@ -1056,6 +1068,8 @@ export default function TicketDetail() {
                 <div className="space-y-4">
                   {messages.map((msg) => {
                     const isMe = msg.senderId === user?.id;
+                    const avatarName = isMe ? (user?.name ?? "Você") : msg.sender.name;
+                    const avatarUserId = msg.sender?.id ?? msg.senderId;
                     return (
                       <div
                         key={msg.id}
@@ -1063,9 +1077,16 @@ export default function TicketDetail() {
                         className={cn("flex gap-3", isMe ? "flex-row-reverse" : "flex-row")}
                         onClick={() => setFocusedMessageId(msg.id)}
                       >
-                        <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0">
-                          <UserCircle2 className="w-5 h-5 text-secondary-foreground" />
-                        </div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="shrink-0">
+                              <UserAvatar userId={avatarUserId} name={avatarName} />
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <span>{avatarName}</span>
+                          </TooltipContent>
+                        </Tooltip>
                         <div className={cn("flex flex-col max-w-[80%]", isMe ? "items-end" : "items-start")}>
                           <div className="flex items-baseline gap-2 mb-1">
                             <span className="text-xs font-medium">{isMe ? "Você" : msg.sender.name}</span>
@@ -1095,28 +1116,37 @@ export default function TicketDetail() {
                 </p>
               ) : null}
 
-              {ticket.status !== TicketStatus.CLOSED && canInteractTicket ? (
-                <div className="mt-4 pt-4 border-t flex gap-2">
-                  <Textarea
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    placeholder="Digite sua mensagem..."
-                    className="min-h-[80px] resize-none"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                  />
-                  <Button 
-                    className="self-end" 
-                    size="icon"
-                    onClick={handleSendMessage}
-                    disabled={!message.trim() || messageMutation.isPending}
-                  >
-                    <Send className="w-4 h-4" />
-                  </Button>
+              {canInteractTicket ? (
+                <div className="mt-4 pt-4 border-t space-y-2">
+                  {!canSendNewMessage ? (
+                    <p className="text-xs text-muted-foreground">
+                      Este chamado está finalizado e não aceita novas interações.
+                    </p>
+                  ) : null}
+                  <div className="flex gap-2">
+                    <Textarea
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      placeholder="Digite sua mensagem..."
+                      className="min-h-[80px] resize-none"
+                      disabled={!canSendNewMessage}
+                      onKeyDown={(e) => {
+                        if (!canSendNewMessage) return;
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                    />
+                    <Button
+                      className="self-end"
+                      size="icon"
+                      onClick={handleSendMessage}
+                      disabled={!canSendNewMessage || !message.trim() || messageMutation.isPending}
+                    >
+                      <Send className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               ) : null}
             </CardContent>
