@@ -8,7 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { PlusCircle, Ticket, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { PlusCircle, Ticket, Clock, CheckCircle2, XCircle, Star } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -138,7 +138,10 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent className="space-y-8">
             <div className="space-y-2">
-              <p className="text-sm font-medium">Avaliação Média</p>
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Star className="h-4 w-4 rounded-sm ring-2 ring-[#87CEEB] ring-offset-1 ring-offset-background text-amber-500" />
+                Avaliação Média
+              </p>
               <div className="flex items-baseline gap-2">
                 <span className="text-4xl font-bold">
                   {summary?.avgRating ? summary.avgRating.toFixed(1) : "-"}

@@ -10,6 +10,17 @@ export type TicketLikeBase = {
 export type TicketsSortBy = "createdAt" | "user" | "location" | "responsible";
 export type TicketsSortDir = "asc" | "desc";
 
+export function canViewResolvedTicketRating(opts: {
+  isAuthenticated: boolean;
+  role?: string | null;
+  status?: string | null;
+}): boolean {
+  if (!opts.isAuthenticated) return false;
+  if (opts.role !== "ADMIN" && opts.role !== "USER") return false;
+  if (opts.status !== "RESOLVED" && opts.status !== "CLOSED") return false;
+  return true;
+}
+
 export function formatUfMunicipality(uf: string, municipality: string): string {
   return `${uf} - ${municipality}`;
 }

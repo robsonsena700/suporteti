@@ -4,6 +4,44 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { readFileSync } from "node:fs";
 
+function tryLoadDotEnv() {
+  try {
+    const envPath = path.resolve(import.meta.dirname, "..", "..", ".env");
+    const raw = readFileSync(envPath, "utf-8");
+    const env: Record<string, string> = {};
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIndex = trimmed.indexOf("=");
+      if (eqIndex <= 0) continue;
+      const key = trimmed.slice(0, eqIndex).trim();
+      let value = trimmed.slice(eqIndex + 1).trim();
+      if (!key) continue;
+      if (
+        (value.startsWith("\"") && value.endsWith("\""))
+        || (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      env[key] = value;
+      if (process.env[key] == null || process.env[key] === "") {
+        process.env[key] = value;
+      }
+    }
+    return env;
+  } catch {
+    return null;
+  }
+}
+
+const dotEnv = tryLoadDotEnv();
+if (!process.env.PORT && dotEnv?.WEB_PORT) {
+  process.env.PORT = dotEnv.WEB_PORT;
+}
+if (!process.env.VITE_API_PROXY_TARGET && dotEnv?.VITE_API_PROXY_TARGET) {
+  process.env.VITE_API_PROXY_TARGET = dotEnv.VITE_API_PROXY_TARGET;
+}
+
 const rawPort = process.env.PORT ?? "5174";
 const port = Number(rawPort);
 
@@ -12,7 +50,10 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH ?? "/";
-const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? "http://localhost:3001";
+const apiProxyTarget =
+  process.env.VITE_API_PROXY_TARGET
+  ?? (process.env.API_PORT ? `http://localhost:${process.env.API_PORT}` : undefined)
+  ?? "http://localhost:3001";
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8")) as { version?: string };
 const appVersion = pkg.version ?? "0.0.0";
 const appEnv = process.env.NODE_ENV ?? "development";
@@ -69,6 +110,7 @@ export default defineConfig(async () => {
       alias: {
         "@": path.resolve(import.meta.dirname, "src"),
         "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+        "@workspace/api-zod": path.resolve(import.meta.dirname, "..", "..", "lib", "api-zod", "src", "index.ts"),
       },
       dedupe: ["react", "react-dom"],
     },

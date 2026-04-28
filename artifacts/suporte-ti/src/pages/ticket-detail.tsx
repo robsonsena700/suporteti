@@ -7,7 +7,7 @@ import {
   useListMessages,
   useCreateMessage,
   useGetTicketRating,
-  useRateTicket,
+  useCreateTicketRating,
   useAssignTicket,
   getGetTicketQueryKey,
   getListMessagesQueryKey,
@@ -17,6 +17,7 @@ import {
   TicketPriority,
   UserRole
 } from "@workspace/api-client-react";
+import { CreateRatingSchema } from "@workspace/api-zod";
 import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,7 +135,9 @@ export default function TicketDetail() {
   
   const [message, setMessage] = useState("");
   const [rating, setRating] = useState(0);
-  const [feedback, setFeedback] = useState("");
+  const [reasonLowRating, setReasonLowRating] = useState("");
+  const [comment, setComment] = useState("");
+  const [ratingModalOpen, setRatingModalOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [textPreview, setTextPreview] = useState<string>("");
@@ -239,18 +242,32 @@ export default function TicketDetail() {
     }
   });
 
-  const { data: ratingData } = useGetTicketRating(ticketId, {
+  const { data: ratingData, isLoading: isLoadingRating } = useGetTicketRating(ticketId, {
     query: {
-      enabled: !!ticketId && ticket?.status === TicketStatus.RESOLVED,
+      enabled: !!ticketId && ticket?.status === TicketStatus.RESOLVED && (user?.role === UserRole.ADMIN || user?.role === UserRole.USER),
       queryKey: getGetTicketRatingQueryKey(ticketId),
     }
   });
 
   const updateMutation = useUpdateTicket();
   const messageMutation = useCreateMessage();
-  const rateMutation = useRateTicket();
+  const rateMutation = useCreateTicketRating();
   const assignMutation = useAssignTicket();
   const restoreLoopStartedRef = useRef<boolean>(false);
+  const ratingAutoOpenedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (ratingAutoOpenedRef.current) return;
+    if (!ticket) return;
+    if (!user) return;
+    if (user.role !== UserRole.USER) return;
+    if (ticket.status !== TicketStatus.RESOLVED) return;
+    if (isLoadingRating) return;
+    if (ticket.createdById !== user.id) return;
+    if (ratingData) return;
+    setRatingModalOpen(true);
+    ratingAutoOpenedRef.current = true;
+  }, [ticket, user, ratingData, isLoadingRating]);
 
   const attachmentApiUrl = useCallback((att: Attachment) => `/api/tickets/${ticketId}/attachments/${att.id}`, [ticketId]);
 
@@ -587,16 +604,37 @@ export default function TicketDetail() {
     }
   };
 
-  const handleRate = () => {
-    if (!rating) return;
+  const handleSubmitRating = () => {
+    if (!ticket) return;
+    const parsed = CreateRatingSchema.safeParse({
+      rating,
+      reason_low_rating: reasonLowRating,
+      comment,
+    });
+    if (!parsed.success) {
+      toast({
+        title: "Dados inválidos",
+        description: parsed.error.issues[0]?.message ?? "Revise os campos e tente novamente.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     rateMutation.mutate(
-      { ticketId, data: { score: rating, feedback } },
+      { ticketId, data: parsed.data },
       {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getGetTicketRatingQueryKey(ticketId) });
+          setRatingModalOpen(false);
           toast({ title: "Avaliação enviada com sucesso!" });
-        }
-      }
+        },
+        onError: (e: any) => {
+          toast({
+            title: "Falha ao enviar avaliação",
+            description: e?.data?.error || e?.message || "Não foi possível concluir a operação.",
+            variant: "destructive",
+          });
+        },
+      },
     );
   };
 
@@ -1594,56 +1632,143 @@ export default function TicketDetail() {
             </Card>
           ) : null}
 
-          {ticket.status === TicketStatus.RESOLVED && isCreator && (
+          {user?.role === UserRole.ADMIN && (ticket as any).rating ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Avalie o Atendimento</CardTitle>
+                <CardTitle className="text-lg">Avaliação Recebida</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star
+                        key={s}
+                        className={cn(
+                          "w-5 h-5 rounded-sm ring-2 ring-[#87CEEB] ring-offset-1 ring-offset-background",
+                          s <= (ticket as any).rating.score ? "fill-amber-400 text-amber-400" : "text-muted",
+                        )}
+                      />
+                    ))}
+                  </div>
+                  {(ticket as any).rating.feedback ? (
+                    <p className="text-sm italic text-muted-foreground">"{(ticket as any).rating.feedback}"</p>
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {ticket.status === TicketStatus.RESOLVED && isCreator && user?.role === UserRole.USER ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Avaliação</CardTitle>
               </CardHeader>
               <CardContent>
                 {ratingData ? (
                   <div className="space-y-2">
                     <div className="flex gap-1">
                       {[1, 2, 3, 4, 5].map((s) => (
-                        <Star key={s} className={cn("w-5 h-5", s <= ratingData.score ? "fill-amber-400 text-amber-400" : "text-muted")} />
+                        <Star
+                          key={s}
+                          className={cn(
+                            "w-5 h-5 rounded-sm ring-2 ring-[#87CEEB] ring-offset-1 ring-offset-background",
+                            s <= ratingData.score ? "fill-amber-400 text-amber-400" : "text-muted",
+                          )}
+                        />
                       ))}
                     </div>
-                    {ratingData.feedback && (
+                    {ratingData.feedback ? (
                       <p className="text-sm italic text-muted-foreground">"{ratingData.feedback}"</p>
-                    )}
+                    ) : null}
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="flex gap-2 justify-center">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => setRating(s)}
-                          className="hover:scale-110 transition-transform"
-                        >
-                          <Star className={cn("w-8 h-8", s <= rating ? "fill-amber-400 text-amber-400" : "text-muted")} />
-                        </button>
-                      ))}
-                    </div>
-                    <Textarea 
-                      placeholder="Deixe um comentário (opcional)" 
-                      className="resize-none text-sm"
-                      value={feedback}
-                      onChange={(e) => setFeedback(e.target.value)}
-                    />
-                    <Button 
-                      className="w-full" 
-                      onClick={handleRate}
-                      disabled={!rating || rateMutation.isPending}
-                    >
-                      Enviar Avaliação
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Sua avaliação ajuda a melhorar o atendimento.
+                    </p>
+                    <Button type="button" className="w-full" onClick={() => setRatingModalOpen(true)} disabled={isLoadingRating}>
+                      Avaliar agora
                     </Button>
                   </div>
                 )}
               </CardContent>
             </Card>
-          )}
+          ) : null}
         </div>
       </div>
+      <Dialog
+        open={ratingModalOpen && user?.role === UserRole.USER}
+        onOpenChange={(open) => {
+          setRatingModalOpen(open);
+          if (!open) {
+            setRating(0);
+            setReasonLowRating("");
+            setComment("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Avalie o Atendimento</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2 justify-center">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    setRating(s);
+                    if (s > 3) setReasonLowRating("");
+                  }}
+                  className="hover:scale-110 transition-transform"
+                  aria-label={`Dar nota ${s}`}
+                >
+                  <Star
+                    className={cn(
+                      "w-9 h-9 rounded-sm ring-2 ring-[#87CEEB] ring-offset-1 ring-offset-background",
+                      s <= rating ? "fill-amber-400 text-amber-400" : "text-muted",
+                    )}
+                  />
+                </button>
+              ))}
+            </div>
+
+            {rating > 0 && rating <= 3 ? (
+              <Textarea
+                placeholder="Motivo da nota (obrigatório)"
+                className="resize-none text-sm"
+                value={reasonLowRating}
+                onChange={(e) => setReasonLowRating(e.target.value)}
+              />
+            ) : null}
+
+            <Textarea
+              placeholder="Comentário adicional (opcional)"
+              className="resize-none text-sm"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+            />
+
+            <div className="flex gap-2 justify-end">
+              <Button type="button" variant="outline" onClick={() => setRatingModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSubmitRating}
+                disabled={
+                  rateMutation.isPending
+                  || rating <= 0
+                  || (rating <= 3 && reasonLowRating.trim().length === 0)
+                }
+              >
+                Enviar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-4xl w-[95vw] p-0 overflow-hidden">
           <div className="p-4 border-b">

@@ -4,8 +4,10 @@ import { useAuth } from "@/lib/auth";
 import { 
   useListTickets, 
   useListResolvedTickets,
+  useGetTicketRating,
   getListTicketsQueryKey,
   getListResolvedTicketsQueryKey,
+  getGetTicketRatingQueryKey,
   TicketStatus,
   TicketType,
   TicketPriority,
@@ -18,14 +20,17 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, PlusCircle, Printer } from "lucide-react";
+import { Image as ImageIcon, PlusCircle, Printer, Star } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { filterAndSortTickets } from "@/lib/tickets-utils";
+import { canViewResolvedTicketRating, filterAndSortTickets } from "@/lib/tickets-utils";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { ApiError } from "@workspace/api-client-react/custom-fetch";
+import { cn } from "@/lib/utils";
 
 const UFS = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
@@ -85,6 +90,92 @@ function getInitialTicketTypeTab(): TicketsMainTab {
   return TicketType.SOFTWARE;
 }
 
+function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; actorRole: string | null | undefined }) {
+  const { toast } = useToast();
+  const canSee = canViewResolvedTicketRating({
+    isAuthenticated: true,
+    role: actorRole,
+    status: "RESOLVED",
+  });
+
+  const { data: rating, error } = useGetTicketRating(ticketId, {
+    query: { enabled: canSee, retry: false, queryKey: getGetTicketRatingQueryKey(ticketId) },
+  });
+
+  const hasRating = Boolean(rating);
+  const score = rating?.score ?? 0;
+  const isNotFound = error instanceof ApiError && error.status === 404;
+  const isOtherError = Boolean(error) && !isNotFound;
+
+  if (!canSee) return null;
+
+  return (
+    <div className="inline-flex items-center gap-1" aria-label="Avaliação do chamado">
+      {Array.from({ length: 5 }).map((_, idx) => {
+        const starValue = idx + 1;
+        const filled = hasRating && starValue <= score;
+        return (
+          <button
+            key={starValue}
+            type="button"
+            className="inline-flex"
+            aria-label={
+              hasRating
+                ? `Avaliação ${score} de 5`
+                : isNotFound
+                  ? "Sem avaliação"
+                  : isOtherError
+                    ? "Erro ao carregar avaliação"
+                    : "Carregando avaliação"
+            }
+            title={
+              hasRating
+                ? `Avaliação: ${score}/5`
+                : isNotFound
+                  ? "Sem avaliação"
+                  : isOtherError
+                    ? "Erro ao carregar avaliação"
+                    : "Carregando..."
+            }
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (hasRating) {
+                toast({
+                  title: "Avaliação do atendimento",
+                  description: `${score}/5`,
+                });
+                return;
+              }
+              if (isNotFound) {
+                toast({
+                  title: "Avaliação do atendimento",
+                  description: "Sem avaliação",
+                });
+                return;
+              }
+              if (isOtherError) {
+                toast({
+                  title: "Avaliação do atendimento",
+                  description: "Erro ao carregar a avaliação",
+                });
+              }
+            }}
+          >
+            <Star
+              className={cn(
+                "h-4 w-4 ring-2 ring-[#87CEEB] transition-colors",
+                filled ? "fill-amber-400 text-amber-400" : "text-muted-foreground",
+                !hasRating ? "opacity-60" : "",
+              )}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Tickets() {
   const { user } = useAuth();
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
@@ -118,32 +209,17 @@ export default function Tickets() {
   const activeMineOnly = mineOnlyByTab[typeTab] ?? true;
 
   useEffect(() => {
-    if (!user) return;
-    if (!canManageRole && typeTab === "RESOLVED") {
-      setTypeTab(TicketType.SOFTWARE);
-      setFilters((f) => ({ ...f, type: TicketType.SOFTWARE, status: undefined }));
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(TYPE_TAB_KEY, TicketType.SOFTWARE);
-      }
-    }
-  }, [user, canManageRole, typeTab]);
-
-  useEffect(() => {
     if (typeTab !== "RESOLVED" && (filters.status === TicketStatus.RESOLVED || filters.status === TicketStatus.CLOSED)) {
-      if (canManageRole) {
-        setTypeTab("RESOLVED");
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
-        }
-        setFilters((f) => ({ ...f, type: undefined }));
-      } else {
-        setFilters((f) => ({ ...f, status: undefined }));
+      setTypeTab("RESOLVED");
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
       }
+      setFilters((f) => ({ ...f, type: undefined }));
     }
     if (typeTab === "RESOLVED" && (filters.status === TicketStatus.OPEN || filters.status === TicketStatus.IN_PROGRESS || filters.status === TicketStatus.AWAITING_CUSTOMER)) {
       setFilters((f) => ({ ...f, status: undefined }));
     }
-  }, [typeTab, filters.status, canManageRole]);
+  }, [typeTab, filters.status]);
 
   useEffect(() => {
     setFilters((f) => {
@@ -166,7 +242,7 @@ export default function Tickets() {
 
   const listResolvedTicketsQuery = useListResolvedTickets(filters, {
     query: {
-      enabled: canManageRole && typeTab === "RESOLVED",
+      enabled: typeTab === "RESOLVED",
       queryKey: getListResolvedTicketsQueryKey(filters),
     }
   });
@@ -325,11 +401,9 @@ export default function Tickets() {
             <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-4">
               Hardware
             </TabsTrigger>
-            {canManageRole ? (
-              <TabsTrigger value="RESOLVED" className="h-9 px-4">
-                Resolvidos
-              </TabsTrigger>
-            ) : null}
+            <TabsTrigger value="RESOLVED" className="h-9 px-4">
+              Resolvidos
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="text-xs text-muted-foreground">
@@ -395,7 +469,7 @@ export default function Tickets() {
                             return;
                           }
                           const nextStatus = v as TicketStatus;
-                          if ((nextStatus === TicketStatus.RESOLVED || nextStatus === TicketStatus.CLOSED) && typeTab !== "RESOLVED" && canManageRole) {
+                          if ((nextStatus === TicketStatus.RESOLVED || nextStatus === TicketStatus.CLOSED) && typeTab !== "RESOLVED") {
                             setTypeTab("RESOLVED");
                             if (typeof window !== "undefined") {
                               window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
@@ -583,7 +657,11 @@ export default function Tickets() {
                           imagem ({ticket.imageAttachmentsCount})
                         </button>
                       ) : (
-                        <div />
+                        <div className="flex items-center">
+                          {ticket.status === TicketStatus.RESOLVED ? (
+                            <ResolvedTicketRatingStars ticketId={ticket.id} actorRole={user?.role} />
+                          ) : null}
+                        </div>
                       )}
                       <div className="flex items-center gap-2">
                         <Button

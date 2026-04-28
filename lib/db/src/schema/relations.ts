@@ -2,7 +2,7 @@ import { relations } from "drizzle-orm";
 import { usersTable } from "./users";
 import { ticketsTable, ticketAttachmentsTable } from "./tickets";
 import { messagesTable } from "./messages";
-import { ratingsTable } from "./ratings";
+import { ticketRatingsTable } from "./ratings";
 import { chatMessagesTable } from "./chat";
 import { directMessagesTable } from "./direct-messages";
 import { chatAttachmentsTable } from "./chat-attachments";
@@ -14,7 +14,6 @@ export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
   assignedTickets: many(ticketsTable, { relationName: "assignedTo" }),
   messages: many(messagesTable),
-  ratings: many(ratingsTable),
   ticketAuditLogs: many(ticketAuditLogsTable),
   ticketCollaborations: many(ticketCollaboratorsTable, { relationName: "ticketCollaborator_user" }),
   addedCollaborations: many(ticketCollaboratorsTable, { relationName: "ticketCollaborator_addedBy" }),
@@ -90,9 +89,9 @@ export const ticketsRelations = relations(ticketsTable, ({ one, many }) => ({
     relationName: "assignedTo",
   }),
   messages: many(messagesTable),
-  rating: one(ratingsTable, {
+  rating: one(ticketRatingsTable, {
     fields: [ticketsTable.id],
-    references: [ratingsTable.ticketId],
+    references: [ticketRatingsTable.ticketId],
   }),
   attachments: many(ticketAttachmentsTable),
   auditLogs: many(ticketAuditLogsTable),
@@ -134,13 +133,9 @@ export const messagesRelations = relations(messagesTable, ({ one }) => ({
   }),
 }));
 
-export const ratingsRelations = relations(ratingsTable, ({ one }) => ({
+export const ticketRatingsRelations = relations(ticketRatingsTable, ({ one }) => ({
   ticket: one(ticketsTable, {
-    fields: [ratingsTable.ticketId],
+    fields: [ticketRatingsTable.ticketId],
     references: [ticketsTable.id],
-  }),
-  user: one(usersTable, {
-    fields: [ratingsTable.userId],
-    references: [usersTable.id],
   }),
 }));

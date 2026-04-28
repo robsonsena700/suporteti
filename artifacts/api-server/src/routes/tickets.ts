@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable } from "@workspace/db";
+import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable, ticketRatingsTable } from "@workspace/db";
 import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
-import { CreateTicketBody, UpdateTicketBody, AssignTicketBody } from "@workspace/api-zod";
+import { CreateTicketBody, UpdateTicketBody, AssignTicketBody, CreateRatingSchema } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
@@ -190,7 +190,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   res.json(result);
 });
 
-router.get("/tickets/resolved", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (req, res): Promise<void> => {
+router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
   const { status, type, priority, uf, municipality, mine } = req.query as Record<string, string | undefined>;
 
@@ -421,7 +421,20 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
         role: m.sender.role,
       },
     })),
-    rating: ticket.rating ?? null,
+    rating: user.role === "ADMIN"
+      ? (
+        ticket.rating
+          ? {
+            id: ticket.rating.id,
+            ticketId: ticket.rating.ticketId,
+            userId: ticket.createdById,
+            score: ticket.rating.rating,
+            feedback: ticket.rating.comment ?? null,
+            createdAt: ticket.rating.createdAt,
+          }
+          : null
+      )
+      : undefined,
     attachments: ticket.attachments.map(a => ({
       id: a.id,
       filename: a.filename,
@@ -435,6 +448,68 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
       email: c.user.email,
       role: c.user.role,
     })),
+  });
+});
+
+router.post("/tickets/:id/rate", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const ticketId = parseInt(raw, 10);
+
+  if (isNaN(ticketId)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, ticketId));
+  if (!ticket) {
+    res.status(404).json({ error: "Chamado não encontrado" });
+    return;
+  }
+
+  if (ticket.createdById !== user.userId) {
+    res.status(403).json({ error: "Apenas o criador do chamado pode avaliá-lo" });
+    return;
+  }
+
+  if (ticket.status !== "RESOLVED") {
+    res.status(400).json({ error: "Chamado deve estar resolvido para ser avaliado" });
+    return;
+  }
+
+  const parsed = CreateRatingSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [existing] = await db
+    .select({ id: ticketRatingsTable.id })
+    .from(ticketRatingsTable)
+    .where(eq(ticketRatingsTable.ticketId, ticketId));
+
+  if (existing) {
+    res.status(409).json({ error: "Este chamado já foi avaliado" });
+    return;
+  }
+
+  const [created] = await db
+    .insert(ticketRatingsTable)
+    .values({
+      ticketId,
+      rating: parsed.data.rating,
+      reasonLowRating: parsed.data.reason_low_rating?.trim() ?? null,
+      comment: parsed.data.comment?.trim() ?? null,
+    })
+    .returning();
+
+  res.status(201).json({
+    id: created.id,
+    ticketId: created.ticketId,
+    rating: created.rating,
+    reason_low_rating: created.reasonLowRating ?? null,
+    comment: created.comment ?? null,
+    created_at: created.createdAt,
   });
 });
 

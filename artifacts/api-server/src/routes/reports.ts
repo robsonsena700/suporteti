@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, messagesTable, ratingsTable } from "@workspace/db";
+import { db, usersTable, ticketsTable, ticketRatingsTable } from "@workspace/db";
 import { eq, count, avg, sql, desc, inArray, and } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { getManagedUserIdsByCoordinator } from "../lib/access";
@@ -43,16 +43,21 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
       : sql`status IN ('RESOLVED', 'CLOSED')`
   );
 
-  const [ratingData] = isScoped
-    ? await db.select({
-      avg: avg(ratingsTable.score),
-    })
-      .from(ratingsTable)
-      .leftJoin(ticketsTable, eq(ticketsTable.id, ratingsTable.ticketId))
-      .where(ticketScopeWhere)
-    : await db.select({
-      avg: avg(ratingsTable.score),
-    }).from(ratingsTable);
+  let ratingScopeWhere: any = sql`true`;
+  if (user.role === "USER") {
+    ratingScopeWhere = eq(ticketsTable.createdById, user.userId);
+  } else if (user.role === "ANALYST") {
+    ratingScopeWhere = eq(ticketsTable.assignedToId, user.userId);
+  } else if (user.role === "COORDINATOR") {
+    const allowedTechnicians = [user.userId, ...managedUserIds];
+    ratingScopeWhere = allowedTechnicians.length > 0 ? inArray(ticketsTable.assignedToId, allowedTechnicians) : sql`false`;
+  }
+
+  const [ratingData] = await db
+    .select({ avg: avg(ticketRatingsTable.rating) })
+    .from(ticketRatingsTable)
+    .leftJoin(ticketsTable, eq(ticketsTable.id, ticketRatingsTable.ticketId))
+    .where(ratingScopeWhere);
 
   res.json({
     totalTickets: Number(ticketCounts.total),

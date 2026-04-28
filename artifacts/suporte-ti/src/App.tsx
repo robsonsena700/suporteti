@@ -1,11 +1,11 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { ChatNotificationProvider } from "@/lib/chat-notifications";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 
 // Pages
 const Login = lazy(() => import("@/pages/login"));
@@ -25,6 +25,14 @@ const NotFound = lazy(() => import("@/pages/not-found"));
 
 const queryClient = new QueryClient();
 
+function Redirect({ to }: { to: string }) {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    setLocation(to);
+  }, [setLocation, to]);
+  return null;
+}
+
 function ProtectedRoute({ component: Component, ...rest }: any) {
   const { user, isLoading } = useAuth();
   
@@ -36,20 +44,16 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
       component={(props) => {
         // Redirections logic handled in AppLayout slightly, but let's be strict here
         if (!user) {
-          window.location.href = "/";
-          return null;
+          return <Redirect to="/" />;
         }
         if (user.status === "PENDING" && window.location.pathname !== "/pendente") {
-          window.location.href = "/pendente";
-          return null;
+          return <Redirect to="/pendente" />;
         }
         if (!user.birthDate && window.location.pathname !== "/perfil") {
-          window.location.href = "/perfil";
-          return null;
+          return <Redirect to="/perfil" />;
         }
         if (rest.adminOnly && user.role !== "ADMIN") {
-          window.location.href = "/dashboard";
-          return null;
+          return <Redirect to="/dashboard" />;
         }
         return <Component {...props} />;
       }}

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, ratingsTable, ticketsTable } from "@workspace/db";
+import { db, ticketRatingsTable, ticketsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { RateTicketBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
@@ -9,6 +9,10 @@ const router: IRouter = Router();
 
 router.get("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+  if (user.role !== "ADMIN" && user.role !== "USER") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
   const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;
   const ticketId = parseInt(raw, 10);
 
@@ -27,17 +31,28 @@ router.get("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, 
     return;
   }
 
-  const [rating] = await db.select().from(ratingsTable).where(eq(ratingsTable.ticketId, ticketId));
+  const [rating] = await db.select().from(ticketRatingsTable).where(eq(ticketRatingsTable.ticketId, ticketId));
   if (!rating) {
     res.status(404).json({ error: "Avaliação não encontrada" });
     return;
   }
 
-  res.json(rating);
+  res.json({
+    id: rating.id,
+    ticketId: rating.ticketId,
+    userId: ticket.createdById,
+    score: rating.rating,
+    feedback: rating.comment ?? null,
+    createdAt: rating.createdAt,
+  });
 });
 
-router.post("/tickets/:ticketId/rating", requireAuth, requireActive, requireRoles("USER"), async (req, res): Promise<void> => {
+router.post("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+  if (user.role !== "ADMIN" && user.role !== "USER") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
   const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;
   const ticketId = parseInt(raw, 10);
 
@@ -60,20 +75,36 @@ router.post("/tickets/:ticketId/rating", requireAuth, requireActive, requireRole
     return;
   }
 
+  const [existing] = await db.select({ id: ticketRatingsTable.id }).from(ticketRatingsTable).where(eq(ticketRatingsTable.ticketId, ticketId));
+  if (existing) {
+    res.status(409).json({ error: "Este chamado já foi avaliado" });
+    return;
+  }
+
   const parsed = RateTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
-  const [rating] = await db.insert(ratingsTable).values({
-    ticketId,
-    userId: user.userId,
-    score: parsed.data.score,
-    feedback: parsed.data.feedback ?? null,
-  }).returning();
+  const [rating] = await db
+    .insert(ticketRatingsTable)
+    .values({
+      ticketId,
+      rating: parsed.data.score,
+      reasonLowRating: null,
+      comment: parsed.data.feedback ?? null,
+    })
+    .returning();
 
-  res.status(201).json(rating);
+  res.status(201).json({
+    id: rating.id,
+    ticketId: rating.ticketId,
+    userId: user.userId,
+    score: rating.rating,
+    feedback: rating.comment ?? null,
+    createdAt: rating.createdAt,
+  });
 });
 
 export default router;
