@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v1.0.18 (2026-04-28)
+- Chamado - Permissão mensagens quando  concluído e avatar. (453b5cb)
+- Avaliação do chamado (fd37df4)
+- chore(release): v1.0.17 (c2e781a)
+
 ## v1.0.16 (2026-04-27)
 - Impressão do chamado (94d0314)
 - Chamado - Alterações de permissões entre outas (5dd8bb7)
@@ -79,6 +84,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
