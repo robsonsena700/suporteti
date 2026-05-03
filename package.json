@@ -26,6 +26,7 @@
     "test:tickets:reassign:integration": "node ./scripts/test-ticket-reassign-integration.cjs",
     "test:tickets:access-policy:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-access-policy-unit.ts",
     "test:tickets:access-control:integration": "node ./scripts/test-ticket-access-control-integration.cjs",
+    "test:tickets:no-coordinator:integration": "node ./scripts/test-no-coordinator-access.cjs",
     "test:tickets:resolved:integration": "node ./scripts/test-tickets-resolved-integration.cjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",

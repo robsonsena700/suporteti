@@ -249,7 +249,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER]
         - name: type
           in: query
           schema:
@@ -268,6 +268,14 @@ paths:
           in: query
           schema:
             type: string
+        - name: mine
+          in: query
+          schema:
+            type: boolean
+        - name: noCoordinator
+          in: query
+          schema:
+            type: boolean
       responses:
         "200":
           description: Lista de chamados
@@ -300,6 +308,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /tickets/resolved:
+    get:
+      operationId: listResolvedTickets
+      tags: [tickets]
+      summary: Listar chamados resolvidos
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [RESOLVED, CLOSED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [SOFTWARE, HARDWARE]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+        - name: uf
+          in: query
+          schema:
+            type: string
+        - name: municipality
+          in: query
+          schema:
+            type: string
+        - name: mine
+          in: query
+          schema:
+            type: boolean
+        - name: noCoordinator
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Lista de chamados resolvidos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ticket"
 
   /tickets/{id}:
     get:
@@ -861,7 +916,7 @@ components:
           type: ["string", "null"]
         status:
           type: string
-          enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]
@@ -877,6 +932,11 @@ components:
           type: integer
         assignedToId:
           type: ["integer", "null"]
+        dueAt:
+          type: ["string", "null"]
+          format: date-time
+        ownerHasCoordinator:
+          type: boolean
         createdAt:
           type: string
           format: date-time
@@ -904,6 +964,27 @@ components:
         - updatedAt
         - createdBy
 
+    TicketAttachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - filename
+        - mimeType
+        - size
+        - createdAt
+
     TicketDetail:
       allOf:
         - $ref: "#/components/schemas/Ticket"
@@ -917,6 +998,10 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/Rating"
                 - type: "null"
+            attachments:
+              type: array
+              items:
+                $ref: "#/components/schemas/TicketAttachment"
             collaborators:
               type: array
               items:
@@ -974,7 +1059,7 @@ components:
           type: string
         status:
           type: string
-          enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]

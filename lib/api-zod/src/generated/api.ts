@@ -224,11 +224,13 @@ export const ApproveUserResponse = zod.object({
  * @summary Listar chamados
  */
 export const ListTicketsQueryParams = zod.object({
-  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]).optional(),
+  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER"]).optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
   uf: zod.coerce.string().optional(),
   municipality: zod.coerce.string().optional(),
+  mine: zod.coerce.boolean().optional(),
+  noCoordinator: zod.coerce.boolean().optional(),
 });
 
 export const ListTicketsResponseItem = zod.object({
@@ -237,7 +239,13 @@ export const ListTicketsResponseItem = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   hardwareSubtype: zod.string().nullish(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
+  status: zod.enum([
+    "OPEN",
+    "IN_PROGRESS",
+    "AWAITING_CUSTOMER",
+    "RESOLVED",
+    "CLOSED",
+  ]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
@@ -245,6 +253,8 @@ export const ListTicketsResponseItem = zod.object({
   imageAttachmentsCount: zod.number().optional(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
+  dueAt: zod.coerce.date().nullish(),
+  ownerHasCoordinator: zod.boolean().optional(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
   createdBy: zod.object({
@@ -282,6 +292,65 @@ export const CreateTicketBody = zod.object({
 });
 
 /**
+ * @summary Listar chamados resolvidos
+ */
+export const ListResolvedTicketsQueryParams = zod.object({
+  status: zod.enum(["RESOLVED", "CLOSED"]).optional(),
+  type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
+  priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+  uf: zod.coerce.string().optional(),
+  municipality: zod.coerce.string().optional(),
+  mine: zod.coerce.boolean().optional(),
+  noCoordinator: zod.coerce.boolean().optional(),
+});
+
+export const ListResolvedTicketsResponseItem = zod.object({
+  id: zod.number(),
+  title: zod.string(),
+  description: zod.string(),
+  type: zod.enum(["SOFTWARE", "HARDWARE"]),
+  hardwareSubtype: zod.string().nullish(),
+  status: zod.enum([
+    "OPEN",
+    "IN_PROGRESS",
+    "AWAITING_CUSTOMER",
+    "RESOLVED",
+    "CLOSED",
+  ]),
+  priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
+  uf: zod.string(),
+  municipality: zod.string(),
+  establishment: zod.string().nullish(),
+  imageAttachmentsCount: zod.number().optional(),
+  createdById: zod.number(),
+  assignedToId: zod.number().nullable(),
+  dueAt: zod.coerce.date().nullish(),
+  ownerHasCoordinator: zod.boolean().optional(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  createdBy: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    email: zod.string(),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  }),
+  assignedTo: zod
+    .union([
+      zod.object({
+        id: zod.number(),
+        name: zod.string(),
+        email: zod.string(),
+        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+});
+export const ListResolvedTicketsResponse = zod.array(
+  ListResolvedTicketsResponseItem,
+);
+
+/**
  * @summary Obter chamado por ID
  */
 export const GetTicketParams = zod.object({
@@ -297,7 +366,13 @@ export const GetTicketResponse = zod
     description: zod.string(),
     type: zod.enum(["SOFTWARE", "HARDWARE"]),
     hardwareSubtype: zod.string().nullish(),
-    status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
+    status: zod.enum([
+      "OPEN",
+      "IN_PROGRESS",
+      "AWAITING_CUSTOMER",
+      "RESOLVED",
+      "CLOSED",
+    ]),
     priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
     uf: zod.string(),
     municipality: zod.string(),
@@ -305,6 +380,8 @@ export const GetTicketResponse = zod
     imageAttachmentsCount: zod.number().optional(),
     createdById: zod.number(),
     assignedToId: zod.number().nullable(),
+    dueAt: zod.coerce.date().nullish(),
+    ownerHasCoordinator: zod.boolean().optional(),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
     createdBy: zod.object({
@@ -360,6 +437,27 @@ export const GetTicketResponse = zod
           zod.null(),
         ])
         .optional(),
+      attachments: zod
+        .array(
+          zod.object({
+            id: zod.number(),
+            filename: zod.string(),
+            mimeType: zod.string(),
+            size: zod.number(),
+            createdAt: zod.coerce.date(),
+          }),
+        )
+        .optional(),
+      collaborators: zod
+        .array(
+          zod.object({
+            id: zod.number(),
+            name: zod.string(),
+            email: zod.string(),
+            role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+          }),
+        )
+        .optional(),
     }),
   );
 
@@ -373,7 +471,9 @@ export const UpdateTicketParams = zod.object({
 export const UpdateTicketBody = zod.object({
   title: zod.string().optional(),
   description: zod.string().optional(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]).optional(),
+  status: zod
+    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
 });
 
@@ -383,7 +483,13 @@ export const UpdateTicketResponse = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   hardwareSubtype: zod.string().nullish(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
+  status: zod.enum([
+    "OPEN",
+    "IN_PROGRESS",
+    "AWAITING_CUSTOMER",
+    "RESOLVED",
+    "CLOSED",
+  ]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
@@ -391,6 +497,8 @@ export const UpdateTicketResponse = zod.object({
   imageAttachmentsCount: zod.number().optional(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
+  dueAt: zod.coerce.date().nullish(),
+  ownerHasCoordinator: zod.boolean().optional(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
   createdBy: zod.object({
@@ -436,7 +544,13 @@ export const AssignTicketResponse = zod.object({
   description: zod.string(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]),
   hardwareSubtype: zod.string().nullish(),
-  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"]),
+  status: zod.enum([
+    "OPEN",
+    "IN_PROGRESS",
+    "AWAITING_CUSTOMER",
+    "RESOLVED",
+    "CLOSED",
+  ]),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
   uf: zod.string(),
   municipality: zod.string(),
@@ -444,6 +558,8 @@ export const AssignTicketResponse = zod.object({
   imageAttachmentsCount: zod.number().optional(),
   createdById: zod.number(),
   assignedToId: zod.number().nullable(),
+  dueAt: zod.coerce.date().nullish(),
+  ownerHasCoordinator: zod.boolean().optional(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
   createdBy: zod.object({
@@ -463,6 +579,56 @@ export const AssignTicketResponse = zod.object({
       zod.null(),
     ])
     .optional(),
+});
+
+/**
+ * @summary Listar colaboradores de um chamado
+ */
+export const ListTicketCollaboratorsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ListTicketCollaboratorsResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  email: zod.string(),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+});
+export const ListTicketCollaboratorsResponse = zod.array(
+  ListTicketCollaboratorsResponseItem,
+);
+
+/**
+ * @summary Adicionar colaboradores em um chamado
+ */
+export const AddTicketCollaboratorsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const AddTicketCollaboratorsBody = zod.object({
+  userIds: zod.array(zod.number()),
+});
+
+export const AddTicketCollaboratorsResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  email: zod.string(),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+});
+export const AddTicketCollaboratorsResponse = zod.array(
+  AddTicketCollaboratorsResponseItem,
+);
+
+/**
+ * @summary Remover colaborador de um chamado
+ */
+export const RemoveTicketCollaboratorParams = zod.object({
+  id: zod.coerce.number(),
+  userId: zod.coerce.number(),
+});
+
+export const RemoveTicketCollaboratorResponse = zod.object({
+  ok: zod.boolean(),
 });
 
 /**

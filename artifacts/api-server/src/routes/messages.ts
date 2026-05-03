@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, messagesTable, ticketsTable, usersTable } from "@workspace/db";
+import { db, messagesTable, ticketAuditLogsTable, ticketsTable, usersTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { CreateMessageBody } from "@workspace/api-zod";
 import { requireAuth, requireActive } from "../middlewares/auth";
@@ -86,6 +86,14 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, async (re
     senderId: user.userId,
     message: parsed.data.message,
   }).returning();
+
+  await db.insert(ticketAuditLogsTable).values({
+    ticketId,
+    actorUserId: user.userId,
+    type: "MESSAGE_SENT",
+    messageId: msg.id,
+    detail: preview,
+  });
 
   await autoAssignTicketOnMessageInteraction({
     actor: user,

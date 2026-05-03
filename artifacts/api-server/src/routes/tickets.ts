@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable, ticketRatingsTable } from "@workspace/db";
+import { db, userCoordinatorsTable, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable, ticketRatingsTable } from "@workspace/db";
 import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody, CreateRatingSchema } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
@@ -69,7 +69,7 @@ async function auditTicketUpdate(args: {
 
 router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { status, type, priority, uf, municipality, mine } = req.query as Record<string, string | undefined>;
+  const { status, type, priority, uf, municipality, mine, noCoordinator } = req.query as Record<string, string | undefined>;
 
   const whereClauses = [];
   if (user.role !== "ADMIN" && user.role !== "ANALYST") {
@@ -99,6 +99,16 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     return;
   }
   if (parsedMine === true && !(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR")) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const parsedNoCoordinator = noCoordinator != null ? parseBooleanQuery(noCoordinator) : null;
+  if (noCoordinator != null && parsedNoCoordinator == null) {
+    res.status(400).json({ error: "Filtro inválido" });
+    return;
+  }
+  if (parsedNoCoordinator === true && !(user.role === "ADMIN" || user.role === "ANALYST")) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -143,6 +153,11 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
   if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));
   if (parsedMunicipality) dbWhereClauses.push(eq(ticketsTable.municipality, parsedMunicipality));
+  if (parsedNoCoordinator === true) {
+    dbWhereClauses.push(
+      sql`not exists(select 1 from public.user_coordinators uc where uc.user_id = ${ticketsTable.createdById})`,
+    );
+  }
 
   const finalWhere = dbWhereClauses.length > 0 ? and(...dbWhereClauses) : undefined;
 
@@ -157,6 +172,16 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     },
     orderBy: [desc(ticketsTable.createdAt)],
   });
+  const ownerIds = Array.from(new Set(allTickets.map(t => t.createdById)));
+  const ownersWithCoordinator = ownerIds.length > 0
+    ? new Set(
+      (await db
+        .select({ userId: userCoordinatorsTable.userId })
+        .from(userCoordinatorsTable)
+        .where(inArray(userCoordinatorsTable.userId, ownerIds)))
+        .map((r) => r.userId),
+    )
+    : new Set<number>();
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
@@ -168,7 +193,9 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     uf: t.uf,
     municipality: t.municipality,
     establishment: t.establishment ?? null,
+    dueAt: t.dueAt ?? null,
     imageAttachmentsCount: (t.attachments ?? []).filter(a => a.mimeType.startsWith("image/")).length,
+    ownerHasCoordinator: ownersWithCoordinator.has(t.createdById),
     createdById: t.createdById,
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
@@ -192,7 +219,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
 
 router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { status, type, priority, uf, municipality, mine } = req.query as Record<string, string | undefined>;
+  const { status, type, priority, uf, municipality, mine, noCoordinator } = req.query as Record<string, string | undefined>;
 
   const whereClauses = [];
   if (user.role !== "ADMIN" && user.role !== "ANALYST") {
@@ -219,6 +246,16 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   const parsedMine = mine != null ? parseBooleanQuery(mine) : null;
   if (mine != null && parsedMine == null) {
     res.status(400).json({ error: "Filtro inválido" });
+    return;
+  }
+
+  const parsedNoCoordinator = noCoordinator != null ? parseBooleanQuery(noCoordinator) : null;
+  if (noCoordinator != null && parsedNoCoordinator == null) {
+    res.status(400).json({ error: "Filtro inválido" });
+    return;
+  }
+  if (parsedNoCoordinator === true && !(user.role === "ADMIN" || user.role === "ANALYST")) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 
@@ -262,6 +299,11 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
   if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));
   if (parsedMunicipality) dbWhereClauses.push(eq(ticketsTable.municipality, parsedMunicipality));
+  if (parsedNoCoordinator === true) {
+    dbWhereClauses.push(
+      sql`not exists(select 1 from public.user_coordinators uc where uc.user_id = ${ticketsTable.createdById})`,
+    );
+  }
 
   const finalWhere = dbWhereClauses.length > 0 ? and(...dbWhereClauses) : undefined;
 
@@ -381,6 +423,12 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
     return;
   }
 
+  const [coordLink] = await db
+    .select({ userId: userCoordinatorsTable.userId })
+    .from(userCoordinatorsTable)
+    .where(eq(userCoordinatorsTable.userId, ticket.createdById));
+  const ownerHasCoordinator = Boolean(coordLink?.userId);
+
   res.json({
     id: ticket.id,
     title: ticket.title,
@@ -394,8 +442,10 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
     establishment: ticket.establishment ?? null,
     createdById: ticket.createdById,
     assignedToId: ticket.assignedToId,
+    dueAt: (ticket as any).dueAt ?? null,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
+    ownerHasCoordinator,
     createdBy: ticket.createdBy ? {
       id: ticket.createdBy.id,
       name: ticket.createdBy.name,
@@ -421,7 +471,7 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
         role: m.sender.role,
       },
     })),
-    rating: user.role === "ADMIN"
+    rating: user.role === "USER" && ticket.createdById === user.userId
       ? (
         ticket.rating
           ? {
@@ -453,6 +503,10 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
 
 router.post("/tickets/:id/rate", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+  if (user.role !== "USER") {
+    res.status(403).json({ error: "Apenas usuário padrão pode avaliar chamados" });
+    return;
+  }
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const ticketId = parseInt(raw, 10);
 
@@ -807,11 +861,12 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
         .where(eq(ticketsTable.id, id))
         .returning();
 
-      await tx.insert(messagesTable).values({
+      const preview = awaitingCustomerMessage.trim().slice(0, 140);
+      const [msg] = await tx.insert(messagesTable).values({
         ticketId: id,
         senderId: user.userId,
         message: awaitingCustomerMessage,
-      });
+      }).returning();
 
       if (detail) {
         await tx.insert(ticketAuditLogsTable).values({
@@ -819,6 +874,16 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
           actorUserId: user.userId,
           type: "TICKET_UPDATED",
           detail,
+        });
+      }
+
+      if (msg) {
+        await tx.insert(ticketAuditLogsTable).values({
+          ticketId: id,
+          actorUserId: user.userId,
+          type: "MESSAGE_SENT",
+          messageId: msg.id,
+          detail: preview,
         });
       }
 
@@ -912,11 +977,12 @@ router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res)
       .where(eq(ticketsTable.id, id))
       .returning();
 
-    await tx.insert(messagesTable).values({
+    const preview = solutionMessage.trim().slice(0, 140);
+    const [msg] = await tx.insert(messagesTable).values({
       ticketId: id,
       senderId: user.userId,
       message: solutionMessage,
-    });
+    }).returning();
 
     await tx.insert(ticketAuditLogsTable).values({
       ticketId: id,
@@ -924,6 +990,16 @@ router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res)
       type: "TICKET_UPDATED",
       detail: formatChange("status", existing.status, "RESOLVED"),
     });
+
+    if (msg) {
+      await tx.insert(ticketAuditLogsTable).values({
+        ticketId: id,
+        actorUserId: user.userId,
+        type: "MESSAGE_SENT",
+        messageId: msg.id,
+        detail: preview,
+      });
+    }
 
     return [updated];
   });
@@ -983,6 +1059,15 @@ router.patch("/tickets/:id/details", requireAuth, requireActive, async (req, res
   const establishment = body.establishment != null ? normalizeText(body.establishment) : null;
   const uf = body.uf != null ? normalizeText(body.uf)?.toUpperCase() ?? null : null;
   const municipality = body.municipality != null ? normalizeText(body.municipality) : null;
+  const dueAtRaw = body.dueAt;
+  const dueAt =
+    dueAtRaw == null
+      ? null
+      : typeof dueAtRaw === "string"
+        ? (dueAtRaw.trim() === "" ? null : new Date(dueAtRaw))
+        : dueAtRaw instanceof Date
+          ? dueAtRaw
+          : null;
 
   if (body.type != null && !type) {
     res.status(400).json({ error: "Tipo inválido" });
@@ -990,6 +1075,15 @@ router.patch("/tickets/:id/details", requireAuth, requireActive, async (req, res
   }
   if (body.priority != null && !priority) {
     res.status(400).json({ error: "Prioridade inválida" });
+    return;
+  }
+  const dueAtTypeOk = dueAtRaw == null || typeof dueAtRaw === "string" || dueAtRaw instanceof Date;
+  if (!dueAtTypeOk) {
+    res.status(400).json({ error: "Prazo inválido" });
+    return;
+  }
+  if (typeof dueAtRaw === "string" && dueAtRaw.trim() !== "" && dueAt instanceof Date && !Number.isFinite(dueAt.getTime())) {
+    res.status(400).json({ error: "Prazo inválido" });
     return;
   }
   if ((body.uf != null || body.municipality != null)) {
@@ -1009,6 +1103,7 @@ router.patch("/tickets/:id/details", requireAuth, requireActive, async (req, res
   if (body.establishment != null) patch.establishment = establishment;
   if (uf) patch.uf = uf;
   if (municipality) patch.municipality = municipality;
+  if (dueAtRaw != null) patch.dueAt = dueAt;
 
   const [ticket] = await db.update(ticketsTable)
     .set(patch)
@@ -1026,6 +1121,9 @@ router.patch("/tickets/:id/details", requireAuth, requireActive, async (req, res
   }
   if (uf && uf !== existing.uf) changes.push({ field: "uf", from: existing.uf, to: uf });
   if (municipality && municipality !== existing.municipality) changes.push({ field: "municipality", from: existing.municipality, to: municipality });
+  if (dueAtRaw != null && (dueAt?.toISOString?.() ?? null) !== ((existing as any).dueAt?.toISOString?.() ?? null)) {
+    changes.push({ field: "dueAt", from: (existing as any).dueAt ?? null, to: dueAt });
+  }
   await auditTicketUpdate({ ticketId: id, actorUserId: user.userId, changes });
 
   const [createdBy] = await db.select().from(usersTable).where(eq(usersTable.id, ticket.createdById));
@@ -1128,11 +1226,22 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
     ? `usuário ${targetUser.name} atribuiu-se ao seu chamado, aguarde...`
     : `[NOTIFICAÇÃO] Ticket reatribuído para ${targetUser.name}. Motivo: ${parsed.data.reason}`;
 
-  await db.insert(messagesTable).values({
+  const preview = notificationMessage.trim().slice(0, 140);
+  const [msg] = await db.insert(messagesTable).values({
     ticketId: id,
     senderId: user.userId,
     message: notificationMessage,
-  });
+  }).returning();
+
+  if (msg) {
+    await db.insert(ticketAuditLogsTable).values({
+      ticketId: id,
+      actorUserId: user.userId,
+      type: "MESSAGE_SENT",
+      messageId: msg.id,
+      detail: preview,
+    });
+  }
 
   res.json({
     ...ticket,

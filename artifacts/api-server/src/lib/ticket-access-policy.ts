@@ -15,6 +15,7 @@ export function computeTicketAccess(args: {
   ticketAssignedToId: number | null;
   isCoordinatorOfOwner?: boolean;
   isCollaborator?: boolean;
+  ownerHasNoCoordinator?: boolean;
 }): TicketAccessDecision {
   const role = args.actorRole.toUpperCase();
   const isOwner = args.ticketCreatedById === args.actorUserId;
@@ -27,7 +28,10 @@ export function computeTicketAccess(args: {
     || role === "ADMIN"
     || role === "ANALYST"
     || (role === "COORDINATOR" && args.isCoordinatorOfOwner === true);
-  const canInteract = isOwner || isAssignee || isCollaborator;
+  const canInteract = isOwner
+    || isAssignee
+    || isCollaborator
+    || ((role === "ADMIN" || role === "ANALYST") && args.ownerHasNoCoordinator === true);
   const canAssign = (role === "ADMIN" || role === "ANALYST" || role === "COORDINATOR") && canView;
 
   return { canView, canInteract, canAssign };

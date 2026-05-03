@@ -145,6 +145,9 @@ export default function TicketDetail() {
   const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
   const [textPreview, setTextPreview] = useState<string>("");
   const [previewUrl, setPreviewUrl] = useState<string>("");
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<number | null>(null);
+  const [pendingRemoveAttachment, setPendingRemoveAttachment] = useState<Attachment | null>(null);
   const [auditLogs, setAuditLogs] = useState<TicketAuditLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -154,6 +157,7 @@ export default function TicketDetail() {
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [detailsType, setDetailsType] = useState<TicketType>("SOFTWARE");
   const [detailsPriority, setDetailsPriority] = useState<TicketPriority>(TicketPriority.MEDIUM);
+  const [detailsDueAt, setDetailsDueAt] = useState<string>("");
   const [detailsUf, setDetailsUf] = useState<string>("");
   const [detailsMunicipality, setDetailsMunicipality] = useState<string>("");
   const [detailsEstablishment, setDetailsEstablishment] = useState<string>("");
@@ -173,6 +177,15 @@ export default function TicketDetail() {
   const pendingRestoreRef = useRef<TicketDetailPersistedState | null>(null);
   const pendingPreviewAttachmentIdRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
+
+  const toDatetimeLocalValue = useCallback((iso: unknown): string => {
+    if (iso == null) return "";
+    const d = iso instanceof Date ? iso : (typeof iso === "string" ? new Date(iso) : null);
+    if (!d) return "";
+    if (!Number.isFinite(d.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
 
   useEffect(() => {
     if (previewOpen) return;
@@ -247,7 +260,7 @@ export default function TicketDetail() {
 
   const { data: ratingData, isLoading: isLoadingRating } = useGetTicketRating(ticketId, {
     query: {
-      enabled: !!ticketId && ticket?.status === TicketStatus.RESOLVED && (user?.role === UserRole.ADMIN || user?.role === UserRole.USER),
+      enabled: !!ticketId && ticket?.status === TicketStatus.RESOLVED && user?.role === UserRole.USER,
       queryKey: getGetTicketRatingQueryKey(ticketId),
     }
   });
@@ -302,6 +315,76 @@ export default function TicketDetail() {
     }
   }, [fetchAttachmentBlob, toast]);
 
+  const uploadTicketAttachments = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    if (uploadingAttachments) return;
+    setUploadingAttachments(true);
+    try {
+      const token = localStorage.getItem("ti_support_token");
+      const form = new FormData();
+      Array.from(files).forEach((f) => form.append("files", f));
+      const resp = await fetch(`/api/tickets/${ticketId}/attachments`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        let data: any = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+        throw new Error(data?.error || "Não foi possível enviar anexos.");
+      }
+      await queryClient.invalidateQueries({ queryKey: getGetTicketQueryKey(ticketId) });
+      if (canManageRole) {
+        customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+          .then((r) => setAuditLogs(Array.isArray(r) ? r : []))
+          .catch(() => null);
+      }
+      toast({ title: "Anexo(s) enviado(s) com sucesso" });
+    } catch (e: any) {
+      toast({
+        title: "Falha ao enviar anexos",
+        description: e?.message || "Não foi possível concluir a operação.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingAttachments(false);
+    }
+  }, [uploadingAttachments, ticketId, queryClient, toast, canManageRole]);
+
+  const deleteTicketAttachment = useCallback(async (att: Attachment) => {
+    if (deletingAttachmentId != null) return;
+    setDeletingAttachmentId(att.id);
+    try {
+      const token = localStorage.getItem("ti_support_token");
+      const resp = await fetch(`/api/tickets/${ticketId}/attachments/${att.id}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!resp.ok && resp.status !== 204) {
+        const text = await resp.text();
+        let data: any = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+        throw new Error(data?.error || "Não foi possível remover o anexo.");
+      }
+      await queryClient.invalidateQueries({ queryKey: getGetTicketQueryKey(ticketId) });
+      if (canManageRole) {
+        customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+          .then((r) => setAuditLogs(Array.isArray(r) ? r : []))
+          .catch(() => null);
+      }
+      toast({ title: "Anexo removido" });
+    } catch (e: any) {
+      toast({
+        title: "Falha ao remover anexo",
+        description: e?.message || "Não foi possível concluir a operação.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingAttachmentId(null);
+    }
+  }, [deletingAttachmentId, ticketId, queryClient, toast, canManageRole]);
+
   const openPreview = useCallback(async (att: Attachment) => {
     setPreviewAtt(att);
     setTextPreview("");
@@ -330,24 +413,26 @@ export default function TicketDetail() {
     if (isEditingDetails) return;
     setDetailsType(ticket.type);
     setDetailsPriority(ticket.priority);
+    setDetailsDueAt(toDatetimeLocalValue(ticket.dueAt ?? null));
     setDetailsUf(ticket.uf);
     setDetailsMunicipality(ticket.municipality);
     setDetailsEstablishment(ticket.establishment ?? "");
-    setDetailsHardwareSubtype((ticket as any).hardwareSubtype ?? "");
-  }, [ticket, isEditingDetails]);
+    setDetailsHardwareSubtype(ticket.hardwareSubtype ?? "");
+  }, [ticket, isEditingDetails, toDatetimeLocalValue]);
 
   useEffect(() => {
     if (!ticket) return;
     if (!isEditingDetails) return;
     setDetailsType(ticket.type);
     setDetailsPriority(ticket.priority);
+    setDetailsDueAt(toDatetimeLocalValue(ticket.dueAt ?? null));
     setDetailsUf(ticket.uf);
     setDetailsMunicipality(ticket.municipality);
     setDetailsEstablishment(ticket.establishment ?? "");
-    setDetailsHardwareSubtype((ticket as any).hardwareSubtype ?? "");
+    setDetailsHardwareSubtype(ticket.hardwareSubtype ?? "");
     setSelectedAssigneeId(ticket.assignedToId ? String(ticket.assignedToId) : "");
     setAssignReason("");
-  }, [isEditingDetails, ticket]);
+  }, [isEditingDetails, ticket, toDatetimeLocalValue]);
 
   useEffect(() => {
     if (!isEditingDetails) return;
@@ -485,7 +570,7 @@ export default function TicketDetail() {
     if (!ticket) return;
     const attId = pendingPreviewAttachmentIdRef.current;
     if (!attId) return;
-    const attachments = ((ticket as any).attachments ?? []) as Attachment[];
+    const attachments = (ticket.attachments ?? []) as Attachment[];
     const att = attachments.find((a) => a.id === attId);
     if (!att) return;
     pendingPreviewAttachmentIdRef.current = null;
@@ -767,19 +852,21 @@ export default function TicketDetail() {
     );
   }
 
-  const collaborators = ((ticket as any).collaborators as CollaboratorRef[] | undefined) ?? [];
+  const collaborators = (ticket.collaborators as CollaboratorRef[] | undefined) ?? [];
   const collaboratorIdSet = new Set(collaborators.map((c) => c.id));
 
   const canManage = canManageRole;
   const isCreator = ticket.createdById === user?.id;
   const isAdminOrAnalyst = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
+  const ownerHasCoordinator = ticket.ownerHasCoordinator !== false;
   const closedAt = new Date(ticket.updatedAt).getTime();
   const withinReopenWindow = Number.isFinite(closedAt) && (Date.now() - closedAt) <= 24 * 60 * 60 * 1000;
   const canReopenClosed = ticket.status !== TicketStatus.CLOSED || (isAdminOrAnalyst && withinReopenWindow);
   const canInteractTicket =
     ticket.createdById === user?.id
     || ticket.assignedToId === user?.id
-    || (user?.id != null && collaboratorIdSet.has(user.id));
+    || (user?.id != null && collaboratorIdSet.has(user.id))
+    || ((user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST) && !ownerHasCoordinator);
   const canSendNewMessage = canCreateTicketMessageUI({ canInteract: canInteractTicket, status: ticket.status });
   const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
   const hasValidAssignee = Boolean(
@@ -869,6 +956,8 @@ export default function TicketDetail() {
     if (type === "MANUAL_ASSIGN") return "Atribuição manual";
     if (type === "AUTO_ASSIGN") return "Atribuição automática";
     if (type === "MESSAGE_SENT") return "Mensagem enviada";
+    if (type === "ATTACHMENT_ADDED") return "Anexo adicionado";
+    if (type === "ATTACHMENT_REMOVED") return "Anexo removido";
     if (type === "TICKET_UPDATED") return "Ticket atualizado";
     if (type === "COLLABORATOR_ADDED") return "Colaborador adicionado";
     if (type === "COLLABORATOR_REMOVED") return "Colaborador removido";
@@ -915,6 +1004,18 @@ export default function TicketDetail() {
       }
     }
 
+    const dueAtIso =
+      detailsDueAt.trim() === ""
+        ? null
+        : (() => {
+          const d = new Date(detailsDueAt);
+          return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+        })();
+    if (detailsDueAt.trim() !== "" && !dueAtIso) {
+      toast({ title: "Prazo inválido", variant: "destructive" });
+      return;
+    }
+
     setSavingDetails(true);
     try {
       if (canAssignTicket && nextAssigneeId !== currentAssigneeId && nextAssigneeId) {
@@ -938,6 +1039,7 @@ export default function TicketDetail() {
         body: JSON.stringify({
           type: detailsType,
           priority: detailsPriority,
+          dueAt: dueAtIso,
           uf: detailsUf,
           municipality: detailsMunicipality,
           establishment: detailsEstablishment || null,
@@ -1005,6 +1107,11 @@ export default function TicketDetail() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight">#{ticket.id} - {ticket.title}</h1>
             <StatusBadge status={ticket.status} />
+            {!ownerHasCoordinator ? (
+              <Badge variant="outline" className="border-amber-400/60 text-amber-700 bg-amber-50">
+                Sem coordenador
+              </Badge>
+            ) : null}
           </div>
           <p className="text-muted-foreground text-sm mt-1">
             Aberto por {ticket.createdBy.name} em {format(new Date(ticket.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
@@ -1197,11 +1304,11 @@ export default function TicketDetail() {
                 )}
               </div>
 
-              {!isEditingDetails && (ticket as any).hardwareSubtype ? (
+              {!isEditingDetails && ticket.hardwareSubtype ? (
                 <div>
                   <span className="text-muted-foreground block mb-1">Subcategoria</span>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                    {(ticket as any).hardwareSubtype}
+                    {ticket.hardwareSubtype}
                   </span>
                 </div>
               ) : null}
@@ -1233,6 +1340,24 @@ export default function TicketDetail() {
                       <SelectItem value="HIGH">Alta</SelectItem>
                     </SelectContent>
                   </Select>
+                )}
+              </div>
+
+              <div>
+                <span className="text-muted-foreground block mb-1">Prazo</span>
+                {!isEditingDetails ? (
+                  <p className="font-medium">
+                    {ticket.dueAt
+                      ? format(new Date(ticket.dueAt), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                      : "Não definido"}
+                  </p>
+                ) : (
+                  <Input
+                    type="datetime-local"
+                    value={detailsDueAt}
+                    onChange={(e) => setDetailsDueAt(e.target.value)}
+                    disabled={savingDetails}
+                  />
                 )}
               </div>
 
@@ -1556,49 +1681,114 @@ export default function TicketDetail() {
 
 
           {/* Attachments */}
-          {((ticket as any).attachments?.length ?? 0) > 0 && (
+          {(((ticket.attachments?.length ?? 0) > 0) || canInteractTicket) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Paperclip className="h-4 w-4" />
-                  Anexos ({(ticket as any).attachments.length})
+                  Anexos ({ticket.attachments?.length ?? 0})
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
-                {(ticket as any).attachments.map((att: Attachment) => (
-                  <div
-                    key={att.id}
-                    className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/60 transition-colors group"
-                  >
-                    <div className="h-10 w-10 rounded bg-primary/10 flex items-center justify-center shrink-0">
-                      {att.mimeType.startsWith("image/")
-                        ? <span className="text-lg">🖼️</span>
-                        : att.mimeType === "application/pdf"
-                        ? <FileText className="h-5 w-5 text-red-500" />
-                        : <Paperclip className="h-5 w-5 text-primary" />}
+              <CardContent className="space-y-3">
+                {canInteractTicket ? (
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold">Adicionar anexos</p>
+                        <p className="text-xs text-muted-foreground">Máx. 3 arquivos • 3MB cada</p>
+                      </div>
+                      <Input
+                        type="file"
+                        multiple
+                        disabled={uploadingAttachments}
+                        onChange={(e) => {
+                          void uploadTicketAttachments(e.target.files);
+                          e.currentTarget.value = "";
+                        }}
+                      />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{att.filename}</p>
-                      <p className="text-xs text-muted-foreground">{formatBytes(att.size)}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Button type="button" variant="outline" size="icon" onClick={() => openPreview(att)} aria-label="Visualizar anexo">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <button
-                        type="button"
-                        onClick={() => downloadAttachment(att)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background shadow-sm hover:bg-muted/50 tap-target"
-                        aria-label="Baixar anexo"
-                      >
-                        <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
-                      </button>
-                    </div>
+                    {uploadingAttachments ? (
+                      <p className="text-xs text-muted-foreground mt-2">Enviando anexos...</p>
+                    ) : null}
                   </div>
-                ))}
+                ) : null}
+
+                {(ticket.attachments?.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nenhum anexo.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(ticket.attachments ?? []).map((att) => (
+                      <div
+                        key={att.id}
+                        className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/60 transition-colors group"
+                      >
+                        <div className="h-10 w-10 rounded bg-primary/10 flex items-center justify-center shrink-0">
+                          {att.mimeType.startsWith("image/")
+                            ? <span className="text-lg">🖼️</span>
+                            : att.mimeType === "application/pdf"
+                              ? <FileText className="h-5 w-5 text-red-500" />
+                              : <Paperclip className="h-5 w-5 text-primary" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{att.filename}</p>
+                          <p className="text-xs text-muted-foreground">{formatBytes(att.size)}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button type="button" variant="outline" size="icon" onClick={() => openPreview(att)} aria-label="Visualizar anexo">
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={() => downloadAttachment(att)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background shadow-sm hover:bg-muted/50 tap-target"
+                            aria-label="Baixar anexo"
+                          >
+                            <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                          </button>
+                          {canInteractTicket ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              disabled={deletingAttachmentId === att.id}
+                              onClick={() => setPendingRemoveAttachment(att)}
+                              aria-label="Remover anexo"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
+
+          <AlertDialog open={pendingRemoveAttachment != null} onOpenChange={(open) => { if (!open) setPendingRemoveAttachment(null); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remover anexo</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Remover o anexo {pendingRemoveAttachment?.filename ?? "selecionado"} do chamado #{ticket.id}?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setPendingRemoveAttachment(null)}>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    if (!pendingRemoveAttachment) return;
+                    const att = pendingRemoveAttachment;
+                    setPendingRemoveAttachment(null);
+                    void deleteTicketAttachment(att);
+                  }}
+                >
+                  Remover
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {canManage ? (
             <Card>
@@ -1658,32 +1848,6 @@ export default function TicketDetail() {
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {user?.role === UserRole.ADMIN && (ticket as any).rating ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Avaliação Recebida</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        className={cn(
-                          "w-5 h-5 rounded-sm ring-2 ring-[#87CEEB] ring-offset-1 ring-offset-background",
-                          s <= (ticket as any).rating.score ? "fill-amber-400 text-amber-400" : "text-muted",
-                        )}
-                      />
-                    ))}
-                  </div>
-                  {(ticket as any).rating.feedback ? (
-                    <p className="text-sm italic text-muted-foreground">"{(ticket as any).rating.feedback}"</p>
-                  ) : null}
-                </div>
               </CardContent>
             </Card>
           ) : null}

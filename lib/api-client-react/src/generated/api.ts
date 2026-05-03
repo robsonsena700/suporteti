@@ -18,6 +18,7 @@ import type {
 
 import type {
   ActivityItem,
+  AddTicketCollaboratorsBody,
   ApproveUserBody,
   AssignTicketBody,
   AuthResponse,
@@ -26,6 +27,7 @@ import type {
   CreateTicketBody,
   ErrorResponse,
   HealthStatus,
+  ListResolvedTicketsParams,
   ListTicketsParams,
   ListUsersParams,
   LoginBody,
@@ -34,6 +36,7 @@ import type {
   Rating,
   RegionCount,
   RegisterBody,
+  RemoveTicketCollaborator200,
   ReportSummary,
   StatusCount,
   Ticket,
@@ -42,6 +45,7 @@ import type {
   UpdateTicketBody,
   UpdateUserBody,
   User,
+  UserRef,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -885,100 +889,6 @@ export function useListTickets<
 }
 
 /**
- * @summary Listar chamados resolvidos
- */
-export const getListResolvedTicketsUrl = (params?: ListTicketsParams) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/tickets/resolved?${stringifiedParams}`
-    : `/api/tickets/resolved`;
-};
-
-export const listResolvedTickets = async (
-  params?: ListTicketsParams,
-  options?: RequestInit,
-): Promise<Ticket[]> => {
-  return customFetch<Ticket[]>(getListResolvedTicketsUrl(params), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getListResolvedTicketsQueryKey = (params?: ListTicketsParams) => {
-  return [`/api/tickets/resolved`, ...(params ? [params] : [])] as const;
-};
-
-export const getListResolvedTicketsQueryOptions = <
-  TData = Awaited<ReturnType<typeof listResolvedTickets>>,
-  TError = ErrorType<unknown>,
->(
-  params?: ListTicketsParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof listResolvedTickets>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getListResolvedTicketsQueryKey(params);
-
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof listResolvedTickets>>> = ({
-    signal,
-  }) => listResolvedTickets(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof listResolvedTickets>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type ListResolvedTicketsQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listResolvedTickets>>
->;
-export type ListResolvedTicketsQueryError = ErrorType<unknown>;
-
-/**
- * @summary Listar chamados resolvidos
- */
-
-export function useListResolvedTickets<
-  TData = Awaited<ReturnType<typeof listResolvedTickets>>,
-  TError = ErrorType<unknown>,
->(
-  params?: ListTicketsParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof listResolvedTickets>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListResolvedTicketsQueryOptions(params, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
  * @summary Abrir novo chamado
  */
 export const getCreateTicketUrl = () => {
@@ -1063,6 +973,106 @@ export const useCreateTicket = <
 > => {
   return useMutation(getCreateTicketMutationOptions(options));
 };
+
+/**
+ * @summary Listar chamados resolvidos
+ */
+export const getListResolvedTicketsUrl = (
+  params?: ListResolvedTicketsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/tickets/resolved?${stringifiedParams}`
+    : `/api/tickets/resolved`;
+};
+
+export const listResolvedTickets = async (
+  params?: ListResolvedTicketsParams,
+  options?: RequestInit,
+): Promise<Ticket[]> => {
+  return customFetch<Ticket[]>(getListResolvedTicketsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListResolvedTicketsQueryKey = (
+  params?: ListResolvedTicketsParams,
+) => {
+  return [`/api/tickets/resolved`, ...(params ? [params] : [])] as const;
+};
+
+export const getListResolvedTicketsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listResolvedTickets>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListResolvedTicketsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listResolvedTickets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListResolvedTicketsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listResolvedTickets>>
+  > = ({ signal }) =>
+    listResolvedTickets(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listResolvedTickets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListResolvedTicketsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listResolvedTickets>>
+>;
+export type ListResolvedTicketsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Listar chamados resolvidos
+ */
+
+export function useListResolvedTickets<
+  TData = Awaited<ReturnType<typeof listResolvedTickets>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListResolvedTicketsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listResolvedTickets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListResolvedTicketsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Obter chamado por ID
@@ -1321,6 +1331,271 @@ export const useAssignTicket = <
   TContext
 > => {
   return useMutation(getAssignTicketMutationOptions(options));
+};
+
+/**
+ * @summary Listar colaboradores de um chamado
+ */
+export const getListTicketCollaboratorsUrl = (id: number) => {
+  return `/api/tickets/${id}/collaborators`;
+};
+
+export const listTicketCollaborators = async (
+  id: number,
+  options?: RequestInit,
+): Promise<UserRef[]> => {
+  return customFetch<UserRef[]>(getListTicketCollaboratorsUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListTicketCollaboratorsQueryKey = (id: number) => {
+  return [`/api/tickets/${id}/collaborators`] as const;
+};
+
+export const getListTicketCollaboratorsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTicketCollaborators>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listTicketCollaborators>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListTicketCollaboratorsQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listTicketCollaborators>>
+  > = ({ signal }) =>
+    listTicketCollaborators(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTicketCollaborators>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListTicketCollaboratorsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTicketCollaborators>>
+>;
+export type ListTicketCollaboratorsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Listar colaboradores de um chamado
+ */
+
+export function useListTicketCollaborators<
+  TData = Awaited<ReturnType<typeof listTicketCollaborators>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listTicketCollaborators>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListTicketCollaboratorsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Adicionar colaboradores em um chamado
+ */
+export const getAddTicketCollaboratorsUrl = (id: number) => {
+  return `/api/tickets/${id}/collaborators`;
+};
+
+export const addTicketCollaborators = async (
+  id: number,
+  addTicketCollaboratorsBody: AddTicketCollaboratorsBody,
+  options?: RequestInit,
+): Promise<UserRef[]> => {
+  return customFetch<UserRef[]>(getAddTicketCollaboratorsUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(addTicketCollaboratorsBody),
+  });
+};
+
+export const getAddTicketCollaboratorsMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addTicketCollaborators>>,
+    TError,
+    { id: number; data: BodyType<AddTicketCollaboratorsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addTicketCollaborators>>,
+  TError,
+  { id: number; data: BodyType<AddTicketCollaboratorsBody> },
+  TContext
+> => {
+  const mutationKey = ["addTicketCollaborators"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addTicketCollaborators>>,
+    { id: number; data: BodyType<AddTicketCollaboratorsBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return addTicketCollaborators(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddTicketCollaboratorsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addTicketCollaborators>>
+>;
+export type AddTicketCollaboratorsMutationBody =
+  BodyType<AddTicketCollaboratorsBody>;
+export type AddTicketCollaboratorsMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Adicionar colaboradores em um chamado
+ */
+export const useAddTicketCollaborators = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addTicketCollaborators>>,
+    TError,
+    { id: number; data: BodyType<AddTicketCollaboratorsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof addTicketCollaborators>>,
+  TError,
+  { id: number; data: BodyType<AddTicketCollaboratorsBody> },
+  TContext
+> => {
+  return useMutation(getAddTicketCollaboratorsMutationOptions(options));
+};
+
+/**
+ * @summary Remover colaborador de um chamado
+ */
+export const getRemoveTicketCollaboratorUrl = (id: number, userId: number) => {
+  return `/api/tickets/${id}/collaborators/${userId}`;
+};
+
+export const removeTicketCollaborator = async (
+  id: number,
+  userId: number,
+  options?: RequestInit,
+): Promise<RemoveTicketCollaborator200> => {
+  return customFetch<RemoveTicketCollaborator200>(
+    getRemoveTicketCollaboratorUrl(id, userId),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getRemoveTicketCollaboratorMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeTicketCollaborator>>,
+    TError,
+    { id: number; userId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeTicketCollaborator>>,
+  TError,
+  { id: number; userId: number },
+  TContext
+> => {
+  const mutationKey = ["removeTicketCollaborator"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeTicketCollaborator>>,
+    { id: number; userId: number }
+  > = (props) => {
+    const { id, userId } = props ?? {};
+
+    return removeTicketCollaborator(id, userId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveTicketCollaboratorMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeTicketCollaborator>>
+>;
+
+export type RemoveTicketCollaboratorMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Remover colaborador de um chamado
+ */
+export const useRemoveTicketCollaborator = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeTicketCollaborator>>,
+    TError,
+    { id: number; userId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof removeTicketCollaborator>>,
+  TError,
+  { id: number; userId: number },
+  TContext
+> => {
+  return useMutation(getRemoveTicketCollaboratorMutationOptions(options));
 };
 
 /**

@@ -170,10 +170,21 @@ export interface Ticket {
   createdById: number;
   /** @nullable */
   assignedToId: number | null;
+  /** @nullable */
+  dueAt?: string | null;
+  ownerHasCoordinator?: boolean;
   createdAt: string;
   updatedAt: string;
   createdBy: UserRef;
   assignedTo?: UserRef | null;
+}
+
+export interface TicketAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
 }
 
 export interface Message {
@@ -202,6 +213,7 @@ export interface Rating {
 export type TicketDetail = Ticket & {
   messages?: Message[];
   rating?: Rating | null;
+  attachments?: TicketAttachment[];
   collaborators?: UserRef[];
 };
 
@@ -349,6 +361,7 @@ export type ListTicketsParams = {
   uf?: string;
   municipality?: string;
   mine?: boolean;
+  noCoordinator?: boolean;
 };
 
 export type ListTicketsStatus =
@@ -358,8 +371,6 @@ export const ListTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
-  RESOLVED: "RESOLVED",
-  CLOSED: "CLOSED",
 } as const;
 
 export type ListTicketsType =
@@ -378,3 +389,46 @@ export const ListTicketsPriority = {
   MEDIUM: "MEDIUM",
   HIGH: "HIGH",
 } as const;
+
+export type ListResolvedTicketsParams = {
+  status?: ListResolvedTicketsStatus;
+  type?: ListResolvedTicketsType;
+  priority?: ListResolvedTicketsPriority;
+  uf?: string;
+  municipality?: string;
+  mine?: boolean;
+  noCoordinator?: boolean;
+};
+
+export type ListResolvedTicketsStatus =
+  (typeof ListResolvedTicketsStatus)[keyof typeof ListResolvedTicketsStatus];
+
+export const ListResolvedTicketsStatus = {
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+
+export type ListResolvedTicketsType =
+  (typeof ListResolvedTicketsType)[keyof typeof ListResolvedTicketsType];
+
+export const ListResolvedTicketsType = {
+  SOFTWARE: "SOFTWARE",
+  HARDWARE: "HARDWARE",
+} as const;
+
+export type ListResolvedTicketsPriority =
+  (typeof ListResolvedTicketsPriority)[keyof typeof ListResolvedTicketsPriority];
+
+export const ListResolvedTicketsPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+} as const;
+
+export type AddTicketCollaboratorsBody = {
+  userIds: number[];
+};
+
+export type RemoveTicketCollaborator200 = {
+  ok: boolean;
+};

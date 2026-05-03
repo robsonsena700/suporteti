@@ -38,6 +38,14 @@ export async function getResponsibleCoordinatorIdForUser(userId: number): Promis
   return link?.coordinatorId ?? null;
 }
 
+async function ownerHasNoCoordinator(userId: number): Promise<boolean> {
+  const [link] = await db
+    .select({ coordinatorId: userCoordinatorsTable.coordinatorId })
+    .from(userCoordinatorsTable)
+    .where(eq(userCoordinatorsTable.userId, userId));
+  return !link?.coordinatorId;
+}
+
 export async function listCoordinatorsForUser(userId: number) {
   const coordinatorIds = await getCoordinatorIdsForUser(userId);
   if (coordinatorIds.length === 0) return [];
@@ -86,6 +94,16 @@ export async function enforceTicketAccess(
     ? (await getResponsibleCoordinatorIdForUser(ticket.createdById)) === user.userId
     : false;
   const collaboratorFlag = await isTicketCollaborator(user.userId, ticket.id);
+  const requiresInteract =
+    action === "messages:create"
+    || action === "attachments:create"
+    || action === "attachments:delete"
+    || action === "tickets:update";
+  const noCoordinatorFlag =
+    (user.role === "ADMIN" || user.role === "ANALYST")
+    && requiresInteract
+    ? await ownerHasNoCoordinator(ticket.createdById)
+    : false;
 
   const access = computeTicketAccess({
     actorRole: user.role,
@@ -94,13 +112,8 @@ export async function enforceTicketAccess(
     ticketAssignedToId: ticket.assignedToId ?? null,
     isCoordinatorOfOwner: coordinatorFlag,
     isCollaborator: collaboratorFlag,
+    ownerHasNoCoordinator: noCoordinatorFlag,
   });
-
-  const requiresInteract =
-    action === "messages:create"
-    || action === "attachments:create"
-    || action === "attachments:delete"
-    || action === "tickets:update";
 
   const allowed = action === "tickets:assign"
     ? access.canAssign && access.canView

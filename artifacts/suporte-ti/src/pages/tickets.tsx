@@ -12,6 +12,7 @@ import {
   TicketType,
   TicketPriority,
   ListTicketsParams,
+  ListResolvedTicketsParams,
   UserRole
 } from "@workspace/api-client-react";
 import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-badge";
@@ -44,10 +45,20 @@ type TicketsMainTab = TicketType | "RESOLVED";
 
 type MineOnlyByTab = Record<TicketsMainTab, boolean>;
 
+type TicketsFilters = {
+  status?: TicketStatus;
+  type?: TicketType;
+  priority?: TicketPriority;
+  uf?: string;
+  municipality?: string;
+  mine?: boolean;
+  noCoordinator?: boolean;
+};
+
 type TicketsListPersistedState = {
   actorUserId: number;
   typeTab: TicketsMainTab;
-  filters: ListTicketsParams;
+  filters: TicketsFilters;
   userFilter: string;
   locationFilter: string;
   responsibleFilter: string;
@@ -179,6 +190,7 @@ function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; 
 export default function Tickets() {
   const { user } = useAuth();
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
+  const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
   const [typeTab, setTypeTab] = useState<TicketsMainTab>(initialTypeTab as any);
   const [mineOnlyByTab, setMineOnlyByTab] = useState<MineOnlyByTab>({
@@ -186,7 +198,8 @@ export default function Tickets() {
     [TicketType.HARDWARE]: true,
     RESOLVED: true,
   });
-  const [filters, setFilters] = useState<ListTicketsParams>(() => {
+  const [noCoordinatorOnly, setNoCoordinatorOnly] = useState(false);
+  const [filters, setFilters] = useState<TicketsFilters>(() => {
     const type = initialTypeTab === "RESOLVED" ? undefined : (initialTypeTab as TicketType);
     return { type };
   });
@@ -223,33 +236,72 @@ export default function Tickets() {
 
   useEffect(() => {
     setFilters((f) => {
-      const next = { ...f };
-      if (!canManageRole) {
-        delete (next as any).mine;
-      } else {
-        next.mine = activeMineOnly ? true : undefined;
-      }
+      const next: TicketsFilters = { ...f };
+      next.mine = canManageRole ? (activeMineOnly ? true : undefined) : undefined;
+      next.noCoordinator = canSeeNoCoordinatorFilter ? (noCoordinatorOnly ? true : undefined) : undefined;
       return next;
     });
-  }, [canManageRole, activeMineOnly]);
+  }, [canManageRole, activeMineOnly, canSeeNoCoordinatorFilter, noCoordinatorOnly]);
 
-  const listTicketsQuery = useListTickets(filters, {
+  const listTicketsParams: ListTicketsParams = {
+    status:
+      filters.status === TicketStatus.OPEN
+        || filters.status === TicketStatus.IN_PROGRESS
+        || filters.status === TicketStatus.AWAITING_CUSTOMER
+        ? filters.status
+        : undefined,
+    type: typeTab === "RESOLVED" ? undefined : (filters.type as any),
+    priority: filters.priority as any,
+    uf: filters.uf,
+    municipality: filters.municipality,
+    mine: filters.mine,
+    noCoordinator: filters.noCoordinator,
+  };
+
+  const listResolvedTicketsParams: ListResolvedTicketsParams = {
+    status:
+      filters.status === TicketStatus.RESOLVED
+        || filters.status === TicketStatus.CLOSED
+        ? filters.status
+        : undefined,
+    type: typeTab === "RESOLVED" ? (filters.type as any) : undefined,
+    priority: filters.priority as any,
+    uf: filters.uf,
+    municipality: filters.municipality,
+    mine: filters.mine,
+    noCoordinator: filters.noCoordinator,
+  };
+
+  const listTicketsQuery = useListTickets(listTicketsParams, {
     query: {
       enabled: typeTab !== "RESOLVED",
-      queryKey: getListTicketsQueryKey(filters),
+      queryKey: getListTicketsQueryKey(listTicketsParams),
     }
   });
 
-  const listResolvedTicketsQuery = useListResolvedTickets(filters, {
+  const listResolvedTicketsQuery = useListResolvedTickets(listResolvedTicketsParams, {
     query: {
       enabled: typeTab === "RESOLVED",
-      queryKey: getListResolvedTicketsQueryKey(filters),
+      queryKey: getListResolvedTicketsQueryKey(listResolvedTicketsParams),
     }
   });
 
-  const { data: tickets, isLoading } = typeTab === "RESOLVED"
-    ? listResolvedTicketsQuery
-    : listTicketsQuery;
+  const activeQuery = typeTab === "RESOLVED" ? listResolvedTicketsQuery : listTicketsQuery;
+  const tickets = activeQuery.data;
+  const isLoading = activeQuery.isLoading;
+  const isError = activeQuery.isError;
+  const error = activeQuery.error as unknown;
+  const refetchTickets = activeQuery.refetch;
+
+  const ticketsLoadErrorMessage = useMemo(() => {
+    if (!isError) return null;
+    const err = error;
+    if (err instanceof ApiError) {
+      const detail = (err.data as any)?.error;
+      return detail ? `${detail} (${err.status})` : `${err.message} (${err.status})`;
+    }
+    return (err as any)?.message || "Não foi possível carregar os chamados.";
+  }, [error, isError]);
 
   const visibleTickets = useMemo(() => {
     return filterAndSortTickets(tickets ?? [], {
@@ -417,7 +469,7 @@ export default function Tickets() {
 
       {canManageRole ? (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-4">
             <Switch
               id={`tickets_mine_only_${typeTab}`}
               checked={activeMineOnly}
@@ -427,6 +479,17 @@ export default function Tickets() {
               }}
             />
             <Label htmlFor={`tickets_mine_only_${typeTab}`}>Meus chamados</Label>
+
+            {canSeeNoCoordinatorFilter ? (
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="tickets_no_coordinator"
+                  checked={noCoordinatorOnly}
+                  onCheckedChange={(checked) => setNoCoordinatorOnly(Boolean(checked))}
+                />
+                <Label htmlFor="tickets_no_coordinator">Sem coordenador</Label>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -604,11 +667,28 @@ export default function Tickets() {
             <div className="flex justify-center items-center py-12">
               <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
             </div>
+          ) : isError ? (
+            <div className="py-12 text-center">
+              <p className="text-muted-foreground">{ticketsLoadErrorMessage}</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Possíveis causas: API fora do ar, falta de permissão, token expirado, ou banco desatualizado (migrations pendentes).
+              </p>
+              <div className="mt-4 flex justify-center">
+                <Button type="button" variant="outline" onClick={() => { void refetchTickets(); }}>
+                  Tentar novamente
+                </Button>
+              </div>
+            </div>
           ) : tickets === undefined ? (
             <div className="py-12 text-center">
               <p className="text-muted-foreground">
-                Não foi possível carregar os chamados. Verifique se a API está rodando e se o banco foi atualizado.
+                Não foi possível carregar os chamados.
               </p>
+              <div className="mt-4 flex justify-center">
+                <Button type="button" variant="outline" onClick={() => { void refetchTickets(); }}>
+                  Tentar novamente
+                </Button>
+              </div>
             </div>
           ) : visibleTickets.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">
@@ -618,8 +698,14 @@ export default function Tickets() {
             <div key={typeTab} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
               {visibleTickets.map((ticket) => (
                 <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
+                  {(() => {
+                    const noCoordinator = ticket.ownerHasCoordinator === false;
+                    return (
                   <div
-                    className="rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors"
+                    className={cn(
+                      "rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors",
+                      noCoordinator ? "border-amber-400/70 ring-1 ring-amber-400/20" : null,
+                    )}
                     onClick={() => {
                       setLastActiveTicketId(ticket.id);
                       saveNow();
@@ -627,7 +713,14 @@ export default function Tickets() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold truncate">#{ticket.id} — {ticket.title}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold truncate">#{ticket.id} — {ticket.title}</p>
+                          {noCoordinator ? (
+                            <span className="rounded-full border border-amber-400/50 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                              Sem coordenador
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="text-xs text-muted-foreground mt-1 truncate">
                           {ticket.createdBy?.name ?? "—"} • {ticket.uf} - {ticket.municipality}
                         </p>
@@ -688,6 +781,8 @@ export default function Tickets() {
                       <p className="font-medium truncate">{ticket.assignedTo?.name ?? "Não atribuído"}</p>
                     </div>
                   </div>
+                    );
+                  })()}
                 </Link>
               ))}
             </div>

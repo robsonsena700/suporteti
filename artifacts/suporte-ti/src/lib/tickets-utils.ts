@@ -16,7 +16,7 @@ export function canViewResolvedTicketRating(opts: {
   status?: string | null;
 }): boolean {
   if (!opts.isAuthenticated) return false;
-  if (opts.role !== "ADMIN" && opts.role !== "USER") return false;
+  if (opts.role !== "USER") return false;
   if (opts.status !== "RESOLVED" && opts.status !== "CLOSED") return false;
   return true;
 }

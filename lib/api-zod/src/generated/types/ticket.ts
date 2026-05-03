@@ -27,6 +27,9 @@ export interface Ticket {
   createdById: number;
   /** @nullable */
   assignedToId: number | null;
+  /** @nullable */
+  dueAt?: Date | null;
+  ownerHasCoordinator?: boolean;
   createdAt: Date;
   updatedAt: Date;
   createdBy: UserRef;

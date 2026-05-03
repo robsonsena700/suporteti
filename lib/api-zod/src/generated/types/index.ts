@@ -7,6 +7,7 @@
  */
 
 export * from "./activityItem";
+export * from "./addTicketCollaboratorsBody";
 export * from "./approveUserBody";
 export * from "./approveUserBodyRole";
 export * from "./assignTicketBody";
@@ -18,6 +19,10 @@ export * from "./createTicketBodyPriority";
 export * from "./createTicketBodyType";
 export * from "./errorResponse";
 export * from "./healthStatus";
+export * from "./listResolvedTicketsParams";
+export * from "./listResolvedTicketsPriority";
+export * from "./listResolvedTicketsStatus";
+export * from "./listResolvedTicketsType";
 export * from "./listTicketsParams";
 export * from "./listTicketsPriority";
 export * from "./listTicketsStatus";
@@ -31,9 +36,11 @@ export * from "./messageResponse";
 export * from "./rating";
 export * from "./regionCount";
 export * from "./registerBody";
+export * from "./removeTicketCollaborator200";
 export * from "./reportSummary";
 export * from "./statusCount";
 export * from "./ticket";
+export * from "./ticketAttachment";
 export * from "./ticketDetail";
 export * from "./ticketPriority";
 export * from "./ticketStatus";

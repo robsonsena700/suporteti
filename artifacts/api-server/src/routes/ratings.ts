@@ -9,7 +9,7 @@ const router: IRouter = Router();
 
 router.get("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  if (user.role !== "ADMIN" && user.role !== "USER") {
+  if (user.role !== "USER") {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -49,7 +49,7 @@ router.get("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, 
 
 router.post("/tickets/:ticketId/rating", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  if (user.role !== "ADMIN" && user.role !== "USER") {
+  if (user.role !== "USER") {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }

@@ -11,6 +11,8 @@ export const ticketAuditTypeEnum = pgEnum("ticket_audit_type", [
   "MANUAL_ASSIGN",
   "COLLABORATOR_ADDED",
   "COLLABORATOR_REMOVED",
+  "ATTACHMENT_ADDED",
+  "ATTACHMENT_REMOVED",
   "TICKET_UPDATED",
 ]);
 

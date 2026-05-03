@@ -8,10 +8,12 @@
 import type { Message } from "./message";
 import type { Rating } from "./rating";
 import type { Ticket } from "./ticket";
+import type { TicketAttachment } from "./ticketAttachment";
 import type { UserRef } from "./userRef";
 
 export type TicketDetail = Ticket & {
   messages?: Message[];
   rating?: Rating | null;
+  attachments?: TicketAttachment[];
   collaborators?: UserRef[];
 };

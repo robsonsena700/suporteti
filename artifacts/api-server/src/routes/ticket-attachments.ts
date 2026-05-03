@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
-import { db, ticketsTable, ticketAttachmentsTable } from "@workspace/db";
+import { db, ticketAuditLogsTable, ticketsTable, ticketAttachmentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { enforceTicketAccess } from "../lib/access";
@@ -80,6 +80,20 @@ router.post(
         data: f.buffer.toString("base64"),
       }))
     ).returning({ id: ticketAttachmentsTable.id, filename: ticketAttachmentsTable.filename, mimeType: ticketAttachmentsTable.mimeType, size: ticketAttachmentsTable.size, createdAt: ticketAttachmentsTable.createdAt });
+
+    await db.insert(ticketAuditLogsTable).values({
+      ticketId,
+      actorUserId: user.userId,
+      type: "ATTACHMENT_ADDED",
+      detail: JSON.stringify({
+        attachments: inserted.map((a) => ({
+          id: a.id,
+          filename: a.filename,
+          mimeType: a.mimeType,
+          size: a.size,
+        })),
+      }),
+    });
 
     res.status(201).json(inserted);
   }
@@ -192,6 +206,13 @@ router.delete("/tickets/:id/attachments/:aid", requireAuth, requireActive, async
     res.status(404).json({ error: "Anexo não encontrado" });
     return;
   }
+
+  await db.insert(ticketAuditLogsTable).values({
+    ticketId,
+    actorUserId: user.userId,
+    type: "ATTACHMENT_REMOVED",
+    detail: JSON.stringify({ id: att.id, filename: att.filename, mimeType: att.mimeType, size: att.size }),
+  });
 
   await db.delete(ticketAttachmentsTable).where(eq(ticketAttachmentsTable.id, aid));
   res.status(204).send();
