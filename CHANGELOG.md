@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v1.0.20 (2026-05-04)
+- Publicação - ajuste no arquivo. (5d71de5)
+- Relatórios - Filtro data dinâmico e impressão. (8b6782c)
+- Relatórios - mudança do idioma pt-br (3d6292a)
+- Chamados - corrigida visualização de chamados sem coordenador atribuido. (bd525e3)
+- chore(release): v1.0.19 (d155619)
+
 ## v1.0.18 (2026-04-28)
 - Chamado - Permissão mensagens quando  concluído e avatar. (453b5cb)
 - Avaliação do chamado (fd37df4)
@@ -84,6 +91,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
