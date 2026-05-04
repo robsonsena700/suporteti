@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v1.0.22 (2026-05-04)
+- Publicação (0306e63)
+- chore(release): v1.0.21 (8735d5c)
+- V1.0.20 (4586358)
+
 ## v1.0.20 (2026-05-04)
 - Publicação - ajuste no arquivo. (5d71de5)
 - Relatórios - Filtro data dinâmico e impressão. (8b6782c)
@@ -91,6 +96,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
