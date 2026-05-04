@@ -16,7 +16,7 @@ if [ ! -f "$SHARED/credenciais.txt" ]; then
 fi
 
 PASSWORD="$(tr -d '\r\n' < "$SHARED/credenciais.txt")"
-ENC_PW="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read().strip()))' <<<"$PASSWORD")"
+ENC_PW="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read().strip(), safe=""))' <<<"$PASSWORD")"
 
 export DATABASE_URL="postgresql://postgres:${ENC_PW}@localhost:5446/suporteti"
 
@@ -51,7 +51,22 @@ fi
 nohup node "$CURRENT/artifacts/api-server/dist/index.mjs" >"$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 
-sleep 1
-curl -fsS "http://127.0.0.1:3001/api/healthz" >/dev/null
-echo "API_OK"
+PID="$(cat "$PID_FILE" || true)"
+TRIES=30
+N=1
+while [ "$N" -le "$TRIES" ]; do
+  if [ -n "$PID" ] && ! kill -0 "$PID" >/dev/null 2>&1; then
+    tail -n 120 "$LOG_FILE" || true
+    exit 1
+  fi
+  if curl -fsS "http://127.0.0.1:3001/api/healthz" >/dev/null 2>&1; then
+    echo "API_OK"
+    exit 0
+  fi
+  sleep 1
+  N=$((N + 1))
+done
+
+tail -n 120 "$LOG_FILE" || true
+exit 1
 
