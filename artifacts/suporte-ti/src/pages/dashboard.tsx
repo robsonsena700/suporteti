@@ -16,13 +16,13 @@ import { ptBR } from "date-fns/locale";
 export default function Dashboard() {
   const { user } = useAuth();
 
-  const { data: summary, isLoading: isLoadingSummary } = useGetReportSummary({
+  const { data: summary, isLoading: isLoadingSummary } = useGetReportSummary(undefined, {
     query: {
       queryKey: getGetReportSummaryQueryKey(),
     }
   });
 
-  const { data: activity, isLoading: isLoadingActivity } = useGetRecentActivity({
+  const { data: activity, isLoading: isLoadingActivity } = useGetRecentActivity(undefined, {
     query: {
       queryKey: getGetRecentActivityQueryKey(),
     }

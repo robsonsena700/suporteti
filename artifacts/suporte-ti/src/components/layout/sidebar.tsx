@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/user/user-avatar";
 import { getRoleLabel } from "@/lib/role-labels";
 
 const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
+const REPORTS_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
@@ -28,7 +29,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     ...(user?.role && CHAT_ROLES.includes(user.role)
       ? [{ name: "Chat", href: "/chat", icon: MessageSquare, badge: unreadCount }]
       : []),
-    ...(user?.role === "ADMIN"
+    ...(user?.role && REPORTS_ROLES.includes(user.role)
       ? [{ name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 }]
       : []),
     { name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 },

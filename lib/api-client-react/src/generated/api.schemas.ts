@@ -307,6 +307,95 @@ export interface ReportSummary {
   avgRating: number | null;
 }
 
+export type ReportUserStatsPriorityOpen = {
+  high: number;
+  medium: number;
+  low: number;
+};
+
+export interface ReportUserStats {
+  user: UserRef;
+  totalTickets: number;
+  openTickets: number;
+  inProgressTickets: number;
+  resolvedTickets: number;
+  closedTickets: number;
+  priorityOpen: ReportUserStatsPriorityOpen;
+  /** @nullable */
+  avgResolutionHours: number | null;
+  /** @nullable */
+  avgRating: number | null;
+}
+
+export interface ReportUserRankingRow {
+  user: UserRef;
+  totalTickets: number;
+  /** @nullable */
+  avgResolutionHours: number | null;
+  /** @nullable */
+  avgRating: number | null;
+  badges: string[];
+}
+
+export type ReportTicketRowType =
+  (typeof ReportTicketRowType)[keyof typeof ReportTicketRowType];
+
+export const ReportTicketRowType = {
+  SOFTWARE: "SOFTWARE",
+  HARDWARE: "HARDWARE",
+} as const;
+
+export type ReportTicketRowStatus =
+  (typeof ReportTicketRowStatus)[keyof typeof ReportTicketRowStatus];
+
+export const ReportTicketRowStatus = {
+  OPEN: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+
+export type ReportTicketRowPriority =
+  (typeof ReportTicketRowPriority)[keyof typeof ReportTicketRowPriority];
+
+export const ReportTicketRowPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+} as const;
+
+export interface ReportTicketRow {
+  id: number;
+  title: string;
+  type: ReportTicketRowType;
+  status: ReportTicketRowStatus;
+  priority: ReportTicketRowPriority;
+  uf: string;
+  municipality: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: UserRef | null;
+  assignedTo?: UserRef | null;
+}
+
+export interface ReportTicketsPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: ReportTicketRow[];
+}
+
+export interface ReportTrendPoint {
+  day: string;
+  count: number;
+}
+
+export interface ReportTicketTrends {
+  created: ReportTrendPoint[];
+  updated: ReportTrendPoint[];
+}
+
 export interface StatusCount {
   status: string;
   count: number;
@@ -432,3 +521,233 @@ export type AddTicketCollaboratorsBody = {
 export type RemoveTicketCollaborator200 = {
   ok: boolean;
 };
+
+export type GetReportSummaryParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetTicketsByStatusParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetTicketsByRegionParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetTicketsByTypeParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetRecentActivityParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetReportsUsersStatsParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetReportsUsersRankingParams = {
+  from?: string;
+  to?: string;
+  order?: GetReportsUsersRankingOrder;
+};
+
+export type GetReportsUsersRankingOrder =
+  (typeof GetReportsUsersRankingOrder)[keyof typeof GetReportsUsersRankingOrder];
+
+export const GetReportsUsersRankingOrder = {
+  volume: "volume",
+  resolution: "resolution",
+  satisfaction: "satisfaction",
+} as const;
+
+export type GetReportsTicketsParams = {
+  from?: string;
+  to?: string;
+  status?: GetReportsTicketsStatus;
+  type?: GetReportsTicketsType;
+  priority?: GetReportsTicketsPriority;
+  /**
+   * @minimum 1
+   */
+  page?: number;
+  /**
+   * @minimum 5
+   * @maximum 50
+   */
+  pageSize?: number;
+};
+
+export type GetReportsTicketsStatus =
+  (typeof GetReportsTicketsStatus)[keyof typeof GetReportsTicketsStatus];
+
+export const GetReportsTicketsStatus = {
+  OPEN: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+
+export type GetReportsTicketsType =
+  (typeof GetReportsTicketsType)[keyof typeof GetReportsTicketsType];
+
+export const GetReportsTicketsType = {
+  SOFTWARE: "SOFTWARE",
+  HARDWARE: "HARDWARE",
+} as const;
+
+export type GetReportsTicketsPriority =
+  (typeof GetReportsTicketsPriority)[keyof typeof GetReportsTicketsPriority];
+
+export const GetReportsTicketsPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+} as const;
+
+export type GetReportsTicketsTrendsParams = {
+  from?: string;
+  to?: string;
+  status?: GetReportsTicketsTrendsStatus;
+  type?: GetReportsTicketsTrendsType;
+  priority?: GetReportsTicketsTrendsPriority;
+};
+
+export type GetReportsTicketsTrendsStatus =
+  (typeof GetReportsTicketsTrendsStatus)[keyof typeof GetReportsTicketsTrendsStatus];
+
+export const GetReportsTicketsTrendsStatus = {
+  OPEN: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+
+export type GetReportsTicketsTrendsType =
+  (typeof GetReportsTicketsTrendsType)[keyof typeof GetReportsTicketsTrendsType];
+
+export const GetReportsTicketsTrendsType = {
+  SOFTWARE: "SOFTWARE",
+  HARDWARE: "HARDWARE",
+} as const;
+
+export type GetReportsTicketsTrendsPriority =
+  (typeof GetReportsTicketsTrendsPriority)[keyof typeof GetReportsTicketsTrendsPriority];
+
+export const GetReportsTicketsTrendsPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+} as const;
+
+export type ExportReportsTicketsParams = {
+  format?: ExportReportsTicketsFormat;
+  from?: string;
+  to?: string;
+  status?: ExportReportsTicketsStatus;
+  type?: ExportReportsTicketsType;
+  priority?: ExportReportsTicketsPriority;
+};
+
+export type ExportReportsTicketsFormat =
+  (typeof ExportReportsTicketsFormat)[keyof typeof ExportReportsTicketsFormat];
+
+export const ExportReportsTicketsFormat = {
+  csv: "csv",
+  xlsx: "xlsx",
+  pdf: "pdf",
+  print: "print",
+} as const;
+
+export type ExportReportsTicketsStatus =
+  (typeof ExportReportsTicketsStatus)[keyof typeof ExportReportsTicketsStatus];
+
+export const ExportReportsTicketsStatus = {
+  OPEN: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+
+export type ExportReportsTicketsType =
+  (typeof ExportReportsTicketsType)[keyof typeof ExportReportsTicketsType];
+
+export const ExportReportsTicketsType = {
+  SOFTWARE: "SOFTWARE",
+  HARDWARE: "HARDWARE",
+} as const;
+
+export type ExportReportsTicketsPriority =
+  (typeof ExportReportsTicketsPriority)[keyof typeof ExportReportsTicketsPriority];
+
+export const ExportReportsTicketsPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+} as const;
+
+export type ExportReportsOverviewParams = {
+  format?: ExportReportsOverviewFormat;
+  from?: string;
+  to?: string;
+  status?: ExportReportsOverviewStatus;
+  type?: ExportReportsOverviewType;
+  priority?: ExportReportsOverviewPriority;
+  order?: ExportReportsOverviewOrder;
+};
+
+export type ExportReportsOverviewFormat =
+  (typeof ExportReportsOverviewFormat)[keyof typeof ExportReportsOverviewFormat];
+
+export const ExportReportsOverviewFormat = {
+  csv: "csv",
+  xlsx: "xlsx",
+  pdf: "pdf",
+  print: "print",
+} as const;
+
+export type ExportReportsOverviewStatus =
+  (typeof ExportReportsOverviewStatus)[keyof typeof ExportReportsOverviewStatus];
+
+export const ExportReportsOverviewStatus = {
+  OPEN: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  RESOLVED: "RESOLVED",
+  CLOSED: "CLOSED",
+} as const;
+
+export type ExportReportsOverviewType =
+  (typeof ExportReportsOverviewType)[keyof typeof ExportReportsOverviewType];
+
+export const ExportReportsOverviewType = {
+  SOFTWARE: "SOFTWARE",
+  HARDWARE: "HARDWARE",
+} as const;
+
+export type ExportReportsOverviewPriority =
+  (typeof ExportReportsOverviewPriority)[keyof typeof ExportReportsOverviewPriority];
+
+export const ExportReportsOverviewPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+} as const;
+
+export type ExportReportsOverviewOrder =
+  (typeof ExportReportsOverviewOrder)[keyof typeof ExportReportsOverviewOrder];
+
+export const ExportReportsOverviewOrder = {
+  volume: "volume",
+  resolution: "resolution",
+  satisfaction: "satisfaction",
+} as const;

@@ -55,6 +55,9 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
         if (rest.adminOnly && user.role !== "ADMIN") {
           return <Redirect to="/dashboard" />;
         }
+        if (Array.isArray(rest.roles) && rest.roles.length > 0 && !rest.roles.includes(user.role)) {
+          return <Redirect to="/dashboard" />;
+        }
         return <Component {...props} />;
       }}
     />
@@ -82,7 +85,7 @@ function Router() {
           <ProtectedRoute path="/chamados/:id/comprovante" component={TicketReceipt} />
           <ProtectedRoute path="/chamados/:id" component={TicketDetail} />
           <ProtectedRoute path="/chat" component={Chat} />
-          <ProtectedRoute path="/relatorios" component={Reports} adminOnly />
+          <ProtectedRoute path="/relatorios" component={Reports} roles={["ADMIN", "COORDINATOR", "ANALYST"]} />
           <ProtectedRoute path="/configuracoes" component={Settings} />
           <ProtectedRoute path="/perfil" component={Profile} />
           <Route path="/preview/prioridades" component={PriorityPreview} />

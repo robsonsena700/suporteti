@@ -653,6 +653,17 @@ paths:
       operationId: getReportSummary
       tags: [reports]
       summary: Resumo geral do sistema
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Resumo com totais e indicadores
@@ -666,6 +677,17 @@ paths:
       operationId: getTicketsByStatus
       tags: [reports]
       summary: Chamados agrupados por status
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Contagem por status
@@ -681,6 +703,17 @@ paths:
       operationId: getTicketsByRegion
       tags: [reports]
       summary: Chamados agrupados por UF
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Contagem por UF
@@ -696,6 +729,17 @@ paths:
       operationId: getTicketsByType
       tags: [reports]
       summary: Chamados agrupados por tipo
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Contagem por tipo
@@ -711,6 +755,17 @@ paths:
       operationId: getRecentActivity
       tags: [reports]
       summary: Atividade recente do sistema
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Últimas atividades
@@ -720,6 +775,267 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ActivityItem"
+
+  /reports/users/stats:
+    get:
+      operationId: getReportsUsersStats
+      tags: [reports]
+      summary: Estatísticas de chamados por usuário (solicitante)
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Lista de estatísticas por usuário
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReportUserStats"
+
+  /reports/users/ranking:
+    get:
+      operationId: getReportsUsersRanking
+      tags: [reports]
+      summary: Ranking de usuários por volume, tempo de resolução e satisfação
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [volume, resolution, satisfaction]
+      responses:
+        "200":
+          description: Lista de ranking
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReportUserRankingRow"
+
+  /reports/tickets:
+    get:
+      operationId: getReportsTickets
+      tags: [reports]
+      summary: Listar chamados (relatórios) com paginação e filtros
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [SOFTWARE, HARDWARE]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 50
+      responses:
+        "200":
+          description: Página de chamados
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTicketsPage"
+
+  /reports/tickets/trends:
+    get:
+      operationId: getReportsTicketsTrends
+      tags: [reports]
+      summary: Tendências de chamados por dia (criados e atualizados)
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [SOFTWARE, HARDWARE]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+      responses:
+        "200":
+          description: Séries de tendência
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTicketTrends"
+
+  /reports/tickets/export:
+    get:
+      operationId: exportReportsTickets
+      tags: [reports]
+      summary: Exportar chamados filtrados (CSV/XLSX/PDF/print)
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv, xlsx, pdf, print]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [SOFTWARE, HARDWARE]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+      responses:
+        "200":
+          description: Arquivo exportado
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+
+  /reports/export:
+    get:
+      operationId: exportReportsOverview
+      tags: [reports]
+      summary: Exportar relatório completo (CSV/XLSX/PDF/print)
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv, xlsx, pdf, print]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [SOFTWARE, HARDWARE]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [volume, resolution, satisfaction]
+      responses:
+        "200":
+          description: Arquivo exportado
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
 
 components:
   schemas:
@@ -1180,6 +1496,156 @@ components:
         - pendingUsers
         - avgResolutionHours
         - avgRating
+
+    ReportUserStats:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/UserRef"
+        totalTickets:
+          type: integer
+        openTickets:
+          type: integer
+        inProgressTickets:
+          type: integer
+        resolvedTickets:
+          type: integer
+        closedTickets:
+          type: integer
+        priorityOpen:
+          type: object
+          properties:
+            high:
+              type: integer
+            medium:
+              type: integer
+            low:
+              type: integer
+          required: [high, medium, low]
+        avgResolutionHours:
+          type: ["number", "null"]
+        avgRating:
+          type: ["number", "null"]
+      required:
+        - user
+        - totalTickets
+        - openTickets
+        - inProgressTickets
+        - resolvedTickets
+        - closedTickets
+        - priorityOpen
+        - avgResolutionHours
+        - avgRating
+
+    ReportUserRankingRow:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/UserRef"
+        totalTickets:
+          type: integer
+        avgResolutionHours:
+          type: ["number", "null"]
+        avgRating:
+          type: ["number", "null"]
+        badges:
+          type: array
+          items:
+            type: string
+      required:
+        - user
+        - totalTickets
+        - avgResolutionHours
+        - avgRating
+        - badges
+
+    ReportTicketRow:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        type:
+          type: string
+          enum: [SOFTWARE, HARDWARE]
+        status:
+          type: string
+          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+        priority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        uf:
+          type: string
+        municipality:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          oneOf:
+            - $ref: "#/components/schemas/UserRef"
+            - type: "null"
+        assignedTo:
+          oneOf:
+            - $ref: "#/components/schemas/UserRef"
+            - type: "null"
+      required:
+        - id
+        - title
+        - type
+        - status
+        - priority
+        - uf
+        - municipality
+        - createdAt
+        - updatedAt
+
+    ReportTicketsPage:
+      type: object
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportTicketRow"
+      required:
+        - page
+        - pageSize
+        - total
+        - items
+
+    ReportTrendPoint:
+      type: object
+      properties:
+        day:
+          type: string
+        count:
+          type: integer
+      required: [day, count]
+
+    ReportTicketTrends:
+      type: object
+      properties:
+        created:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportTrendPoint"
+        updated:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportTrendPoint"
+      required:
+        - created
+        - updated
 
     StatusCount:
       type: object

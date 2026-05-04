@@ -699,6 +699,11 @@ export const RateTicketBody = zod.object({
 /**
  * @summary Resumo geral do sistema
  */
+export const GetReportSummaryQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
 export const GetReportSummaryResponse = zod.object({
   totalTickets: zod.number(),
   openTickets: zod.number(),
@@ -714,6 +719,11 @@ export const GetReportSummaryResponse = zod.object({
 /**
  * @summary Chamados agrupados por status
  */
+export const GetTicketsByStatusQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
 export const GetTicketsByStatusResponseItem = zod.object({
   status: zod.string(),
   count: zod.number(),
@@ -725,6 +735,11 @@ export const GetTicketsByStatusResponse = zod.array(
 /**
  * @summary Chamados agrupados por UF
  */
+export const GetTicketsByRegionQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
 export const GetTicketsByRegionResponseItem = zod.object({
   uf: zod.string(),
   count: zod.number(),
@@ -736,6 +751,11 @@ export const GetTicketsByRegionResponse = zod.array(
 /**
  * @summary Chamados agrupados por tipo
  */
+export const GetTicketsByTypeQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
 export const GetTicketsByTypeResponseItem = zod.object({
   type: zod.string(),
   count: zod.number(),
@@ -745,6 +765,11 @@ export const GetTicketsByTypeResponse = zod.array(GetTicketsByTypeResponseItem);
 /**
  * @summary Atividade recente do sistema
  */
+export const GetRecentActivityQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
 export const GetRecentActivityResponseItem = zod.object({
   id: zod.number(),
   action: zod.string(),
@@ -756,3 +781,187 @@ export const GetRecentActivityResponseItem = zod.object({
 export const GetRecentActivityResponse = zod.array(
   GetRecentActivityResponseItem,
 );
+
+/**
+ * @summary Estatísticas de chamados por usuário (solicitante)
+ */
+export const GetReportsUsersStatsQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
+export const GetReportsUsersStatsResponseItem = zod.object({
+  user: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    email: zod.string(),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  }),
+  totalTickets: zod.number(),
+  openTickets: zod.number(),
+  inProgressTickets: zod.number(),
+  resolvedTickets: zod.number(),
+  closedTickets: zod.number(),
+  priorityOpen: zod.object({
+    high: zod.number(),
+    medium: zod.number(),
+    low: zod.number(),
+  }),
+  avgResolutionHours: zod.number().nullable(),
+  avgRating: zod.number().nullable(),
+});
+export const GetReportsUsersStatsResponse = zod.array(
+  GetReportsUsersStatsResponseItem,
+);
+
+/**
+ * @summary Ranking de usuários por volume, tempo de resolução e satisfação
+ */
+export const GetReportsUsersRankingQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+  order: zod.enum(["volume", "resolution", "satisfaction"]).optional(),
+});
+
+export const GetReportsUsersRankingResponseItem = zod.object({
+  user: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    email: zod.string(),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  }),
+  totalTickets: zod.number(),
+  avgResolutionHours: zod.number().nullable(),
+  avgRating: zod.number().nullable(),
+  badges: zod.array(zod.string()),
+});
+export const GetReportsUsersRankingResponse = zod.array(
+  GetReportsUsersRankingResponseItem,
+);
+
+/**
+ * @summary Listar chamados (relatórios) com paginação e filtros
+ */
+
+export const getReportsTicketsQueryPageSizeMin = 5;
+export const getReportsTicketsQueryPageSizeMax = 50;
+
+export const GetReportsTicketsQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+  status: zod
+    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .optional(),
+  type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
+  priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+  page: zod.coerce.number().min(1).optional(),
+  pageSize: zod.coerce
+    .number()
+    .min(getReportsTicketsQueryPageSizeMin)
+    .max(getReportsTicketsQueryPageSizeMax)
+    .optional(),
+});
+
+export const GetReportsTicketsResponse = zod.object({
+  page: zod.number(),
+  pageSize: zod.number(),
+  total: zod.number(),
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      title: zod.string(),
+      type: zod.enum(["SOFTWARE", "HARDWARE"]),
+      status: zod.enum([
+        "OPEN",
+        "IN_PROGRESS",
+        "AWAITING_CUSTOMER",
+        "RESOLVED",
+        "CLOSED",
+      ]),
+      priority: zod.enum(["LOW", "MEDIUM", "HIGH"]),
+      uf: zod.string(),
+      municipality: zod.string(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+      createdBy: zod
+        .union([
+          zod.object({
+            id: zod.number(),
+            name: zod.string(),
+            email: zod.string(),
+            role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+          }),
+          zod.null(),
+        ])
+        .optional(),
+      assignedTo: zod
+        .union([
+          zod.object({
+            id: zod.number(),
+            name: zod.string(),
+            email: zod.string(),
+            role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+          }),
+          zod.null(),
+        ])
+        .optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Tendências de chamados por dia (criados e atualizados)
+ */
+export const GetReportsTicketsTrendsQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+  status: zod
+    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .optional(),
+  type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
+  priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+});
+
+export const GetReportsTicketsTrendsResponse = zod.object({
+  created: zod.array(
+    zod.object({
+      day: zod.string(),
+      count: zod.number(),
+    }),
+  ),
+  updated: zod.array(
+    zod.object({
+      day: zod.string(),
+      count: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Exportar chamados filtrados (CSV/XLSX/PDF/print)
+ */
+export const ExportReportsTicketsQueryParams = zod.object({
+  format: zod.enum(["csv", "xlsx", "pdf", "print"]).optional(),
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+  status: zod
+    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .optional(),
+  type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
+  priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+});
+
+/**
+ * @summary Exportar relatório completo (CSV/XLSX/PDF/print)
+ */
+export const ExportReportsOverviewQueryParams = zod.object({
+  format: zod.enum(["csv", "xlsx", "pdf", "print"]).optional(),
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+  status: zod
+    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .optional(),
+  type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
+  priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+  order: zod.enum(["volume", "resolution", "satisfaction"]).optional(),
+});
