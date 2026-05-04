@@ -24,6 +24,31 @@ export default function Reports() {
     query: { queryKey: getGetTicketsByTypeQueryKey() }
   });
 
+  const labelStatus = (value: unknown): string => {
+    if (value === "OPEN") return "Aberto";
+    if (value === "IN_PROGRESS") return "Em andamento";
+    if (value === "AWAITING_CUSTOMER") return "Aguardando cliente";
+    if (value === "RESOLVED") return "Resolvido";
+    if (value === "CLOSED") return "Cancelado";
+    return String(value ?? "—");
+  };
+
+  const labelType = (value: unknown): string => {
+    if (value === "SOFTWARE") return "Software";
+    if (value === "HARDWARE") return "Hardware";
+    return String(value ?? "—");
+  };
+
+  const statusChartData = (statusData ?? []).map((r) => ({
+    ...r,
+    label: labelStatus((r as any).status),
+  }));
+
+  const typeChartData = (typeData ?? []).map((r) => ({
+    ...r,
+    label: labelType((r as any).type),
+  }));
+
   return (
     <div className="space-y-6">
       <div>
@@ -45,21 +70,24 @@ export default function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={statusData}
+                    data={statusChartData}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
                     outerRadius={100}
                     fill="#8884d8"
                     dataKey="count"
-                    nameKey="status"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    nameKey="label"
+                    label={({ payload, percent }) => `${payload.label} ${(percent * 100).toFixed(0)}%`}
                   >
-                    {statusData.map((_, index) => (
+                    {statusChartData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip
+                    formatter={(value) => [value, "Quantidade"]}
+                    labelFormatter={(_label, payload) => (payload as any)?.[0]?.payload?.label ?? ""}
+                  />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -80,21 +108,24 @@ export default function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={typeData}
+                    data={typeChartData}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
                     outerRadius={100}
                     fill="#8884d8"
                     dataKey="count"
-                    nameKey="type"
+                    nameKey="label"
                     label
                   >
-                    {typeData.map((_, index) => (
+                    {typeChartData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip
+                    formatter={(value) => [value, "Quantidade"]}
+                    labelFormatter={(_label, payload) => (payload as any)?.[0]?.payload?.label ?? ""}
+                  />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
