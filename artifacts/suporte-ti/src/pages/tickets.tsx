@@ -70,6 +70,15 @@ type TicketsListPersistedState = {
   savedAt: number;
 };
 
+function buildDefaultMineOnlyByTab(forRole?: UserRole | null): MineOnlyByTab {
+  const mineDefault = forRole === UserRole.ADMIN || forRole === UserRole.ANALYST ? false : true;
+  return {
+    [TicketType.SOFTWARE]: mineDefault,
+    [TicketType.HARDWARE]: mineDefault,
+    RESOLVED: mineDefault,
+  };
+}
+
 function loadTicketsListState(actorUserId: number | null | undefined): TicketsListPersistedState | null {
   if (typeof window === "undefined") return null;
   if (!actorUserId) return null;
@@ -193,11 +202,7 @@ export default function Tickets() {
   const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
   const [typeTab, setTypeTab] = useState<TicketsMainTab>(initialTypeTab as any);
-  const [mineOnlyByTab, setMineOnlyByTab] = useState<MineOnlyByTab>({
-    [TicketType.SOFTWARE]: true,
-    [TicketType.HARDWARE]: true,
-    RESOLVED: true,
-  });
+  const [mineOnlyByTab, setMineOnlyByTab] = useState<MineOnlyByTab>(() => buildDefaultMineOnlyByTab());
   const [noCoordinatorOnly, setNoCoordinatorOnly] = useState(false);
   const [filters, setFilters] = useState<TicketsFilters>(() => {
     const type = initialTypeTab === "RESOLVED" ? undefined : (initialTypeTab as TicketType);
@@ -347,9 +352,7 @@ export default function Tickets() {
     setSortBy(state.sortBy);
     setSortDir(state.sortDir);
     setMineOnlyByTab(state.mineOnlyByTab ?? {
-      [TicketType.SOFTWARE]: true,
-      [TicketType.HARDWARE]: true,
-      RESOLVED: true,
+      ...buildDefaultMineOnlyByTab(user?.role),
     });
     setLastActiveTicketId(state.lastActiveTicketId);
     pendingScrollYRef.current = state.scrollY;
@@ -382,6 +385,15 @@ export default function Tickets() {
     applyPersisted(state);
     attemptRestoreScroll();
   }, [user, applyPersisted, attemptRestoreScroll]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.ANALYST) return;
+    setMineOnlyByTab((prev) => {
+      if (!prev[TicketType.SOFTWARE] && !prev[TicketType.HARDWARE] && !prev.RESOLVED) return prev;
+      return buildDefaultMineOnlyByTab(user.role);
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;

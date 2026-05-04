@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
+if (set -o pipefail) 2>/dev/null; then
+  set -o pipefail
+fi
 
 BASE_DIR="${1:-/home/whs/suporte-ti}"
 CURRENT="$BASE_DIR/current"

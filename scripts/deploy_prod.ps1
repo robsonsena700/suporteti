@@ -198,9 +198,14 @@ if ($shouldStart -and [string]::IsNullOrWhiteSpace($StartScriptPath)) {
   if (!(Test-Path $localStartScript)) {
     throw "Não encontrei o script local: $localStartScript"
   }
+  $normalizedStartScript = Join-Path $tmp "start_prod.normalized.sh"
+  $startRaw = Get-Content -Raw -Path $localStartScript
+  $startNormalized = ($startRaw -replace "`r`n", "`n" -replace "`r", "`n")
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($normalizedStartScript, $startNormalized, $utf8NoBom)
   $remoteSharedDir = "$RemoteBaseDir/shared"
   Ssh "mkdir -p $remoteSharedDir"
-  ScpToRemote -LocalPath $localStartScript -RemotePath "$remoteSharedDir/start_prod.sh"
+  ScpToRemote -LocalPath $normalizedStartScript -RemotePath "$remoteSharedDir/start_prod.sh"
   Ssh "set -e; sed -i 's/\\r\$//' '$remoteSharedDir/start_prod.sh'; chmod +x '$remoteSharedDir/start_prod.sh'"
 }
 
