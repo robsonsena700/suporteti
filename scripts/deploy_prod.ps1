@@ -193,6 +193,17 @@ $resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) 
 $startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
 $migrateCmd = 'set -e; if [ -d "{0}/lib/db/migrations" ] && [ -f "{0}/scripts/remote/apply_sql_migrations.sh" ]; then sed -i ''s/\r$//'' "{0}/scripts/remote/apply_sql_migrations.sh"; chmod +x "{0}/scripts/remote/apply_sql_migrations.sh"; "{0}/scripts/remote/apply_sql_migrations.sh" "{0}/lib/db/migrations"; fi' -f $releaseDir
 
+if ($shouldStart -and [string]::IsNullOrWhiteSpace($StartScriptPath)) {
+  $localStartScript = Join-Path (Get-Location) "scripts\remote\start_prod.sh"
+  if (!(Test-Path $localStartScript)) {
+    throw "Não encontrei o script local: $localStartScript"
+  }
+  $remoteSharedDir = "$RemoteBaseDir/shared"
+  Ssh "mkdir -p $remoteSharedDir"
+  ScpToRemote -LocalPath $localStartScript -RemotePath "$remoteSharedDir/start_prod.sh"
+  Ssh "set -e; sed -i 's/\\r\$//' '$remoteSharedDir/start_prod.sh'; chmod +x '$remoteSharedDir/start_prod.sh'"
+}
+
 if (!$SkipMigrations) {
   try {
     Ssh $migrateCmd

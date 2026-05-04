@@ -54,6 +54,36 @@ function Exec {
   return $text
 }
 
+function EnsureBranchExists {
+  param([Parameter(Mandatory)][string]$Branch)
+
+  & git show-ref --verify --quiet "refs/heads/$Branch"
+  if ($LASTEXITCODE -eq 0) { return }
+
+  & git show-ref --verify --quiet "refs/remotes/$Remote/$Branch"
+  if ($LASTEXITCODE -eq 0) {
+    ExecGit @("checkout", "-b", $Branch, "$Remote/$Branch") | Out-Null
+    return
+  }
+
+  throw "Branch não encontrada: $Branch (nem local, nem em $Remote)."
+}
+
+function EnsureRemoteBranchExists {
+  param([Parameter(Mandatory)][string]$Branch)
+
+  & git show-ref --verify --quiet "refs/remotes/$Remote/$Branch"
+  if ($LASTEXITCODE -eq 0) { return }
+
+  & git show-ref --verify --quiet "refs/heads/$Branch"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Branch local não encontrada para publicar no remoto: $Branch"
+  }
+
+  Write-Host "Branch remota ausente ($Remote/$Branch). Publicando branch..." -ForegroundColor Yellow
+  ExecGit @("push", "-u", $Remote, $Branch) | Out-Null
+}
+
 function ConfirmOrThrow {
   param([Parameter(Mandatory)][string]$Message)
   if ($Yes) { return }
@@ -102,6 +132,8 @@ if ([string]::IsNullOrWhiteSpace($HeadBranch)) {
 if ([string]::IsNullOrWhiteSpace($HeadBranch)) { throw "Informe -HeadBranch (ex: V1.0.2)" }
 if ($HeadBranch -eq $BaseBranch) { throw "HeadBranch não pode ser igual à BaseBranch ($BaseBranch)." }
 
+EnsureBranchExists -Branch $HeadBranch
+EnsureRemoteBranchExists -Branch $HeadBranch
 ExecGit @("checkout", $HeadBranch) | Out-Null
 ExecGit @("pull", $Remote, $HeadBranch) | Out-Null
 

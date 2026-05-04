@@ -80,6 +80,20 @@ function EnsureBranchExists {
   throw "Branch nao encontrada: $Branch (nem local, nem em $Remote)."
 }
 
+function EnsureRemoteBranchExists {
+  param([Parameter(Mandatory)][string]$Branch)
+  & git show-ref --verify --quiet "refs/remotes/$Remote/$Branch"
+  if ($LASTEXITCODE -eq 0) { return }
+
+  & git show-ref --verify --quiet "refs/heads/$Branch"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Branch local não encontrada para publicar no remoto: $Branch"
+  }
+
+  Write-Host "Branch remota ausente ($Remote/$Branch). Publicando branch..." -ForegroundColor Yellow
+  ExecGit @("push", "-u", $Remote, $Branch) | Out-Null
+}
+
 function EnsureBranch {
   param([Parameter(Mandatory)][string]$Branch)
   $current = (ExecGit @("rev-parse", "--abbrev-ref", "HEAD")).Trim()
@@ -136,6 +150,24 @@ function ResolveCommitRef {
   }
 
   $candidate = $Input.Trim()
+
+  if ($candidate -match "^(?:v|V)?(\d+\.\d+\.\d+)$") {
+    $ver = $Matches[1]
+    $tagCandidates = @("v$ver", "V$ver")
+    foreach ($tag in $tagCandidates) {
+      $old = $ErrorActionPreference
+      $ErrorActionPreference = "Continue"
+      try {
+        & git rev-parse --verify "$tag^{commit}" *> $null
+        $ok = ($LASTEXITCODE -eq 0)
+      } finally {
+        $ErrorActionPreference = $old
+      }
+      if ($ok) {
+        return (ExecGit @("rev-parse", $tag)).Trim()
+      }
+    }
+  }
 
   # If the user typed an existing branch/tag/ref, resolve that exact ref first.
   $old = $ErrorActionPreference
@@ -242,6 +274,7 @@ if ($DevelopBranch -eq $MainBranch) {
 }
 EnsureBranchExists -Branch $MainBranch
 EnsureBranchExists -Branch $DevelopBranch
+EnsureRemoteBranchExists -Branch $DevelopBranch
 
 $inputCommit = Read-Host "Informe o hash/tag/branch do commit que deseja publicar (Enter = HEAD da branch de desenvolvimento ou digite parte da mensagem)"
 $commit = ResolveCommitRef -Input $inputCommit -DefaultRef "$Remote/$DevelopBranch"
