@@ -35,13 +35,6 @@ type UserWithCoordinator = {
   coordinatorId?: number | null;
 };
 
-type ResetInfo = {
-  userName: string;
-  userEmail: string;
-  userPhone: string | null;
-  temporaryPassword: string;
-};
-
 type UserRow = UserWithCoordinator & {
   effectiveRole: UserRole;
   effectiveCoordinatorId: string;
@@ -62,7 +55,6 @@ function AdminSettings() {
   const [selectedRoles, setSelectedRoles] = useState<Record<number, UserRole>>({});
   const [approvalCoordinatorByUser, setApprovalCoordinatorByUser] = useState<Record<number, string>>({});
   const [associationCoordinatorByUser, setAssociationCoordinatorByUser] = useState<Record<number, string>>({});
-  const [resetInfo, setResetInfo] = useState<ResetInfo | null>(null);
   const [openMunicipalities, setOpenMunicipalities] = useState<string[]>([]);
   const [openRoleGroupsByMunicipality, setOpenRoleGroupsByMunicipality] = useState<Record<string, string[]>>({});
   const [openCoordinatorGroupsByMunicipality, setOpenCoordinatorGroupsByMunicipality] = useState<Record<string, string[]>>({});
@@ -85,15 +77,6 @@ function AdminSettings() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ coordinatorId }),
-      });
-    },
-  });
-  const resetPasswordMutation = useMutation({
-    mutationFn: async (userId: number) => {
-      return customFetch<{ message: string; temporaryPassword: string }>(`/api/users/${userId}/reset-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
       });
     },
   });
@@ -222,15 +205,6 @@ function AdminSettings() {
     setOpenCoordinatorGroupsByMunicipality({});
   };
 
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast({ title: "Copiado para a área de transferência" });
-    } catch {
-      toast({ title: "Não foi possível copiar automaticamente", description: "Copie manualmente o texto exibido.", variant: "destructive" });
-    }
-  };
-
   const handleApprove = (userId: number) => {
     const role = selectedRoles[userId] || UserRole.USER;
     const coordinatorId = approvalCoordinatorByUser[userId];
@@ -270,22 +244,6 @@ function AdminSettings() {
         },
       },
     );
-  };
-
-  const handleResetPassword = (user: UserWithCoordinator) => {
-    resetPasswordMutation.mutate(user.id, {
-      onSuccess: (result) => {
-        setResetInfo({
-          userName: user.name,
-          userEmail: user.email,
-          userPhone: user.contactPhone,
-          temporaryPassword: result.temporaryPassword,
-        });
-      },
-      onError: () => {
-        toast({ title: "Erro ao resetar senha", variant: "destructive" });
-      },
-    });
   };
 
   const handleToggleStatus = (userId: number, currentStatus: UserStatus) => {
@@ -403,14 +361,6 @@ function AdminSettings() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleResetPassword(user)}
-                        disabled={resetPasswordMutation.isPending}
-                      >
-                        Redefinir senha
-                      </Button>
                       {user.status !== UserStatus.PENDING && (
                         <Button
                           size="sm"
@@ -437,63 +387,6 @@ function AdminSettings() {
 
   return (
     <div className="space-y-8">
-      {resetInfo ? (
-        <Card className="border-primary/20 shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle>Senha provisória gerada</CardTitle>
-            <Button variant="ghost" onClick={() => setResetInfo(null)}>Fechar</Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-sm text-muted-foreground">
-              Usuário: <span className="text-foreground font-medium">{resetInfo.userName}</span> ({resetInfo.userEmail})
-            </div>
-            <div className="rounded-md border p-3 font-mono text-sm break-all">
-              {resetInfo.temporaryPassword}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => copyToClipboard(resetInfo.temporaryPassword)}>Copiar senha</Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const msg = `Olá ${resetInfo.userName}, sua senha provisória é: ${resetInfo.temporaryPassword}\n\nAo entrar, será solicitado alterar a senha.`;
-                  copyToClipboard(msg);
-                }}
-              >
-                Copiar mensagem pronta
-              </Button>
-              {resetInfo.userPhone ? (
-                <Button
-                  asChild
-                  variant="outline"
-                >
-                  <a
-                    href={`https://wa.me/${resetInfo.userPhone.replace(/\D/g, "")}?text=${encodeURIComponent(
-                      `Olá ${resetInfo.userName}, sua senha provisória é: ${resetInfo.temporaryPassword}\n\nAo entrar, será solicitado alterar a senha.`,
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Enviar WhatsApp
-                  </a>
-                </Button>
-              ) : null}
-              <Button
-                asChild
-                variant="outline"
-              >
-                <a
-                  href={`mailto:${encodeURIComponent(resetInfo.userEmail)}?subject=${encodeURIComponent("Senha provisória de acesso")}&body=${encodeURIComponent(
-                    `Olá ${resetInfo.userName},\n\nSua senha provisória é: ${resetInfo.temporaryPassword}\n\nAo entrar, será solicitado alterar a senha.`,
-                  )}`}
-                >
-                  Enviar e-mail
-                </a>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Card className="border-primary/20 shadow-md">
         <CardHeader>
           <CardTitle>Aprovações Pendentes</CardTitle>

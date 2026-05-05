@@ -593,6 +593,148 @@ router.get("/reports/users/ranking", requireAuth, requireActive, async (req, res
   }));
 });
 
+router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
+  if (!(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR")) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const rawPerfil = Array.isArray(req.params.perfil) ? req.params.perfil[0] : req.params.perfil;
+  const perfil = String(rawPerfil ?? "").trim().toLowerCase();
+  const role =
+    perfil === "analistas" || perfil === "analysts" || perfil === "analyst"
+      ? "ANALYST"
+      : perfil === "coordenadores" || perfil === "coordinators" || perfil === "coordinator"
+      ? "COORDINATOR"
+      : null;
+  if (!role) {
+    res.status(400).json({ error: "Perfil inválido. Use analistas ou coordenadores." });
+    return;
+  }
+
+  const from = parseDateQuery(req.query.from);
+  const to = parseDateQuery(req.query.to);
+  if (req.query.from != null && from == null) {
+    res.status(400).json({ error: "Data inicial inválida" });
+    return;
+  }
+  if (req.query.to != null && to == null) {
+    res.status(400).json({ error: "Data final inválida" });
+    return;
+  }
+  if (from && to && from.getTime() > to.getTime()) {
+    res.status(400).json({ error: "Data final não pode ser anterior à data inicial" });
+    return;
+  }
+
+  const compute = async (range: { from?: Date | null; to?: Date | null }) => {
+    const dateWhere = buildTicketDateRangeWhere({ from: range.from, to: range.to });
+    const statuses = ["RESOLVED", "CLOSED"] as const;
+    const where = dateWhere
+      ? and(eq(usersTable.role, role as any), eq(usersTable.status, "ACTIVE" as any), inArray(ticketsTable.status, [...statuses]), dateWhere)
+      : and(eq(usersTable.role, role as any), eq(usersTable.status, "ACTIVE" as any), inArray(ticketsTable.status, [...statuses]));
+
+    const rows = await db
+      .select({
+        userId: usersTable.id,
+        userName: usersTable.name,
+        userEmail: usersTable.email,
+        totalTickets: count(),
+        avgResolutionHours: sql<number | null>`avg(extract(epoch from (${ticketsTable.updatedAt} - ${ticketsTable.createdAt})) / 3600)`,
+        avgRating: avg(ticketRatingsTable.rating),
+      })
+      .from(ticketsTable)
+      .innerJoin(usersTable, eq(usersTable.id, ticketsTable.assignedToId))
+      .leftJoin(ticketRatingsTable, eq(ticketRatingsTable.ticketId, ticketsTable.id))
+      .where(where)
+      .groupBy(usersTable.id, usersTable.name, usersTable.email);
+
+    const normalized = rows.map((r) => ({
+      userId: r.userId,
+      userName: r.userName ?? "—",
+      userEmail: r.userEmail ?? "—",
+      totalTickets: Number(r.totalTickets),
+      avgResolutionHours: r.avgResolutionHours != null ? Number(r.avgResolutionHours) : null,
+      avgRating: r.avgRating != null ? Number(r.avgRating) : null,
+    }));
+
+    const totals = normalized.map((r) => r.totalTickets);
+    const times = normalized.map((r) => r.avgResolutionHours).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const ratings = normalized.map((r) => r.avgRating).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+
+    const minTotal = totals.length ? Math.min(...totals) : 0;
+    const maxTotal = totals.length ? Math.max(...totals) : 0;
+    const minTime = times.length ? Math.min(...times) : 0;
+    const maxTime = times.length ? Math.max(...times) : 0;
+    const minRating = ratings.length ? Math.min(...ratings) : 0;
+    const maxRating = ratings.length ? Math.max(...ratings) : 0;
+
+    const toNorm = (value: number, min: number, max: number) => (max === min ? 1 : (value - min) / (max - min));
+    const toNormInverse = (value: number, min: number, max: number) => (max === min ? 1 : (max - value) / (max - min));
+
+    const weighted = normalized.map((r) => {
+      const vol = toNorm(r.totalTickets, minTotal, maxTotal);
+      const timeValue = r.avgResolutionHours == null ? maxTime : r.avgResolutionHours;
+      const time = toNormInverse(timeValue, minTime, maxTime);
+      const ratingValue = r.avgRating == null ? minRating : r.avgRating;
+      const sat = toNorm(ratingValue, minRating, maxRating);
+      const score = 0.4 * vol + 0.35 * time + 0.25 * sat;
+      return { ...r, score };
+    });
+
+    weighted.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.totalTickets !== a.totalTickets) return b.totalTickets - a.totalTickets;
+      const at = a.avgResolutionHours ?? Number.POSITIVE_INFINITY;
+      const bt = b.avgResolutionHours ?? Number.POSITIVE_INFINITY;
+      if (at !== bt) return at - bt;
+      const ar = a.avgRating ?? -1;
+      const br = b.avgRating ?? -1;
+      if (ar !== br) return br - ar;
+      return a.userName.localeCompare(b.userName, "pt-BR");
+    });
+
+    return weighted.map((r, idx) => ({
+      position: idx + 1,
+      user: { id: r.userId, name: r.userName, email: r.userEmail, role },
+      totalTickets: r.totalTickets,
+      avgResolutionHours: r.avgResolutionHours,
+      avgRating: r.avgRating,
+      score: Number(r.score.toFixed(6)),
+    }));
+  };
+
+  const current = await compute({ from, to });
+
+  let previous: Array<{ position: number; user: { id: number } }> | null = null;
+  if (from && to) {
+    const durationMs = to.getTime() - from.getTime();
+    const prevTo = new Date(from.getTime() - 1);
+    const prevFrom = new Date(prevTo.getTime() - durationMs);
+    previous = (await compute({ from: prevFrom, to: prevTo })).map((r) => ({ position: r.position, user: { id: r.user.id } }));
+  }
+
+  const prevPos = new Map<number, number>();
+  if (previous) {
+    previous.forEach((r) => prevPos.set(r.user.id, r.position));
+  }
+
+  const items = current.slice(0, 10).map((r) => {
+    const p = prevPos.get(r.user.id);
+    const positionChange = typeof p === "number" ? p - r.position : null;
+    return { ...r, positionChange };
+  });
+
+  res.json({
+    profile: role,
+    from: from ? from.toISOString() : null,
+    to: to ? to.toISOString() : null,
+    generatedAt: new Date().toISOString(),
+    items,
+  });
+});
+
 router.get("/reports/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
   const from = parseDateQuery(req.query.from);

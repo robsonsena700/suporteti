@@ -6,7 +6,6 @@ import {
   useGetTicketsByRegion,
   useGetTicketsByType,
   useGetReportsUsersStats,
-  useGetReportsUsersRanking,
   useGetReportsTickets,
   useGetReportsTicketsTrends,
   getGetReportSummaryQueryKey,
@@ -14,11 +13,11 @@ import {
   getGetTicketsByRegionQueryKey,
   getGetTicketsByTypeQueryKey,
   getGetReportsUsersStatsQueryKey,
-  getGetReportsUsersRankingQueryKey,
   getGetReportsTicketsQueryKey,
   getGetReportsTicketsTrendsQueryKey,
 } from "@workspace/api-client-react";
-import { customFetch } from "@workspace/api-client-react/custom-fetch";
+import { useQuery } from "@tanstack/react-query";
+import { ApiError, customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,11 +25,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
+import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 
 const COLORS = ['#1B3B6E', '#2B5B9E', '#3B7BCE', '#4B9BFE', '#5BBBFE'];
 const REPORTS_DATE_RANGE_KEY = "suporte-ti:reports:date-range:v1";
@@ -40,15 +42,37 @@ type PersistedDateRange = { from: string | null; to: string | null };
 type ReportsTicketStatus = "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
 type ReportsTicketType = "SOFTWARE" | "HARDWARE";
 type ReportsTicketPriority = "LOW" | "MEDIUM" | "HIGH";
+type ProfessionalProfile = "analistas" | "coordenadores";
 type PersistedCardsState = {
   selectedUserId: number | null;
   rankingOrder: "volume" | "resolution" | "satisfaction";
+  professionalProfile?: ProfessionalProfile;
   tableStatus: ReportsTicketStatus | null;
   tableType: ReportsTicketType | null;
   tablePriority: ReportsTicketPriority | null;
   tablePage: number;
   tablePageSize: number;
 };
+
+type ProfessionalRankingItem = {
+  position: number;
+  positionChange: number | null;
+  user: { id: number; name: string; email: string; role: "ANALYST" | "COORDINATOR" };
+  totalTickets: number;
+  avgResolutionHours: number | null;
+  avgRating: number | null;
+  score: number;
+};
+
+type ProfessionalRankingResponse = {
+  profile: "ANALYST" | "COORDINATOR";
+  from: string | null;
+  to: string | null;
+  generatedAt: string;
+  items: ProfessionalRankingItem[];
+};
+
+const PROFESSIONAL_RANKING_CACHE_KEY = "suporte-ti:reports:professional-ranking:v1";
 
 export default function Reports() {
   const { user } = useAuth();
@@ -64,6 +88,7 @@ export default function Reports() {
   const [ticketsExporting, setTicketsExporting] = useState<null | "pdf" | "csv" | "xlsx">(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [rankingOrder, setRankingOrder] = useState<"volume" | "resolution" | "satisfaction">("volume");
+  const [professionalProfile, setProfessionalProfile] = useState<ProfessionalProfile>("analistas");
   const [tableStatus, setTableStatus] = useState<ReportsTicketStatus | null>(null);
   const [tableType, setTableType] = useState<ReportsTicketType | null>(null);
   const [tablePriority, setTablePriority] = useState<ReportsTicketPriority | null>(null);
@@ -106,6 +131,9 @@ export default function Reports() {
         }
         if (parsedCards?.rankingOrder === "volume" || parsedCards?.rankingOrder === "resolution" || parsedCards?.rankingOrder === "satisfaction") {
           setRankingOrder(parsedCards.rankingOrder);
+        }
+        if (parsedCards?.professionalProfile === "analistas" || parsedCards?.professionalProfile === "coordenadores") {
+          setProfessionalProfile(parsedCards.professionalProfile);
         }
         if (parsedCards?.tableStatus === "OPEN" || parsedCards?.tableStatus === "IN_PROGRESS" || parsedCards?.tableStatus === "AWAITING_CUSTOMER" || parsedCards?.tableStatus === "RESOLVED" || parsedCards?.tableStatus === "CLOSED" || parsedCards?.tableStatus === null) {
           setTableStatus(parsedCards.tableStatus);
@@ -219,6 +247,7 @@ export default function Reports() {
       const payload: PersistedCardsState = {
         selectedUserId,
         rankingOrder,
+        professionalProfile,
         tableStatus,
         tableType,
         tablePriority,
@@ -228,7 +257,7 @@ export default function Reports() {
       window.localStorage.setItem(REPORTS_CARDS_STATE_KEY, JSON.stringify(payload));
     } catch {
     }
-  }, [rankingOrder, selectedUserId, tablePage, tablePageSize, tablePriority, tableStatus, tableType]);
+  }, [professionalProfile, rankingOrder, selectedUserId, tablePage, tablePageSize, tablePriority, tableStatus, tableType]);
 
   const labelStatus = useCallback((value: unknown): string => {
     if (value === "OPEN") return "Aberto";
@@ -269,15 +298,66 @@ export default function Reports() {
     }
   });
 
-  const rankingQuery = useGetReportsUsersRanking({ ...reportParams, order: rankingOrder }, {
-    query: {
-      queryKey: getGetReportsUsersRankingQueryKey({ ...reportParams, order: rankingOrder }),
-      refetchInterval: 30_000,
-      refetchIntervalInBackground: true,
-      refetchOnWindowFocus: false,
-      staleTime: 15_000,
+  const professionalRankingQueryKey = useMemo(() => {
+    return ["reports-professional-ranking", professionalProfile, reportParams.from ?? null, reportParams.to ?? null] as const;
+  }, [professionalProfile, reportParams.from, reportParams.to]);
+
+  const professionalRankingCacheKey = useMemo(() => {
+    return `${professionalProfile}::${reportParams.from ?? ""}::${reportParams.to ?? ""}`;
+  }, [professionalProfile, reportParams.from, reportParams.to]);
+
+  const professionalRankingCached = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(PROFESSIONAL_RANKING_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { key: string; savedAt: number; payload: ProfessionalRankingResponse };
+      if (!parsed || typeof parsed !== "object") return null;
+      if (parsed.key !== professionalRankingCacheKey) return null;
+      return parsed.payload;
+    } catch {
+      return null;
     }
+  }, [professionalRankingCacheKey]);
+
+  const professionalRankingQuery = useQuery({
+    queryKey: professionalRankingQueryKey,
+    queryFn: async (): Promise<ProfessionalRankingResponse> => {
+      const params = new URLSearchParams();
+      if (reportParams.from) params.set("from", reportParams.from);
+      if (reportParams.to) params.set("to", reportParams.to);
+      const url = `/api/ranking/${professionalProfile}${params.toString() ? `?${params.toString()}` : ""}`;
+      return customFetch<ProfessionalRankingResponse>(url, { method: "GET", responseType: "json" });
+    },
+    enabled: Boolean(user),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: false,
+    staleTime: 25_000,
+    retry: 1,
   });
+
+  const professionalRankingErrorMessage = useMemo(() => {
+    const err = professionalRankingQuery.error as unknown;
+    if (!professionalRankingQuery.isError) return null;
+    if (err instanceof ApiError) {
+      const detail = (err.data as any)?.error;
+      return detail ? String(detail) : "Dados de ranking indisponíveis no momento.";
+    }
+    return (err as any)?.message || "Dados de ranking indisponíveis no momento.";
+  }, [professionalRankingQuery.error, professionalRankingQuery.isError]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!professionalRankingQuery.data) return;
+    try {
+      window.localStorage.setItem(
+        PROFESSIONAL_RANKING_CACHE_KEY,
+        JSON.stringify({ key: professionalRankingCacheKey, savedAt: Date.now(), payload: professionalRankingQuery.data }),
+      );
+    } catch {
+    }
+  }, [professionalRankingCacheKey, professionalRankingQuery.data]);
 
   useEffect(() => {
     setTablePage(1);
@@ -294,6 +374,60 @@ export default function Reports() {
     if (!usersStatsQuery.data || selectedUserId == null) return null;
     return usersStatsQuery.data.find((r) => r.user.id === selectedUserId) ?? null;
   }, [selectedUserId, usersStatsQuery.data]);
+
+  const usersStatsRanking = useMemo(() => {
+    const rows = usersStatsQuery.data ?? [];
+    if (rows.length === 0) return [];
+
+    const totals = rows.map((r) => r.totalTickets);
+    const times = rows.map((r) => r.avgResolutionHours).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const ratings = rows.map((r) => r.avgRating).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+
+    const minTotal = totals.length ? Math.min(...totals) : 0;
+    const maxTotal = totals.length ? Math.max(...totals) : 0;
+    const minTime = times.length ? Math.min(...times) : 0;
+    const maxTime = times.length ? Math.max(...times) : 0;
+    const minRating = ratings.length ? Math.min(...ratings) : 0;
+    const maxRating = ratings.length ? Math.max(...ratings) : 0;
+
+    const toNorm = (value: number, min: number, max: number) => (max === min ? 1 : (value - min) / (max - min));
+    const toNormInverse = (value: number, min: number, max: number) => (max === min ? 1 : (max - value) / (max - min));
+
+    const ranked = rows.map((r) => {
+      const vol = toNorm(r.totalTickets, minTotal, maxTotal);
+      const timeValue = r.avgResolutionHours == null ? maxTime : r.avgResolutionHours;
+      const time = toNormInverse(timeValue, minTime, maxTime);
+      const ratingValue = r.avgRating == null ? minRating : r.avgRating;
+      const sat = toNorm(ratingValue, minRating, maxRating);
+      const score = 0.4 * vol + 0.35 * time + 0.25 * sat;
+      return { ...r, score };
+    });
+
+    ranked.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.totalTickets !== a.totalTickets) return b.totalTickets - a.totalTickets;
+      const at = a.avgResolutionHours ?? Number.POSITIVE_INFINITY;
+      const bt = b.avgResolutionHours ?? Number.POSITIVE_INFINITY;
+      if (at !== bt) return at - bt;
+      const ar = a.avgRating ?? -1;
+      const br = b.avgRating ?? -1;
+      if (ar !== br) return br - ar;
+      return a.user.name.localeCompare(b.user.name, "pt-BR");
+    });
+
+    return ranked.slice(0, 10).map((r, idx) => ({
+      position: idx + 1,
+      user: r.user,
+      totalTickets: r.totalTickets,
+      avgResolutionHours: r.avgResolutionHours,
+      avgRating: r.avgRating,
+      score: Number(r.score.toFixed(6)),
+      openTickets: r.openTickets,
+      inProgressTickets: r.inProgressTickets,
+      resolvedTickets: r.resolvedTickets,
+      closedTickets: r.closedTickets,
+    }));
+  }, [usersStatsQuery.data]);
 
   const ticketsParams = useMemo(() => {
     return {
@@ -628,6 +762,10 @@ export default function Reports() {
     setTicketsExporting(null);
   }, [buildExportTimestamp, createPrintTarget, downloadBlob, readApiError, reportParams.from, reportParams.to, tablePriority, tableStatus, tableType, user]);
 
+  const professionalRankingData = professionalRankingQuery.data ?? professionalRankingCached;
+  const isProfessionalRankingCached = !professionalRankingQuery.data && Boolean(professionalRankingCached);
+  const isAdminViewer = user?.role === "ADMIN";
+
   return (
     <div className="space-y-6">
       <div>
@@ -928,56 +1066,174 @@ export default function Reports() {
             </div>
           </CardHeader>
           <CardContent className="flex-1">
-            {usersStatsQuery.isLoading ? (
-              <div className="flex items-center justify-center py-10 text-muted-foreground">Carregando...</div>
+            {usersStatsQuery.isFetching && !usersStatsQuery.isLoading ? (
+              <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                Atualizando...
+              </div>
+            ) : null}
+
+            {usersStatsQuery.isLoading && usersStatsRanking.length === 0 ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <div key={idx} className="rounded-lg border p-3 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <Skeleton className="h-6 w-14" />
+                        <Skeleton className="h-6 w-10" />
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-3 w-2/3" />
+                        <div className="grid grid-cols-3 gap-2 pt-2">
+                          <Skeleton className="h-10 w-full" />
+                          <Skeleton className="h-10 w-full" />
+                          <Skeleton className="h-10 w-full" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : usersStatsQuery.isError ? (
               <div className="flex items-center justify-center py-10 text-destructive">Erro ao carregar estatísticas.</div>
-            ) : !selectedUserStats ? (
+            ) : usersStatsRanking.length === 0 ? (
               <div className="flex items-center justify-center py-10 text-muted-foreground">Sem dados suficientes.</div>
             ) : (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="rounded-lg border p-3">
-                    <div className="text-sm text-muted-foreground">Abertos</div>
-                    <div className="text-2xl font-bold">{selectedUserStats.openTickets}</div>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="text-sm text-muted-foreground">Em andamento</div>
-                    <div className="text-2xl font-bold">{selectedUserStats.inProgressTickets}</div>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="text-sm text-muted-foreground">Fechados</div>
-                    <div className="text-2xl font-bold">{selectedUserStats.closedTickets}</div>
-                  </div>
-                </div>
-
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border p-3">
-                    <div className="text-sm text-muted-foreground">Tempo médio de resolução</div>
-                    <div className="text-xl font-semibold">
-                      {selectedUserStats.avgResolutionHours == null ? "—" : `${selectedUserStats.avgResolutionHours.toFixed(1)}h`}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="text-sm text-muted-foreground">Satisfação média</div>
-                    <div className="text-xl font-semibold">
-                      {selectedUserStats.avgRating == null ? "—" : `${selectedUserStats.avgRating.toFixed(2)} / 5`}
-                    </div>
-                  </div>
+                  {usersStatsRanking.map((row) => {
+                    const pos = row.position;
+                    const posBadgeClass =
+                      pos === 1
+                        ? "border-yellow-300 bg-yellow-50 text-yellow-800"
+                        : pos === 2
+                        ? "border-slate-300 bg-slate-50 text-slate-800"
+                        : pos === 3
+                        ? "border-amber-300 bg-amber-50 text-amber-800"
+                        : "border-muted bg-background text-foreground";
+
+                    const score = row.score ?? 0;
+                    const perfClass =
+                      score >= 0.75
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : score >= 0.5
+                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                        : "border-red-200 bg-red-50 text-red-700";
+
+                    const isSelected = selectedUserId === row.user.id;
+
+                    return (
+                      <UiTooltip key={row.user.id}>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedUserId(row.user.id)}
+                            className={cn(
+                              "w-full text-left rounded-lg border p-3 shadow-sm transition-colors hover:bg-muted/30",
+                              isSelected ? "ring-2 ring-primary/40" : "",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <Badge variant="outline" className={cn("min-w-[3rem] justify-center", posBadgeClass)}>
+                                {pos}º
+                              </Badge>
+                              <Badge variant="outline" className={cn(perfClass)}>
+                                {Math.round(score * 100)}%
+                              </Badge>
+                            </div>
+
+                            <div className="mt-2">
+                              <div className="font-medium leading-tight">{row.user.name}</div>
+                              <div className="text-xs text-muted-foreground truncate">{row.user.email}</div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-3 gap-2">
+                              <div className="rounded-md border p-2">
+                                <div className="text-[11px] text-muted-foreground">Atividades</div>
+                                <div className="text-sm font-semibold">{row.totalTickets}</div>
+                              </div>
+                              <div className="rounded-md border p-2">
+                                <div className="text-[11px] text-muted-foreground">Resolução</div>
+                                <div className="text-sm font-semibold">
+                                  {row.avgResolutionHours == null ? "—" : `${row.avgResolutionHours.toFixed(1)}h`}
+                                </div>
+                              </div>
+                              <div className="rounded-md border p-2">
+                                <div className="text-[11px] text-muted-foreground">Satisfação</div>
+                                <div className="text-sm font-semibold">
+                                  {row.avgRating == null ? "—" : row.avgRating.toFixed(2)}
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[320px]">
+                          <div className="space-y-1">
+                            <div className="font-medium">{row.user.name}</div>
+                            <div className="text-xs text-muted-foreground">{row.user.email}</div>
+                            <div className="pt-2 text-xs">
+                              <div>Atividades: {row.totalTickets}</div>
+                              <div>Tempo médio: {row.avgResolutionHours == null ? "—" : `${row.avgResolutionHours.toFixed(2)}h`}</div>
+                              <div>Satisfação: {row.avgRating == null ? "—" : `${row.avgRating.toFixed(2)} / 5`}</div>
+                              <div className="pt-1">
+                                Abertos: {row.openTickets} | Em andamento: {row.inProgressTickets} | Resolvidos: {row.resolvedTickets} | Cancelados: {row.closedTickets}
+                              </div>
+                              <div className="pt-1">Score: {Math.round(score * 100)}%</div>
+                            </div>
+                          </div>
+                        </TooltipContent>
+                      </UiTooltip>
+                    );
+                  })}
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
-                    Alta: {selectedUserStats.priorityOpen.high}
-                  </Badge>
-                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
-                    Média: {selectedUserStats.priorityOpen.medium}
-                  </Badge>
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
-                    Baixa: {selectedUserStats.priorityOpen.low}
-                  </Badge>
-                  <Badge variant="secondary">Total: {selectedUserStats.totalTickets}</Badge>
-                </div>
+                {selectedUserStats ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="rounded-lg border p-3">
+                        <div className="text-sm text-muted-foreground">Abertos</div>
+                        <div className="text-2xl font-bold">{selectedUserStats.openTickets}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-sm text-muted-foreground">Em andamento</div>
+                        <div className="text-2xl font-bold">{selectedUserStats.inProgressTickets}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-sm text-muted-foreground">Fechados</div>
+                        <div className="text-2xl font-bold">{selectedUserStats.closedTickets}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border p-3">
+                        <div className="text-sm text-muted-foreground">Tempo médio de resolução</div>
+                        <div className="text-xl font-semibold">
+                          {selectedUserStats.avgResolutionHours == null ? "—" : `${selectedUserStats.avgResolutionHours.toFixed(1)}h`}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-sm text-muted-foreground">Satisfação média</div>
+                        <div className="text-xl font-semibold">
+                          {selectedUserStats.avgRating == null ? "—" : `${selectedUserStats.avgRating.toFixed(2)} / 5`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
+                        Alta: {selectedUserStats.priorityOpen.high}
+                      </Badge>
+                      <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+                        Média: {selectedUserStats.priorityOpen.medium}
+                      </Badge>
+                      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                        Baixa: {selectedUserStats.priorityOpen.low}
+                      </Badge>
+                      <Badge variant="secondary">Total: {selectedUserStats.totalTickets}</Badge>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </CardContent>
@@ -985,67 +1241,173 @@ export default function Reports() {
 
         <Card className="flex flex-col">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
-            <CardTitle>Ranking de Usuários</CardTitle>
+            <CardTitle>
+              Ranking de chamados
+            </CardTitle>
             <div className="w-full max-w-[260px]">
-              <Select value={rankingOrder} onValueChange={(v) => setRankingOrder(v as any)}>
+              <Select value={professionalProfile} onValueChange={(v) => setProfessionalProfile(v as ProfessionalProfile)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="volume">Volume de chamados</SelectItem>
-                  <SelectItem value="resolution">Menor tempo de resolução</SelectItem>
-                  <SelectItem value="satisfaction">Maior satisfação</SelectItem>
+                  <SelectItem value="analistas">Analistas</SelectItem>
+                  <SelectItem value="coordenadores">Coordenadores</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </CardHeader>
           <CardContent className="flex-1">
-            {rankingQuery.isLoading ? (
-              <div className="flex items-center justify-center py-10 text-muted-foreground">Carregando...</div>
-            ) : rankingQuery.isError ? (
-              <div className="flex items-center justify-center py-10 text-destructive">Erro ao carregar ranking.</div>
-            ) : (rankingQuery.data?.length ?? 0) === 0 ? (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary">
+                  {professionalProfile === "analistas" ? "Perfil: Analistas" : "Perfil: Coordenadores"}
+                </Badge>
+                {isAdminViewer ? (
+                  <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                    Administrador
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Visualização padrão
+                  </Badge>
+                )}
+              </div>
+              {professionalRankingQuery.isFetching && !professionalRankingQuery.isLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                  Atualizando...
+                </div>
+              ) : null}
+            </div>
+
+            {isProfessionalRankingCached ? (
+              <div className="mb-3 text-xs text-muted-foreground">
+                Exibindo dados em cache (último carregamento). Atualize o período ou aguarde sincronização.
+              </div>
+            ) : null}
+
+            {professionalRankingQuery.isLoading && !professionalRankingData ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {Array.from({ length: 10 }).map((_, idx) => (
+                  <div key={idx} className="rounded-lg border p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <Skeleton className="h-6 w-14" />
+                      <Skeleton className="h-6 w-10" />
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-2/3" />
+                      <div className="grid grid-cols-3 gap-2 pt-2">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : professionalRankingErrorMessage && !professionalRankingData ? (
+              <div className="flex items-center justify-center py-10 text-destructive">{professionalRankingErrorMessage}</div>
+            ) : (professionalRankingData?.items?.length ?? 0) === 0 ? (
               <div className="flex items-center justify-center py-10 text-muted-foreground">Sem dados suficientes.</div>
             ) : (
-              <div className="space-y-3">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[56px]">#</TableHead>
-                      <TableHead>Usuário</TableHead>
-                      <TableHead className="text-right">Chamados</TableHead>
-                      <TableHead className="text-right">Resolução (h)</TableHead>
-                      <TableHead className="text-right">Satisfação</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(rankingQuery.data ?? []).slice(0, 10).map((row, idx) => (
-                      <TableRow key={row.user.id}>
-                        <TableCell className="font-medium">{idx + 1}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span className="font-medium">{row.user.name}</span>
-                            <span className="text-xs text-muted-foreground">{row.user.email}</span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {(row.badges ?? []).slice(0, 3).map((b: string) => (
-                              <Badge key={b} variant="outline" className="text-xs">
-                                {b === "TOP_VOLUME" ? "Top volume" :
-                                  b === "MAIS_RAPIDO" ? "Mais rápido" :
-                                  b === "MELHOR_SATISFACAO" ? "Melhor satisfação" :
-                                  b === "ALTA_SATISFACAO" ? "Alta satisfação" :
-                                  b === "RESOLUCAO_RAPIDA" ? "Resolução rápida" : b}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {(professionalRankingData?.items ?? []).slice(0, 10).map((row) => {
+                  const pos = row.position;
+                  const posBadgeClass =
+                    pos === 1
+                      ? "border-yellow-300 bg-yellow-50 text-yellow-800"
+                      : pos === 2
+                      ? "border-slate-300 bg-slate-50 text-slate-800"
+                      : pos === 3
+                      ? "border-amber-300 bg-amber-50 text-amber-800"
+                      : "border-muted bg-background text-foreground";
+
+                  const score = row.score ?? 0;
+                  const perfClass =
+                    score >= 0.75
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : score >= 0.5
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : "border-red-200 bg-red-50 text-red-700";
+
+                  const delta = row.positionChange;
+                  const deltaNode =
+                    delta == null ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : delta > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
+                        <ArrowUp className="h-3.5 w-3.5" />
+                        {delta}
+                      </span>
+                    ) : delta < 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-red-700">
+                        <ArrowDown className="h-3.5 w-3.5" />
+                        {Math.abs(delta)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <Minus className="h-3.5 w-3.5" />
+                        0
+                      </span>
+                    );
+
+                  return (
+                    <UiTooltip key={row.user.id}>
+                      <TooltipTrigger asChild>
+                        <div className="rounded-lg border p-3 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className={cn("min-w-[3rem] justify-center", posBadgeClass)}>
+                                {pos}º
                               </Badge>
-                            ))}
+                              {deltaNode}
+                            </div>
+                            <Badge variant="outline" className={cn(perfClass)}>
+                              {Math.round(score * 100)}%
+                            </Badge>
                           </div>
-                        </TableCell>
-                        <TableCell className="text-right">{row.totalTickets}</TableCell>
-                        <TableCell className="text-right">{row.avgResolutionHours == null ? "—" : row.avgResolutionHours.toFixed(1)}</TableCell>
-                        <TableCell className="text-right">{row.avgRating == null ? "—" : row.avgRating.toFixed(2)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+
+                          <div className="mt-2">
+                            <div className="font-medium leading-tight">{row.user.name}</div>
+                            <div className="text-xs text-muted-foreground truncate">{row.user.email}</div>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-3 gap-2">
+                            <div className="rounded-md border p-2">
+                              <div className="text-[11px] text-muted-foreground">Volume</div>
+                              <div className="text-sm font-semibold">{row.totalTickets}</div>
+                            </div>
+                            <div className="rounded-md border p-2">
+                              <div className="text-[11px] text-muted-foreground">Resolução</div>
+                              <div className="text-sm font-semibold">
+                                {row.avgResolutionHours == null ? "—" : `${row.avgResolutionHours.toFixed(1)}h`}
+                              </div>
+                            </div>
+                            <div className="rounded-md border p-2">
+                              <div className="text-[11px] text-muted-foreground">Satisfação</div>
+                              <div className="text-sm font-semibold">
+                                {row.avgRating == null ? "—" : row.avgRating.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[320px]">
+                        <div className="space-y-1">
+                          <div className="font-medium">{row.user.name}</div>
+                          <div className="text-xs text-muted-foreground">{row.user.email}</div>
+                          <div className="pt-2 text-xs">
+                            <div>Volume (40%): {row.totalTickets}</div>
+                            <div>Resolução (35%): {row.avgResolutionHours == null ? "—" : `${row.avgResolutionHours.toFixed(2)}h`}</div>
+                            <div>Satisfação (25%): {row.avgRating == null ? "—" : `${row.avgRating.toFixed(2)} / 5`}</div>
+                            <div className="pt-1">Score ponderado: {Math.round(score * 100)}%</div>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </UiTooltip>
+                  );
+                })}
               </div>
             )}
           </CardContent>

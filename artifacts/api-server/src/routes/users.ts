@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { randomBytes } from "node:crypto";
 import multer from "multer";
 import { db, usersTable, userCoordinatorsTable, ticketsTable } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
@@ -51,16 +50,6 @@ function parseSingleCoordinatorId(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function generateTemporaryPassword(length = 12): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*";
-  const bytes = randomBytes(length);
-  let password = "";
-  for (let i = 0; i < length; i += 1) {
-    password += chars[bytes[i] % chars.length];
-  }
-  return password;
 }
 
 router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
@@ -414,57 +403,6 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
   }
 
   res.json(user);
-});
-
-router.post("/users/:id/reset-password", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (req, res): Promise<void> => {
-  const currentUser = req.user!;
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
-
-  if (isNaN(id)) {
-    res.status(400).json({ error: "ID inválido" });
-    return;
-  }
-
-  const providedPassword = (req.body as { temporaryPassword?: unknown } | undefined)?.temporaryPassword;
-  if (providedPassword != null && (typeof providedPassword !== "string" || providedPassword.length < 8)) {
-    res.status(400).json({ error: "A senha provisória deve possuir no mínimo 8 caracteres" });
-    return;
-  }
-  const temporaryPassword = typeof providedPassword === "string"
-    ? providedPassword
-    : generateTemporaryPassword();
-
-  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
-  if (!targetUser) {
-    res.status(404).json({ error: "Usuário não encontrado" });
-    return;
-  }
-
-  if (currentUser.role === "COORDINATOR" && currentUser.userId !== id) {
-    const [link] = await db
-      .select()
-      .from(userCoordinatorsTable)
-      .where(and(
-        eq(userCoordinatorsTable.coordinatorId, currentUser.userId),
-        eq(userCoordinatorsTable.userId, id),
-      ));
-
-    if (!link) {
-      res.status(403).json({ error: "Acesso negado" });
-      return;
-    }
-  }
-
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
-  await db.update(usersTable)
-    .set({ passwordHash, mustChangePassword: true })
-    .where(eq(usersTable.id, id));
-
-  res.json({
-    message: "Senha provisória atualizada com sucesso",
-    temporaryPassword,
-  });
 });
 
 router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
