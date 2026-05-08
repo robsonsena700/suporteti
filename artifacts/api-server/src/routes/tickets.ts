@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, userCoordinatorsTable, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable, ticketRatingsTable } from "@workspace/db";
+import { db, userCoordinatorsTable, gestorCoordinatorsTable, usersTable, ticketsTable, ticketAttachmentsTable, ticketAuditLogsTable, messagesTable, ticketCollaboratorsTable, ticketRatingsTable } from "@workspace/db";
 import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody, CreateRatingSchema } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
@@ -164,7 +164,8 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   if (parsedMunicipality) dbWhereClauses.push(eq(ticketsTable.municipality, parsedMunicipality));
   if (parsedNoCoordinator === true) {
     dbWhereClauses.push(
-      sql`not exists(select 1 from public.user_coordinators uc where uc.user_id = ${ticketsTable.createdById})`,
+      sql`not exists(select 1 from public.user_coordinators uc where uc.user_id = ${ticketsTable.createdById})
+        and not exists(select 1 from public.gestor_coordinators gc where gc.gestor_id = ${ticketsTable.createdById})`,
     );
   }
 
@@ -182,15 +183,20 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     orderBy: [desc(ticketsTable.createdAt)],
   });
   const ownerIds = Array.from(new Set(allTickets.map(t => t.createdById)));
-  const ownersWithCoordinator = ownerIds.length > 0
-    ? new Set(
-      (await db
-        .select({ userId: userCoordinatorsTable.userId })
-        .from(userCoordinatorsTable)
-        .where(inArray(userCoordinatorsTable.userId, ownerIds)))
-        .map((r) => r.userId),
-    )
-    : new Set<number>();
+  const ownersWithCoordinator = new Set<number>();
+  if (ownerIds.length > 0) {
+    const userOwners = await db
+      .select({ userId: userCoordinatorsTable.userId })
+      .from(userCoordinatorsTable)
+      .where(inArray(userCoordinatorsTable.userId, ownerIds));
+    userOwners.forEach((r) => ownersWithCoordinator.add(r.userId));
+
+    const gestorOwners = await db
+      .select({ gestorId: gestorCoordinatorsTable.gestorId })
+      .from(gestorCoordinatorsTable)
+      .where(inArray(gestorCoordinatorsTable.gestorId, ownerIds));
+    gestorOwners.forEach((r) => ownersWithCoordinator.add(r.gestorId));
+  }
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
@@ -323,7 +329,8 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   if (parsedMunicipality) dbWhereClauses.push(eq(ticketsTable.municipality, parsedMunicipality));
   if (parsedNoCoordinator === true) {
     dbWhereClauses.push(
-      sql`not exists(select 1 from public.user_coordinators uc where uc.user_id = ${ticketsTable.createdById})`,
+      sql`not exists(select 1 from public.user_coordinators uc where uc.user_id = ${ticketsTable.createdById})
+        and not exists(select 1 from public.gestor_coordinators gc where gc.gestor_id = ${ticketsTable.createdById})`,
     );
   }
 
@@ -449,7 +456,11 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
     .select({ userId: userCoordinatorsTable.userId })
     .from(userCoordinatorsTable)
     .where(eq(userCoordinatorsTable.userId, ticket.createdById));
-  const ownerHasCoordinator = Boolean(coordLink?.userId);
+  const [gestorLink] = await db
+    .select({ gestorId: gestorCoordinatorsTable.gestorId })
+    .from(gestorCoordinatorsTable)
+    .where(eq(gestorCoordinatorsTable.gestorId, ticket.createdById));
+  const ownerHasCoordinator = Boolean(coordLink?.userId || gestorLink?.gestorId);
 
   res.json({
     id: ticket.id,

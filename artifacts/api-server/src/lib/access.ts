@@ -30,6 +30,14 @@ export async function getManagedUserIdsByCoordinator(coordinatorId: number): Pro
   return links.map(link => link.userId);
 }
 
+export async function getGestorIdsForCoordinator(coordinatorId: number): Promise<number[]> {
+  const links = await db
+    .select({ gestorId: gestorCoordinatorsTable.gestorId })
+    .from(gestorCoordinatorsTable)
+    .where(eq(gestorCoordinatorsTable.coordinatorId, coordinatorId));
+  return links.map(link => link.gestorId);
+}
+
 export async function getMunicipalityUserIdsForCoordinator(coordinatorId: number): Promise<number[]> {
   const [coordinator] = await db
     .select({ uf: usersTable.uf, municipality: usersTable.municipality })
@@ -56,7 +64,8 @@ export async function getMunicipalityUserIdsForCoordinator(coordinatorId: number
 export async function getVisibleOwnerIdsForCoordinator(coordinatorId: number): Promise<number[]> {
   const managedUserIds = await getManagedUserIdsByCoordinator(coordinatorId);
   const municipalityUserIds = await getMunicipalityUserIdsForCoordinator(coordinatorId);
-  return Array.from(new Set([coordinatorId, ...managedUserIds, ...municipalityUserIds]));
+  const gestorIds = await getGestorIdsForCoordinator(coordinatorId);
+  return Array.from(new Set([coordinatorId, ...gestorIds, ...managedUserIds, ...municipalityUserIds]));
 }
 
 export async function getCoordinatorIdForGestor(gestorId: number): Promise<number | null> {
@@ -114,6 +123,19 @@ async function canGestorViewTicket(user: JwtPayload, ticket: TicketRow): Promise
 }
 
 export async function getResponsibleCoordinatorIdForUser(userId: number): Promise<number | null> {
+  const [owner] = await db
+    .select({ role: usersTable.role })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+  const role = String(owner?.role ?? "").toUpperCase();
+
+  if (role === "GESTOR") {
+    const [link] = await db
+      .select({ coordinatorId: gestorCoordinatorsTable.coordinatorId })
+      .from(gestorCoordinatorsTable)
+      .where(eq(gestorCoordinatorsTable.gestorId, userId));
+    return link?.coordinatorId ?? null;
+  }
   const [link] = await db
     .select({ coordinatorId: userCoordinatorsTable.coordinatorId })
     .from(userCoordinatorsTable)
@@ -122,6 +144,19 @@ export async function getResponsibleCoordinatorIdForUser(userId: number): Promis
 }
 
 async function ownerHasNoCoordinator(userId: number): Promise<boolean> {
+  const [owner] = await db
+    .select({ role: usersTable.role })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+  const role = String(owner?.role ?? "").toUpperCase();
+
+  if (role === "GESTOR") {
+    const [link] = await db
+      .select({ coordinatorId: gestorCoordinatorsTable.coordinatorId })
+      .from(gestorCoordinatorsTable)
+      .where(eq(gestorCoordinatorsTable.gestorId, userId));
+    return !link?.coordinatorId;
+  }
   const [link] = await db
     .select({ coordinatorId: userCoordinatorsTable.coordinatorId })
     .from(userCoordinatorsTable)

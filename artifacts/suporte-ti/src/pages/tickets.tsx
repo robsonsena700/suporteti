@@ -751,6 +751,13 @@ export default function Tickets() {
                         <p className="text-xs text-muted-foreground mt-1 truncate">
                           {ticket.createdBy?.name ?? "—"} • {ticket.uf} - {ticket.municipality}
                         </p>
+                        {ticket.createdBy?.role === UserRole.GESTOR ? (
+                          <div className="mt-1">
+                            <span className="rounded-full border border-indigo-300/50 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                              Chamado do Gestor associado
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
                       <div className="flex flex-col gap-2 items-end">
                         <StatusBadge status={ticket.status} />

@@ -43,7 +43,10 @@
 - Visualização:
   - Criador do chamado e responsável atual podem visualizar.
   - Admin e Analista podem visualizar chamados mesmo sem atribuição.
-  - Coordenador pode visualizar chamados dos usuários vinculados ao seu perfil (e os atribuídos a ele).
+  - Coordenador pode visualizar chamados:
+    - dos usuários vinculados ao seu perfil,
+    - dos gestores vinculados ao seu perfil (chamados abertos por Gestores associados),
+    - e os atribuídos a ele.
   - Gestor pode visualizar:
     - chamados do Coordenador principal ao qual está vinculado (inclui os usuários subordinados do Coordenador),
     - chamados de usuários adicionais explicitamente adicionados na configuração do Gestor.

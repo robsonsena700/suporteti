@@ -91,6 +91,7 @@ async function createTicket(userToken, title) {
     body: {
       title,
       description: `Teste integração ${title}`,
+      establishment: "UBS Centro",
       type: "SOFTWARE",
       priority: "MEDIUM",
     },
@@ -108,32 +109,46 @@ async function main() {
   const coordB = await registerUser({ name: `CoordB ${suffix}`, email: `coordb.${suffix}@mail.com`, password });
   const userA = await registerUser({ name: `UserA ${suffix}`, email: `usera.${suffix}@mail.com`, password });
   const userB = await registerUser({ name: `UserB ${suffix}`, email: `userb.${suffix}@mail.com`, password });
+  const gestorA = await registerUser({ name: `GestorA ${suffix}`, email: `gestora.${suffix}@mail.com`, password });
+  const gestorB = await registerUser({ name: `GestorB ${suffix}`, email: `gestorb.${suffix}@mail.com`, password });
 
   await approveUser(adminToken, coordA.id, "COORDINATOR");
   await approveUser(adminToken, coordB.id, "COORDINATOR");
   await approveUser(adminToken, userA.id, "USER", coordA.id);
   await approveUser(adminToken, userB.id, "USER", coordB.id);
+  await approveUser(adminToken, gestorA.id, "GESTOR", coordA.id);
+  await approveUser(adminToken, gestorB.id, "GESTOR", coordB.id);
 
   const userAToken = await login(userA.email, password);
   const userBToken = await login(userB.email, password);
   const coordAToken = await login(coordA.email, password);
   const coordBToken = await login(coordB.email, password);
+  const gestorAToken = await login(gestorA.email, password);
+  const gestorBToken = await login(gestorB.email, password);
 
   const ticketA = await createTicket(userAToken, `TicketA-${suffix}`);
   const ticketB = await createTicket(userBToken, `TicketB-${suffix}`);
+  const ticketGestorA = await createTicket(gestorAToken, `TicketGestorA-${suffix}`);
+  const ticketGestorB = await createTicket(gestorBToken, `TicketGestorB-${suffix}`);
 
   const listA = await api("/tickets", { token: coordAToken });
   assert(listA.status === 200, "Coordenador A não conseguiu listar tickets");
   assert(listA.data.some(t => t.id === ticketA), "Coordenador A não visualiza ticket associado");
+  assert(listA.data.some(t => t.id === ticketGestorA), "Coordenador A não visualiza ticket do Gestor associado");
   assert(!listA.data.some(t => t.id === ticketB), "Coordenador A visualizou ticket de outro coordenador");
+  assert(!listA.data.some(t => t.id === ticketGestorB), "Coordenador A visualizou ticket de Gestor não associado");
 
   const listB = await api("/tickets", { token: coordBToken });
   assert(listB.status === 200, "Coordenador B não conseguiu listar tickets");
   assert(listB.data.some(t => t.id === ticketB), "Coordenador B não visualiza ticket associado");
+  assert(listB.data.some(t => t.id === ticketGestorB), "Coordenador B não visualiza ticket do Gestor associado");
   assert(!listB.data.some(t => t.id === ticketA), "Coordenador B visualizou ticket de outro coordenador");
+  assert(!listB.data.some(t => t.id === ticketGestorA), "Coordenador B visualizou ticket de Gestor não associado");
 
   const forbiddenRead = await api(`/tickets/${ticketB}`, { token: coordAToken });
   assert(forbiddenRead.status === 403, "Coordenador A conseguiu ler ticket do coordenador B");
+  const allowedReadGestor = await api(`/tickets/${ticketGestorA}`, { token: coordAToken });
+  assert(allowedReadGestor.status === 200, "Coordenador A não conseguiu ler ticket do Gestor associado");
 
   const forbiddenUpdate = await api(`/tickets/${ticketB}`, {
     method: "PATCH",
@@ -141,6 +156,12 @@ async function main() {
     body: { priority: "HIGH" },
   });
   assert(forbiddenUpdate.status === 403, "Coordenador A conseguiu editar ticket do coordenador B");
+  const allowedUpdateGestor = await api(`/tickets/${ticketGestorA}`, {
+    method: "PATCH",
+    token: coordAToken,
+    body: { priority: "HIGH" },
+  });
+  assert(allowedUpdateGestor.status === 200, "Coordenador A não conseguiu editar ticket do Gestor associado");
 
   const forbiddenMessage = await api(`/tickets/${ticketB}/messages`, {
     method: "POST",

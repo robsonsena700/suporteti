@@ -1428,6 +1428,11 @@ export default function TicketDetail() {
                 Sem coordenador
               </Badge>
             ) : null}
+            {ticket.createdBy?.role === UserRole.GESTOR ? (
+              <Badge variant="outline" className="border-indigo-300/60 text-indigo-700 bg-indigo-50">
+                Chamado do Gestor associado
+              </Badge>
+            ) : null}
           </div>
           <p className="text-muted-foreground text-sm mt-1">
             Aberto por {ticket.createdBy.name} em {format(new Date(ticket.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
