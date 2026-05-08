@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## v1.0.24 (2026-05-08)
+- Perfil Coordenador - Visualizar chamados do perfil Gestor (11f6dae)
+- Relatório - Ranking de chamados para o perfil Gestor (c16b9ca)
+- Perfil Gestor - Permissões de abertura de chamados e interações. (2132b13)
+- Upload - Criação e persistência do diretório no servidor ~/suporte-ti/shared/backups/uploads/ (3f7f5aa)
+- Chamado - Anexo, emoji e formatação de texto. (2c89d0e)
+- Perfil - Gestor (1ee81c5)
+- Relatório - Ranking (fe7b564)
+- chore(release): v1.0.23 (22f52e1)
+
 ## v1.0.22 (2026-05-04)
 - Publicação (0306e63)
 - chore(release): v1.0.21 (8735d5c)
@@ -96,6 +106,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
