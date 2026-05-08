@@ -147,6 +147,22 @@ async function createMessage(token, ticketId, message) {
   });
 }
 
+async function assignTicket(token, ticketId, assignedToId, reason) {
+  return jsonFetch(`${API_BASE}/api/tickets/${ticketId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ assignedToId, reason }),
+  });
+}
+
+async function addCollaborators(token, ticketId, userIds) {
+  return jsonFetch(`${API_BASE}/api/tickets/${ticketId}/collaborators`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ userIds }),
+  });
+}
+
 async function createTicketAs(token, title) {
   return jsonFetch(`${API_BASE}/api/tickets`, {
     method: "POST",
@@ -216,6 +232,7 @@ function assertTicketNotInList(resp, ticketId, label) {
 
   const ticket1 = await createTicket(user1Token, `vis-u1-${Date.now()}`);
   const ticket2 = await createTicket(user2Token, `vis-u2-${Date.now()}`);
+  const ticketGestor = await createTicket(gestorToken, `vis-gestor-${Date.now()}`);
 
   const extraCount = Number(process.env.EXTRA_TICKETS || "150");
   for (let i = 0; i < extraCount; i++) {
@@ -278,17 +295,24 @@ function assertTicketNotInList(resp, ticketId, label) {
     const gList = await listTickets(gestorToken);
     assertTicketInList(gList, ticket1, "GESTOR list coordinator scope");
     assertTicketInList(gList, ticket2, "GESTOR list allowlist");
+    assertTicketInList(gList, ticketGestor, "GESTOR list own ticket");
 
     const gDeniedChat = await chatParticipants(gestorToken);
     if (gDeniedChat.status !== 403) fail("GESTOR não deve acessar endpoints de chat (esperado 403).", gDeniedChat);
     report.checks.push({ rule: "GESTOR chat forbidden", ok: true });
 
     const gCreateTicket = await createTicketAs(gestorToken, `gestor-create-${Date.now()}`);
-    if (gCreateTicket.status !== 403) fail("GESTOR não deve criar chamados (esperado 403).", gCreateTicket);
+    if (!gCreateTicket.ok || !gCreateTicket.data?.id) fail("GESTOR deveria criar chamados (como Coordenador).", gCreateTicket);
+
+    const gAssignDenied = await assignTicket(gestorToken, ticket1, gestorId, "self-assign (teste gestor)");
+    if (gAssignDenied.status !== 400) fail("GESTOR não deveria poder ser atribuído como responsável (esperado 400).", gAssignDenied);
+
+    const gAddCollab = await addCollaborators(gestorToken, ticket1, [gestorId]);
+    if (!gAddCollab.ok) fail("GESTOR deveria conseguir adicionar-se como colaborador no ticket do escopo.", gAddCollab);
 
     const gMessage = await createMessage(gestorToken, ticket1, "mensagem gestor");
-    if (gMessage.status !== 403) fail("GESTOR não deve interagir via mensagens (esperado 403).", gMessage);
-    report.checks.push({ rule: "GESTOR read-only", ok: true });
+    if (!gMessage.ok) fail("GESTOR deveria conseguir interagir via mensagens como colaborador.", gMessage);
+    report.checks.push({ rule: "GESTOR interaction (like COORD)", ok: true });
   }
 
   {

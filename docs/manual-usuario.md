@@ -50,13 +50,13 @@
 - Interação:
   - Apenas o criador e o responsável atual podem interagir (enviar mensagens e anexar arquivos).
   - Admin/Analista não conseguem enviar mensagens até que o chamado seja atribuído a eles.
-  - Gestor possui acesso somente de leitura (não cria, não edita, não reatribui e não interage no chamado).
+  - Gestor segue as mesmas regras de interação do perfil Coordenador, respeitando o mesmo escopo de permissão (com a restrição adicional de não poder ser definido como Responsável do chamado).
 
 ## Perfil Gestor (Administração)
 
 ### Objetivo
 
-- O perfil `Gestor` foi criado para atuar como “assistente/subordinado” de um `Coordenador`, com acesso a Relatórios e visualização de chamados, porém com acesso somente de leitura aos chamados e sem acesso ao módulo de Chat.
+- O perfil `Gestor` foi criado para atuar como “assistente/subordinado” de um `Coordenador`, com acesso a Relatórios e chamados dentro do seu escopo, com as mesmas regras de visualização e interação do perfil `Coordenador` no módulo de chamados, e sem acesso ao módulo de Chat.
 
 ### Criação do Perfil no Banco
 
@@ -87,19 +87,18 @@
   - é o responsável (atribuído), ou
   - está como colaborador no chamado.
 
-### Limitações (Gestor = Somente Leitura)
+### Restrição (Responsável)
 
-- Um Gestor não pode:
-  - abrir novos chamados,
-  - editar/atualizar chamados,
-  - atribuir/reatribuir chamados,
-  - adicionar/remover colaboradores,
-  - enviar mensagens ou anexar/remover arquivos em chamados.
+- Não é permitido atribuir chamados como `Responsável` para usuários com perfil `Gestor`.
+
+### Limitações (Gestor)
+
+- Um Gestor não possui acesso ao módulo de Chat.
 
 ### Testes
 
 - Unitários (política de acesso): `pnpm run test:tickets:access-policy:unit`
-- Integração (escopo + bloqueios + não-vazamento): `pnpm run test:gestor:access-control:integration`
+- Integração (escopo + permissões equivalentes ao Coordenador): `pnpm run test:gestor:access-control:integration`
 
 ### Pré-visualização
 

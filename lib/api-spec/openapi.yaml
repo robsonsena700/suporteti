@@ -472,7 +472,7 @@ paths:
     post:
       operationId: assignTicket
       tags: [tickets]
-      summary: Atribuir chamado a analista
+      summary: Atribuir chamado a responsável
       parameters:
         - name: id
           in: path
@@ -492,6 +492,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Dados inválidos ou regra de negócio bloqueou a atribuição (ex.: não é permitido atribuir para Gestor)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Chamado não encontrado
           content:

@@ -107,7 +107,7 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
   res.json(users);
 });
 
-router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (_req, res): Promise<void> => {
+router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"), async (_req, res): Promise<void> => {
   const assignable = await db.select({
     id: usersTable.id,
     name: usersTable.name,

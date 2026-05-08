@@ -1,6 +1,6 @@
 export function canActorReassign(role: string): boolean {
   const r = role.toUpperCase();
-  return r === "ADMIN" || r === "ANALYST" || r === "COORDINATOR";
+  return r === "ADMIN" || r === "ANALYST" || r === "COORDINATOR" || r === "GESTOR";
 }
 
 export function canReceiveReassign(role: string, status: string): boolean {

@@ -376,10 +376,6 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
 
 router.post("/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  if (user.role === "GESTOR") {
-    res.status(403).json({ error: "Acesso negado" });
-    return;
-  }
   const parsed = CreateTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -597,7 +593,7 @@ router.get(
   "/tickets/:id/collaborators",
   requireAuth,
   requireActive,
-  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"),
   async (req, res): Promise<void> => {
     const user = req.user!;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -634,7 +630,7 @@ router.post(
   "/tickets/:id/collaborators",
   requireAuth,
   requireActive,
-  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"),
   async (req, res): Promise<void> => {
     const actor = req.user!;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -684,9 +680,9 @@ router.post(
       return;
     }
 
-    const invalidRole = targets.filter(t => !(t.role === "ADMIN" || t.role === "ANALYST" || t.role === "COORDINATOR"));
+    const invalidRole = targets.filter(t => !(t.role === "ADMIN" || t.role === "ANALYST" || t.role === "COORDINATOR" || t.role === "GESTOR"));
     if (invalidRole.length > 0) {
-      res.status(400).json({ error: "Apenas Admin, Analista e Coordenador podem ser colaboradores" });
+      res.status(400).json({ error: "Apenas Admin, Analista, Coordenador e Gestor podem ser colaboradores" });
       return;
     }
 
@@ -741,7 +737,7 @@ router.delete(
   "/tickets/:id/collaborators/:userId",
   requireAuth,
   requireActive,
-  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"),
   async (req, res): Promise<void> => {
     const actor = req.user!;
     const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -1174,7 +1170,7 @@ router.patch("/tickets/:id/details", requireAuth, requireActive, async (req, res
   });
 });
 
-router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANALYST", "ADMIN", "COORDINATOR"), async (req, res): Promise<void> => {
+router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANALYST", "ADMIN", "COORDINATOR", "GESTOR"), async (req, res): Promise<void> => {
   const user = req.user!;
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);
@@ -1212,6 +1208,28 @@ router.post("/tickets/:id/assign", requireAuth, requireActive, requireRoles("ANA
   }
   if (targetUser.status !== "ACTIVE") {
     res.status(400).json({ error: "O novo responsável precisa estar ativo" });
+    return;
+  }
+  if (String(targetUser.role).toUpperCase() === "GESTOR") {
+    logger.warn(
+      {
+        ticketId: id,
+        actorUserId: user.userId,
+        actorRole: user.role,
+        targetUserId: targetUser.id,
+        targetUserRole: targetUser.role,
+      },
+      "Tentativa de atribuir chamado para Gestor (bloqueado)",
+    );
+
+    await db.insert(ticketAuditLogsTable).values({
+      ticketId: id,
+      actorUserId: user.userId,
+      type: "TICKET_UPDATED",
+      detail: `assign: denied -> Gestor (targetUserId=${targetUser.id})`,
+    });
+
+    res.status(400).json({ error: "Não é permitido atribuir chamados para usuários com perfil Gestor." });
     return;
   }
   if (!canReceiveReassign(targetUser.role, targetUser.status)) {

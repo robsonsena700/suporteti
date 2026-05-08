@@ -71,7 +71,12 @@ type TicketsListPersistedState = {
 };
 
 function buildDefaultMineOnlyByTab(forRole?: UserRole | null): MineOnlyByTab {
-  const mineDefault = forRole === UserRole.ADMIN || forRole === UserRole.ANALYST ? false : true;
+  const mineDefault = forRole === UserRole.ADMIN
+    || forRole === UserRole.ANALYST
+    || forRole === UserRole.COORDINATOR
+    || forRole === UserRole.GESTOR
+    ? false
+    : true;
   return {
     [TicketType.SOFTWARE]: mineDefault,
     [TicketType.HARDWARE]: mineDefault,
@@ -381,8 +386,18 @@ export default function Tickets() {
   useEffect(() => {
     if (!user) return;
     const state = loadTicketsListState(user.id);
-    if (!state) return;
-    applyPersisted(state);
+    if (!state) {
+      setMineOnlyByTab(buildDefaultMineOnlyByTab(user.role));
+      return;
+    }
+    const normalized = user.role === UserRole.GESTOR
+      && state.mineOnlyByTab
+      && state.mineOnlyByTab[TicketType.SOFTWARE]
+      && state.mineOnlyByTab[TicketType.HARDWARE]
+      && state.mineOnlyByTab.RESOLVED
+      ? { ...state, mineOnlyByTab: buildDefaultMineOnlyByTab(user.role) }
+      : state;
+    applyPersisted(normalized);
     attemptRestoreScroll();
   }, [user, applyPersisted, attemptRestoreScroll]);
 
@@ -431,14 +446,12 @@ export default function Tickets() {
             Gerencie e acompanhe as solicitações de suporte.
           </p>
         </div>
-        {user?.role !== UserRole.GESTOR ? (
-          <Button asChild>
-            <Link href="/chamados/novo">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Abrir Chamado
-            </Link>
-          </Button>
-        ) : null}
+        <Button asChild>
+          <Link href="/chamados/novo">
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Abrir Chamado
+          </Link>
+        </Button>
       </div>
 
       <div className="flex items-center justify-between gap-3">

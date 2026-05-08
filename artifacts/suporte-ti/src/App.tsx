@@ -81,7 +81,7 @@ function Router() {
           <ProtectedRoute path="/pendente" component={Pending} />
           <ProtectedRoute path="/dashboard" component={Dashboard} />
           <ProtectedRoute path="/chamados" component={Tickets} />
-          <ProtectedRoute path="/chamados/novo" component={NewTicket} roles={["ADMIN", "COORDINATOR", "ANALYST", "USER"]} />
+          <ProtectedRoute path="/chamados/novo" component={NewTicket} roles={["ADMIN", "COORDINATOR", "ANALYST", "GESTOR", "USER"]} />
           <ProtectedRoute path="/chamados/:id/comprovante" component={TicketReceipt} />
           <ProtectedRoute path="/chamados/:id" component={TicketDetail} />
           <ProtectedRoute path="/chat" component={Chat} roles={["ADMIN", "COORDINATOR", "ANALYST"]} />

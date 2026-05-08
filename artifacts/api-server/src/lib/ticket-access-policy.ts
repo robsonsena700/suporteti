@@ -37,7 +37,7 @@ export function computeTicketAccess(args: {
     || isAssignee
     || isCollaborator
     || ((role === "ADMIN" || role === "ANALYST") && args.ownerHasNoCoordinator === true);
-  const canAssign = (role === "ADMIN" || role === "ANALYST" || role === "COORDINATOR") && canView;
+  const canAssign = (role === "ADMIN" || role === "ANALYST" || role === "COORDINATOR" || role === "GESTOR") && canView;
 
   return { canView, canInteract, canAssign };
 }

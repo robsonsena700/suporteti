@@ -15,11 +15,13 @@ const { canActorReassign, canReceiveReassign, requiresStaffAssigneeForStatus } =
 assert.equal(canActorReassign("ADMIN"), true);
 assert.equal(canActorReassign("ANALYST"), true);
 assert.equal(canActorReassign("COORDINATOR"), true);
+assert.equal(canActorReassign("GESTOR"), true);
 assert.equal(canActorReassign("USER"), false);
 
 assert.equal(canReceiveReassign("ADMIN", "ACTIVE"), true);
 assert.equal(canReceiveReassign("ANALYST", "ACTIVE"), true);
 assert.equal(canReceiveReassign("COORDINATOR", "ACTIVE"), true);
+assert.equal(canReceiveReassign("GESTOR", "ACTIVE"), false);
 assert.equal(canReceiveReassign("ANALYST", "INACTIVE"), false);
 assert.equal(canReceiveReassign("USER", "ACTIVE"), false);
 

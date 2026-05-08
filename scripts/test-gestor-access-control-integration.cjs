@@ -105,6 +105,39 @@ async function createTicket(token, title) {
   return r.data.id;
 }
 
+async function assignTicket(token, ticketId, assignedToId, reason) {
+  const r = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ assignedToId, reason }),
+  });
+  return r;
+}
+
+async function createMessage(token, ticketId, message) {
+  const r = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ message }),
+  });
+  return r;
+}
+
+async function addCollaborators(token, ticketId, userIds) {
+  const r = await jsonFetch(`${API_BASE}/api/tickets/${ticketId}/collaborators`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ userIds }),
+  });
+  return r;
+}
+
+async function listAudit(token, ticketId) {
+  return jsonFetch(`${API_BASE}/api/tickets/${ticketId}/audit`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 (async () => {
   const adminToken = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
   const coordinatorToken = await login(COORDINATOR_EMAIL, COORDINATOR_PASSWORD);
@@ -125,6 +158,7 @@ async function createTicket(token, title) {
   await setRole(adminToken, gestor.id, "GESTOR", coordinator.id);
   await setGestorConfig(adminToken, gestor.id, coordinator.id, [extraUser.id]);
 
+  const ticketFromGestor = await createTicket(gestorToken, `gestor-own-${Date.now()}`);
   const ticketFromManagedUser = await createTicket(userToken, `gestor-managed-${Date.now()}`);
   const ticketFromExtraUser = await createTicket(extraUserToken, `gestor-extra-${Date.now()}`);
   const ticketFromOtherUser = await createTicket(otherUserToken, `gestor-other-${Date.now()}`);
@@ -134,6 +168,7 @@ async function createTicket(token, title) {
   });
   if (!list.ok || !Array.isArray(list.data)) fail(`Gestor deveria listar tickets. Status: ${list.status}`);
   const ids = new Set(list.data.map((t) => t.id));
+  if (!ids.has(ticketFromGestor)) fail("Gestor deveria ver ticket criado por ele mesmo.");
   if (!ids.has(ticketFromManagedUser)) fail("Gestor deveria ver ticket do coordenador (usuário subordinado).");
   if (!ids.has(ticketFromExtraUser)) fail("Gestor deveria ver ticket do usuário explicitamente permitido.");
   if (ids.has(ticketFromOtherUser)) fail("Gestor não deveria ver ticket fora do escopo.");
@@ -148,25 +183,42 @@ async function createTicket(token, title) {
   });
   if (getDenied.status !== 403) fail(`Esperado 403 ao acessar ticket fora do escopo. Obtido: ${getDenied.status}`);
 
-  const patchDenied = await jsonFetch(`${API_BASE}/api/tickets/${ticketFromManagedUser}`, {
+  const patchAllowed = await jsonFetch(`${API_BASE}/api/tickets/${ticketFromManagedUser}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${gestorToken}` },
-    body: JSON.stringify({ status: "IN_PROGRESS" }),
+    body: JSON.stringify({ priority: "HIGH" }),
   });
-  if (patchDenied.status !== 403) fail(`Gestor não deveria atualizar tickets. Obtido: ${patchDenied.status}`);
+  if (!patchAllowed.ok) fail(`Gestor deveria atualizar ticket permitido. Obtido: ${patchAllowed.status}`);
 
-  const msgDenied = await jsonFetch(`${API_BASE}/api/tickets/${ticketFromManagedUser}/messages`, {
-    method: "POST",
+  const patchDeniedOutsideScope = await jsonFetch(`${API_BASE}/api/tickets/${ticketFromOtherUser}`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${gestorToken}` },
-    body: JSON.stringify({ message: "tentativa gestor" }),
+    body: JSON.stringify({ priority: "LOW" }),
   });
-  if (msgDenied.status !== 403) fail(`Gestor não deveria interagir (mensagens). Obtido: ${msgDenied.status}`);
+  if (patchDeniedOutsideScope.status !== 403) fail(`Esperado 403 ao atualizar ticket fora do escopo. Obtido: ${patchDeniedOutsideScope.status}`);
+
+  const assignDenied = await assignTicket(gestorToken, ticketFromManagedUser, gestor.id, "auto-assign (teste gestor)");
+  if (assignDenied.status !== 400) fail(`Esperado 400 ao tentar atribuir para Gestor. Obtido: ${assignDenied.status}`);
+
+  const assign = await assignTicket(gestorToken, ticketFromManagedUser, coordinator.id, "assign coord (teste gestor)");
+  if (!assign.ok) fail(`Gestor deveria conseguir atribuir ticket permitido para Coordenador. Status: ${assign.status}`);
+
+  const collab = await addCollaborators(gestorToken, ticketFromManagedUser, [gestor.id]);
+  if (!collab.ok) fail(`Gestor deveria conseguir adicionar-se como colaborador no ticket do escopo. Status: ${collab.status}`);
+
+  const msgAllowed = await createMessage(gestorToken, ticketFromManagedUser, "mensagem gestor (teste)");
+  if (!msgAllowed.ok) fail(`Gestor deveria conseguir enviar mensagem como colaborador. Status: ${msgAllowed.status}`);
+
+  const audit = await listAudit(gestorToken, ticketFromManagedUser);
+  if (!audit.ok || !Array.isArray(audit.data)) fail(`Gestor deveria acessar auditoria do ticket permitido. Status: ${audit.status}`);
+  const hasGestorActor = audit.data.some((l) => l?.actor?.id === gestor.id);
+  if (!hasGestorActor) fail("Auditoria deveria registrar ações do Gestor como actor no ticket.");
 
   const coordinatorList = await jsonFetch(`${API_BASE}/api/tickets`, {
     headers: { Authorization: `Bearer ${coordinatorToken}` },
   });
   if (!coordinatorList.ok) fail(`Coordenador deveria listar tickets. Status: ${coordinatorList.status}`);
 
-  console.log("Integração de escopo e restrições do Gestor validada com sucesso.");
+  console.log("Integração de escopo e permissões do Gestor (equivalente ao Coordenador) validada com sucesso.");
 })();
 

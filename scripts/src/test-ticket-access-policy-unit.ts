@@ -100,7 +100,7 @@ const { computeTicketAccess, canCreateTicketMessage } = mod as {
   });
   assert.equal(a.canView, true);
   assert.equal(a.canInteract, false);
-  assert.equal(a.canAssign, false);
+  assert.equal(a.canAssign, true);
 }
 
 {

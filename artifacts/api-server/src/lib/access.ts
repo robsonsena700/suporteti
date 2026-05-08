@@ -80,7 +80,7 @@ export async function getVisibleOwnerIdsForGestor(gestorId: number): Promise<{ c
   if (coordinatorId == null) return { coordinatorId: null, ownerIds: [] };
   const allowedUserIds = await getAllowedUserIdsForGestor(gestorId);
   const coordinatorOwnerIds = await getVisibleOwnerIdsForCoordinator(coordinatorId);
-  const ownerIds = Array.from(new Set([...coordinatorOwnerIds, ...allowedUserIds]));
+  const ownerIds = Array.from(new Set([gestorId, ...coordinatorOwnerIds, ...allowedUserIds]));
   return { coordinatorId, ownerIds };
 }
 
@@ -178,52 +178,14 @@ export async function enforceTicketAccess(
   ticket: TicketRow,
   action: string,
 ): Promise<boolean> {
-  if (user.role === "GESTOR") {
-    const denied =
-      action === "tickets:assign"
-      || action === "tickets:collaborators"
-      || action === "tickets:update"
-      || action === "messages:create"
-      || action === "attachments:create"
-      || action === "attachments:delete";
-    if (denied) {
-      logger.warn(
-        {
-          action,
-          ticketId: ticket.id,
-          ticketOwnerId: ticket.createdById,
-          ticketAssignedToId: ticket.assignedToId ?? null,
-          actorUserId: user.userId,
-          actorRole: user.role,
-        },
-        "Tentativa de acesso não autorizado ao chamado",
-      );
-      return false;
-    }
-
-    const allowed = await canGestorViewTicket(user, ticket);
-    if (!allowed) {
-      logger.warn(
-        {
-          action,
-          ticketId: ticket.id,
-          ticketOwnerId: ticket.createdById,
-          ticketAssignedToId: ticket.assignedToId ?? null,
-          actorUserId: user.userId,
-          actorRole: user.role,
-        },
-        "Tentativa de acesso não autorizado ao chamado",
-      );
-    }
-    return allowed;
-  }
-
   const coordinatorFlag = user.role === "COORDINATOR"
     ? (
       (await getResponsibleCoordinatorIdForUser(ticket.createdById)) === user.userId
       || (await isCoordinatorOfOwnerViaMunicipality({ coordinatorId: user.userId, ownerUserId: ticket.createdById }))
     )
-    : false;
+    : user.role === "GESTOR"
+      ? await canGestorViewTicket(user, ticket)
+      : false;
   const collaboratorFlag = await isTicketCollaborator(user.userId, ticket.id);
   const requiresInteract =
     action === "messages:create"
@@ -253,7 +215,7 @@ export async function enforceTicketAccess(
     : action === "tickets:update"
       ? (
         access.canInteract
-        || (access.canView && (user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR"))
+        || (access.canView && (user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR" || user.role === "GESTOR"))
       )
       : requiresInteract
         ? access.canInteract
