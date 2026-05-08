@@ -10,6 +10,15 @@ SHARED="$BASE_DIR/shared"
 
 mkdir -p "$SHARED"
 
+export UPLOADS_DIR="${UPLOADS_DIR:-$SHARED/uploads}"
+mkdir -p "$UPLOADS_DIR"
+chmod 750 "$UPLOADS_DIR" || true
+
+if [ -f "$SHARED/uploads_guard.sh" ]; then
+  chmod +x "$SHARED/uploads_guard.sh" || true
+  bash "$SHARED/uploads_guard.sh" ensure "$BASE_DIR" >/dev/null 2>&1 || true
+fi
+
 if [ ! -f "$SHARED/credenciais.txt" ]; then
   echo "credenciais.txt nao encontrado em $SHARED/credenciais.txt"
   exit 1

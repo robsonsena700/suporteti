@@ -11,15 +11,25 @@ export function normalizeFilename(filename: string): string {
   return filename.replaceAll(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160);
 }
 
+export function inferAttachmentMimeType(filename: string): string | null {
+  const ext = extensionOf(filename);
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".pdf") return "application/pdf";
+  return null;
+}
+
 export function validateTicketMessageAttachmentFile(file: { originalname: string; mimetype: string; size: number }): { ok: true } | { ok: false; error: string } {
   const allowedMime = new Set(["image/png", "image/jpeg", "application/pdf"]);
   const allowedExt = new Set([".png", ".jpg", ".jpeg", ".pdf"]);
   const ext = extensionOf(file.originalname);
   if (!allowedExt.has(ext)) return { ok: false, error: "Extensão de arquivo não permitida. Use .png, .jpg ou .pdf." };
-  if (!allowedMime.has(file.mimetype)) return { ok: false, error: "Tipo de arquivo não permitido. Use PNG, JPG ou PDF." };
-  if ((ext === ".png" && file.mimetype !== "image/png")
-    || ((ext === ".jpg" || ext === ".jpeg") && file.mimetype !== "image/jpeg")
-    || (ext === ".pdf" && file.mimetype !== "application/pdf")) {
+  const inferred = inferAttachmentMimeType(file.originalname);
+  const normalizedMime = String(file.mimetype || "").toLowerCase();
+  const isGenericMime = normalizedMime === "" || normalizedMime === "application/octet-stream" || normalizedMime === "binary/octet-stream";
+  const mimeOk = allowedMime.has(normalizedMime) || (isGenericMime && inferred != null);
+  if (!mimeOk) return { ok: false, error: "Tipo de arquivo não permitido. Use PNG, JPG ou PDF." };
+  if (!isGenericMime && inferred != null && normalizedMime !== inferred) {
     return { ok: false, error: "Tipo MIME não corresponde à extensão do arquivo." };
   }
   if (file.size > MAX_ATTACHMENT_SIZE) return { ok: false, error: "Arquivo excede 3MB." };

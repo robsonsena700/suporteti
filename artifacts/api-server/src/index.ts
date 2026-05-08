@@ -40,6 +40,16 @@ if (!process.env.PORT && process.env.API_PORT) {
   process.env.PORT = process.env.API_PORT;
 }
 
+function ensureUploadsDir(): void {
+  const dir = process.env.UPLOADS_DIR
+    ? path.resolve(process.env.UPLOADS_DIR)
+    : path.resolve(process.cwd(), "uploads");
+  fs.mkdirSync(dir, { recursive: true });
+  const probe = path.join(dir, ".probe_write");
+  fs.writeFileSync(probe, "");
+  fs.unlinkSync(probe);
+}
+
 async function main() {
   const rawPort = process.env["PORT"] ?? "3001";
 
@@ -54,6 +64,13 @@ async function main() {
     import("./lib/logger"),
     import("./lib/municipalities-sync"),
   ]);
+
+  try {
+    ensureUploadsDir();
+  } catch (err) {
+    console.error("Falha ao preparar UPLOADS_DIR:", err);
+    process.exit(1);
+  }
 
   app.listen(port, (err) => {
     if (err) {

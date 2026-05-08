@@ -360,10 +360,38 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  const debugEnabled = typeof window !== "undefined"
+    && (window.localStorage.getItem("DEBUG_API") === "1" || window.localStorage.getItem("DEBUG_TICKET_MESSAGES") === "1");
+
+  if (debugEnabled) {
+    try {
+      console.log(`[api] ${new Date().toISOString()} ${method} ${requestInfo.url}`, {
+        hasBody: init.body != null,
+        responseType,
+      });
+    } catch {}
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(input, { ...init, method, headers });
+  } catch (err) {
+    if (debugEnabled) {
+      console.error(`[api] ${new Date().toISOString()} fetch failed ${method} ${requestInfo.url}`, err);
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
+    if (debugEnabled) {
+      try {
+        console.error(
+          `[api] ${new Date().toISOString()} ${method} ${requestInfo.url} -> ${response.status}`,
+          errorData,
+        );
+      } catch {}
+    }
     throw new ApiError(response, errorData, requestInfo);
   }
 

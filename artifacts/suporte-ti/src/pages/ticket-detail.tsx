@@ -195,6 +195,25 @@ export default function TicketDetail() {
   const messageFilesRef = useRef<Array<{ file: File; url: string }>>([]);
   const messageFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const debugTicketMessagesEnabled = useMemo(() => {
+    if (!import.meta.env.DEV) return false;
+    try {
+      return window.localStorage.getItem("DEBUG_TICKET_MESSAGES") === "1";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const debugTicketMessages = useCallback((event: string, data?: any) => {
+    if (!debugTicketMessagesEnabled) return;
+    try {
+      console.log(
+        `[ticket-messages] ${new Date().toISOString()} ${event}`,
+        { ticketId, userId: user?.id, role: user?.role, ...data },
+      );
+    } catch {}
+  }, [debugTicketMessagesEnabled, ticketId, user?.id, user?.role]);
+
   const FontSize = useMemo(() => Extension.create({
     name: "fontSize",
     addGlobalAttributes() {
@@ -809,27 +828,34 @@ export default function TicketDetail() {
       for (const f of Array.from(files)) {
         if (next.length >= 5) {
           tooMany += 1;
+          debugTicketMessages("file_rejected", { reason: "too_many", name: f.name, size: f.size, type: f.type });
           continue;
         }
         const ext = toExt(f.name);
-        const mimeOk = allowedMime.has(f.type);
+        const normalizedMime = (f.type || "").toLowerCase();
+        const isGenericMime = normalizedMime === "" || normalizedMime === "application/octet-stream" || normalizedMime === "binary/octet-stream";
+        const mimeOk = allowedMime.has(normalizedMime) || isGenericMime;
         const extOk = allowedExt.has(ext);
         const sizeOk = f.size <= maxSize;
         const pairOk =
-          (ext === ".png" && f.type === "image/png")
-          || ((ext === ".jpg" || ext === ".jpeg") && f.type === "image/jpeg")
-          || (ext === ".pdf" && f.type === "application/pdf");
+          isGenericMime
+          || (ext === ".png" && normalizedMime === "image/png")
+          || ((ext === ".jpg" || ext === ".jpeg") && normalizedMime === "image/jpeg")
+          || (ext === ".pdf" && normalizedMime === "application/pdf");
 
         if (!sizeOk) {
           tooBig += 1;
+          debugTicketMessages("file_rejected", { reason: "too_big", name: f.name, size: f.size, type: f.type, ext });
           continue;
         }
         if (!mimeOk || !extOk || !pairOk) {
           invalid += 1;
+          debugTicketMessages("file_rejected", { reason: "invalid_type", name: f.name, size: f.size, type: f.type, ext });
           continue;
         }
         const url = URL.createObjectURL(f);
         next.push({ file: f, url });
+        debugTicketMessages("file_added", { name: f.name, size: f.size, type: f.type, ext });
       }
       return next;
     });
@@ -845,7 +871,7 @@ export default function TicketDetail() {
         variant: "destructive",
       });
     }
-  }, []);
+  }, [debugTicketMessages, toast]);
 
   const removeMessageFile = useCallback((idx: number) => {
     setMessageFiles((prev) => {
@@ -873,21 +899,56 @@ export default function TicketDetail() {
     setSendingMessage(true);
     try {
       const token = localStorage.getItem("ti_support_token");
-      const form = new FormData();
-      form.append("format", "HTML");
-      form.append("message", html);
-      messageFiles.forEach((f) => form.append("files", f.file));
-
-      const resp = await fetch(`/api/tickets/${ticketId}/messages`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: form,
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      debugTicketMessages("send_start", {
+        hasFiles: messageFiles.length > 0,
+        fileCount: messageFiles.length,
+        files: messageFiles.map((f) => ({ name: f.file.name, size: f.file.size, type: f.file.type })),
+        textLen: text.length,
+        htmlLen: html.length,
       });
+
+      const hasRichFormatting =
+        /<(strong|b|em|i|u|s|del|ul|ol|li|a|blockquote|pre|code|span|h[1-6])\b/i.test(html);
+      const sendFormat = hasRichFormatting ? "HTML" : "PLAIN";
+      const sendMessage = sendFormat === "PLAIN" ? (editor?.getText() ?? "") : html;
+
+      const resp = messageFiles.length > 0
+        ? await (async () => {
+          const form = new FormData();
+          form.append("format", sendFormat);
+          form.append("message", sendMessage);
+          messageFiles.forEach((f) => form.append("files", f.file, f.file.name));
+          const r = await fetch(`/api/tickets/${ticketId}/messages`, {
+            method: "POST",
+            headers,
+            body: form,
+          });
+          debugTicketMessages("send_response", { status: r.status, ok: r.ok, mode: "multipart" });
+          return r;
+        })()
+        : await fetch(`/api/tickets/${ticketId}/messages`, {
+          method: "POST",
+          headers: {
+            ...(headers ?? {}),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ format: sendFormat, message: sendMessage }),
+        });
+      if (messageFiles.length === 0) {
+        debugTicketMessages("send_response", { status: resp.status, ok: resp.ok, mode: "json" });
+      }
       if (!resp.ok) {
         const raw = await resp.text();
         let data: any = null;
         try { data = raw ? JSON.parse(raw) : null; } catch { data = { raw }; }
-        throw new Error(data?.error || "Não foi possível enviar a mensagem.");
+        const errorMessage = typeof data?.error === "string"
+          ? data.error
+          : Array.isArray(data)
+            ? JSON.stringify(data, null, 2)
+            : "Não foi possível enviar a mensagem.";
+        debugTicketMessages("send_error_body", { status: resp.status, body: data ?? raw });
+        throw new Error(errorMessage);
       }
 
       await queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
@@ -904,6 +965,7 @@ export default function TicketDetail() {
       editor?.commands.clearContent(true);
       setDraftHtml("");
     } catch (e: any) {
+      debugTicketMessages("send_exception", { message: e?.message, stack: e?.stack });
       toast({
         title: "Falha ao enviar mensagem",
         description: e?.message || "Tente novamente em instantes.",
@@ -911,6 +973,7 @@ export default function TicketDetail() {
       });
     } finally {
       setSendingMessage(false);
+      debugTicketMessages("send_end");
     }
   };
 

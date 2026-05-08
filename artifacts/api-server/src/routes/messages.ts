@@ -10,7 +10,8 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
-import { normalizeFilename, sanitizeTicketMessageHtml, validateTicketMessageAttachmentFile } from "../lib/ticket-message-content";
+import { inferAttachmentMimeType, normalizeFilename, sanitizeTicketMessageHtml, validateTicketMessageAttachmentFile } from "../lib/ticket-message-content";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -103,13 +104,26 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
   const user = req.user!;
   const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;
   const ticketId = parseInt(raw, 10);
+  logger.info({
+    ticketId,
+    userId: user.userId,
+    role: user.role,
+    contentType: req.headers["content-type"],
+    fileCount: Array.isArray(req.files) ? req.files.length : 0,
+    files: Array.isArray(req.files) ? (req.files as Express.Multer.File[]).map((f) => ({
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
+    })) : [],
+  }, "ticket message create request");
 
   if (isNaN(ticketId)) {
     res.status(400).json({ error: "ID inválido" });
     return;
   }
 
-  const isMultipart = String(req.headers["content-type"] || "").includes("multipart/form-data");
+  const isMultipart = String(req.headers["content-type"] || "").toLowerCase().includes("multipart/form-data")
+    || Array.isArray(req.files);
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   if (files.length > MAX_ATTACHMENTS_PER_MESSAGE) {
     res.status(400).json({ error: `Máximo de ${MAX_ATTACHMENTS_PER_MESSAGE} anexos por mensagem.` });
@@ -145,12 +159,14 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
     format = bodyFormat === "PLAIN" ? "PLAIN" : "HTML";
     rawMessage = bodyMsg;
   } else {
-    const parsed = CreateMessageBody.safeParse(req.body);
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const parsed = CreateMessageBody.safeParse(body);
     if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
+      res.status(400).json({ error: "Payload inválido para envio de mensagem. Se estiver enviando anexos, envie como multipart/form-data." });
       return;
     }
-    format = "PLAIN";
+    const bodyFormat = typeof (parsed.data as any)?.format === "string" ? String((parsed.data as any).format).toUpperCase() : "PLAIN";
+    format = bodyFormat === "HTML" ? "HTML" : "PLAIN";
     rawMessage = parsed.data.message;
   }
 
@@ -180,11 +196,15 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
       const abs = path.resolve(dir, storedName);
       await fs.writeFile(abs, f.buffer);
       const rel = path.relative(getUploadsBaseDir(), abs).replaceAll("\\", "/");
+      const inferredMime = inferAttachmentMimeType(safeName);
+      const normalizedMime = String(f.mimetype || "").toLowerCase();
+      const isGenericMime = normalizedMime === "" || normalizedMime === "application/octet-stream" || normalizedMime === "binary/octet-stream";
+      const mimeToStore = isGenericMime && inferredMime ? inferredMime : normalizedMime;
       const [att] = await db.insert(ticketMessageAttachmentsTable).values({
         messageId: msg.id,
         ticketId,
         filename: safeName,
-        mimeType: f.mimetype,
+        mimeType: mimeToStore,
         size: f.size,
         storagePath: rel,
       } as any).returning({

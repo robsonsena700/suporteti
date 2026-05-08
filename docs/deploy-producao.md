@@ -52,6 +52,31 @@ O script realiza:
 - Deploy por releases + symlink `current` e `previous`
 - Restart de serviços (se `systemctl` existir) e health check
 
+## Persistência do diretório uploads
+
+### Objetivo
+
+- Garantir que anexos (uploads) não sejam perdidos em deploys (deploy por releases troca `current`).
+
+### Estratégia
+
+- O diretório de uploads é mantido fora do release, em `shared/uploads`.
+- A API usa `UPLOADS_DIR=/home/whs/suporte-ti/shared/uploads` (definido no `start_prod.sh`).
+
+### Guard (backup + verificação + auditoria)
+
+- Script no servidor: `shared/uploads_guard.sh`
+- O deploy executa automaticamente:
+  - `ensure` e `backup` antes de trocar o symlink `current`
+  - `verify` após iniciar a API
+- Logs de auditoria: `shared/uploads_audit.log`
+
+Variáveis opcionais:
+- `UPLOADS_ALERT_WEBHOOK_URL`: webhook para alertas (POST JSON) em falhas de verificação
+- `UPLOADS_ALERT_EMAIL`: email via `mail` (se instalado)
+- `UPLOADS_VERIFY_FULL=true`: valida todas as referências do banco (pode ser mais lento)
+- `UPLOADS_VERIFY_MAX=2000`: limite de verificação quando `UPLOADS_VERIFY_FULL=false`
+
 ## Base de Municípios (cache local IBGE)
 
 ### Objetivo

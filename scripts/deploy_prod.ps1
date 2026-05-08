@@ -209,6 +209,25 @@ if ($shouldStart -and [string]::IsNullOrWhiteSpace($StartScriptPath)) {
   Ssh "set -e; sed -i 's/\\r\$//' '$remoteSharedDir/start_prod.sh'; chmod +x '$remoteSharedDir/start_prod.sh'"
 }
 
+$remoteSharedDir = "$RemoteBaseDir/shared"
+$localUploadsGuard = Join-Path (Get-Location) "scripts\remote\uploads_guard.sh"
+if (Test-Path $localUploadsGuard) {
+  $normalizedUploadsGuard = Join-Path $tmp "uploads_guard.normalized.sh"
+  $raw = Get-Content -Raw -Path $localUploadsGuard
+  $normalized = ($raw -replace "`r`n", "`n" -replace "`r", "`n")
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($normalizedUploadsGuard, $normalized, $utf8NoBom)
+  Ssh "mkdir -p $remoteSharedDir"
+  ScpToRemote -LocalPath $normalizedUploadsGuard -RemotePath "$remoteSharedDir/uploads_guard.sh"
+  Ssh "set -e; sed -i 's/\\r\$//' '$remoteSharedDir/uploads_guard.sh'; chmod +x '$remoteSharedDir/uploads_guard.sh'"
+}
+
+try {
+  Ssh "set -e; if [ -x '$remoteSharedDir/uploads_guard.sh' ]; then bash '$remoteSharedDir/uploads_guard.sh' ensure '$RemoteBaseDir'; bash '$remoteSharedDir/uploads_guard.sh' backup '$RemoteBaseDir'; fi"
+} catch {
+  Write-Host "Aviso: falha ao garantir/backup do diretório uploads." -ForegroundColor Yellow
+}
+
 if (!$SkipMigrations) {
   try {
     Ssh $migrateCmd
@@ -234,6 +253,18 @@ if (!$SkipHealthCheck) {
   } catch {
     Write-Host "Aviso: healthcheck falhou (API pode nao estar exposta/ativa ainda)." -ForegroundColor Yellow
   }
+}
+
+try {
+  Ssh "set -e; if [ -x '$remoteSharedDir/uploads_guard.sh' ]; then bash '$remoteSharedDir/uploads_guard.sh' verify '$RemoteBaseDir'; fi"
+} catch {
+  throw "Falha na verificação de persistência/integridade do diretório uploads. Verifique $remoteSharedDir/uploads_audit.log e $remoteSharedDir/api.log no servidor."
+}
+
+try {
+  Ssh "set -e; if [ -x '$remoteSharedDir/uploads_guard.sh' ]; then bash '$remoteSharedDir/uploads_guard.sh' backup '$RemoteBaseDir'; fi"
+} catch {
+  Write-Host "Aviso: falha ao executar backup pós-deploy do diretório uploads." -ForegroundColor Yellow
 }
 
 Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os servicos."
