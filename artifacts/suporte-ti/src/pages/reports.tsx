@@ -57,7 +57,7 @@ type PersistedCardsState = {
 type ProfessionalRankingItem = {
   position: number;
   positionChange: number | null;
-  user: { id: number; name: string; email: string; role: "ANALYST" | "COORDINATOR" };
+  user: { id: number; name: string; email: string; role: "ANALYST" | "COORDINATOR" | "USER" };
   totalTickets: number;
   avgResolutionHours: number | null;
   avgRating: number | null;
@@ -65,7 +65,7 @@ type ProfessionalRankingItem = {
 };
 
 type ProfessionalRankingResponse = {
-  profile: "ANALYST" | "COORDINATOR";
+  profile: "ANALYST" | "COORDINATOR" | "USER";
   from: string | null;
   to: string | null;
   generatedAt: string;
@@ -1244,23 +1244,27 @@ export default function Reports() {
             <CardTitle>
               Ranking de chamados
             </CardTitle>
-            <div className="w-full max-w-[260px]">
-              <Select value={professionalProfile} onValueChange={(v) => setProfessionalProfile(v as ProfessionalProfile)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="analistas">Analistas</SelectItem>
-                  <SelectItem value="coordenadores">Coordenadores</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {user?.role !== "GESTOR" ? (
+              <div className="w-full max-w-[260px]">
+                <Select value={professionalProfile} onValueChange={(v) => setProfessionalProfile(v as ProfessionalProfile)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="analistas">Analistas</SelectItem>
+                    <SelectItem value="coordenadores">Coordenadores</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </CardHeader>
           <CardContent className="flex-1">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">
-                  {professionalProfile === "analistas" ? "Perfil: Analistas" : "Perfil: Coordenadores"}
+                  {user?.role === "GESTOR"
+                    ? "Perfil: Usuários (com coordenador)"
+                    : (professionalProfile === "analistas" ? "Perfil: Analistas" : "Perfil: Coordenadores")}
                 </Badge>
                 {isAdminViewer ? (
                   <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
@@ -1271,6 +1275,11 @@ export default function Reports() {
                     Visualização padrão
                   </Badge>
                 )}
+                {user?.role === "GESTOR" ? (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Município: {user.municipality ?? "—"} / {user.uf ?? "—"}
+                  </Badge>
+                ) : null}
               </div>
               {professionalRankingQuery.isFetching && !professionalRankingQuery.isLoading ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">

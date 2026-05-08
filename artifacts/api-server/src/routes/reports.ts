@@ -1,10 +1,10 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, ticketsTable, ticketRatingsTable } from "@workspace/db";
+import { db, usersTable, ticketsTable, ticketRatingsTable, userCoordinatorsTable } from "@workspace/db";
 import { eq, count, avg, sql, desc, inArray, and, asc } from "drizzle-orm";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import { requireAuth, requireActive } from "../middlewares/auth";
-import { getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
+import { getCoordinatorIdForGestor, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
 
 const router: IRouter = Router();
 
@@ -595,7 +595,9 @@ router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Pro
       : perfil === "coordenadores" || perfil === "coordinators" || perfil === "coordinator"
       ? "COORDINATOR"
       : null;
-  if (!role) {
+  const effectiveRole = user.role === "GESTOR" ? "USER" : role;
+
+  if (!effectiveRole) {
     res.status(400).json({ error: "Perfil inválido. Use analistas ou coordenadores." });
     return;
   }
@@ -618,9 +620,37 @@ router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Pro
   const compute = async (range: { from?: Date | null; to?: Date | null }) => {
     const dateWhere = buildTicketDateRangeWhere({ from: range.from, to: range.to });
     const statuses = ["RESOLVED", "CLOSED"] as const;
-    const where = dateWhere
-      ? and(eq(usersTable.role, role as any), eq(usersTable.status, "ACTIVE" as any), inArray(ticketsTable.status, [...statuses]), dateWhere)
-      : and(eq(usersTable.role, role as any), eq(usersTable.status, "ACTIVE" as any), inArray(ticketsTable.status, [...statuses]));
+    const isUserRanking = effectiveRole === "USER";
+
+    let gestorManagedUserIds: number[] = [];
+    if (isUserRanking) {
+      const coordinatorId = await getCoordinatorIdForGestor(user.userId);
+      if (!coordinatorId) return [];
+
+      const rows = await db
+        .select({ userId: userCoordinatorsTable.userId })
+        .from(userCoordinatorsTable)
+        .innerJoin(usersTable, eq(usersTable.id, userCoordinatorsTable.userId))
+        .where(and(
+          eq(userCoordinatorsTable.coordinatorId, coordinatorId),
+          eq(usersTable.status, "ACTIVE" as any),
+          eq(usersTable.role, "USER" as any),
+        ));
+      gestorManagedUserIds = rows.map((r) => r.userId);
+      if (gestorManagedUserIds.length === 0) return [];
+    }
+
+    const where = isUserRanking
+      ? (
+        dateWhere
+          ? and(inArray(ticketsTable.createdById, gestorManagedUserIds), dateWhere)
+          : inArray(ticketsTable.createdById, gestorManagedUserIds)
+      )
+      : (
+        dateWhere
+          ? and(eq(usersTable.role, effectiveRole as any), eq(usersTable.status, "ACTIVE" as any), inArray(ticketsTable.status, [...statuses]), dateWhere)
+          : and(eq(usersTable.role, effectiveRole as any), eq(usersTable.status, "ACTIVE" as any), inArray(ticketsTable.status, [...statuses]))
+      );
 
     const rows = await db
       .select({
@@ -628,11 +658,11 @@ router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Pro
         userName: usersTable.name,
         userEmail: usersTable.email,
         totalTickets: count(),
-        avgResolutionHours: sql<number | null>`avg(extract(epoch from (${ticketsTable.updatedAt} - ${ticketsTable.createdAt})) / 3600)`,
+        avgResolutionHours: sql<number | null>`avg(extract(epoch from (${ticketsTable.updatedAt} - ${ticketsTable.createdAt})) / 3600) filter (where ${ticketsTable.status} IN ('RESOLVED', 'CLOSED'))`,
         avgRating: avg(ticketRatingsTable.rating),
       })
       .from(ticketsTable)
-      .innerJoin(usersTable, eq(usersTable.id, ticketsTable.assignedToId))
+      .innerJoin(usersTable, eq(usersTable.id, isUserRanking ? ticketsTable.createdById : ticketsTable.assignedToId))
       .leftJoin(ticketRatingsTable, eq(ticketRatingsTable.ticketId, ticketsTable.id))
       .where(where)
       .groupBy(usersTable.id, usersTable.name, usersTable.email);
@@ -684,7 +714,7 @@ router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Pro
 
     return weighted.map((r, idx) => ({
       position: idx + 1,
-      user: { id: r.userId, name: r.userName, email: r.userEmail, role },
+      user: { id: r.userId, name: r.userName, email: r.userEmail, role: effectiveRole },
       totalTickets: r.totalTickets,
       avgResolutionHours: r.avgResolutionHours,
       avgRating: r.avgRating,
@@ -714,7 +744,7 @@ router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Pro
   });
 
   res.json({
-    profile: role,
+    profile: effectiveRole,
     from: from ? from.toISOString() : null,
     to: to ? to.toISOString() : null,
     generatedAt: new Date().toISOString(),
