@@ -3,7 +3,7 @@ import { db, userCoordinatorsTable, usersTable, ticketsTable, ticketAttachmentsT
 import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody, CreateRatingSchema } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
-import { enforceTicketAccess, getManagedUserIdsByCoordinator } from "../lib/access";
+import { enforceTicketAccess, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
 import { validateMunicipalityForUf } from "../lib/ibge";
@@ -74,8 +74,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   const whereClauses = [];
   if (user.role !== "ADMIN" && user.role !== "ANALYST") {
     if (user.role === "COORDINATOR") {
-      const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
-      const allowedOwners = [user.userId, ...managedUserIds];
+      const allowedOwners = await getVisibleOwnerIdsForCoordinator(user.userId);
       whereClauses.push(
         or(
           inArray(ticketsTable.createdById, allowedOwners),
@@ -83,12 +82,22 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
           sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${user.userId})`,
         ),
       );
+    } else if (user.role === "GESTOR") {
+      const { coordinatorId, ownerIds } = await getVisibleOwnerIdsForGestor(user.userId);
+      if (!coordinatorId || ownerIds.length === 0) {
+        whereClauses.push(sql`false`);
+      } else {
+        whereClauses.push(
+          or(
+            inArray(ticketsTable.createdById, ownerIds),
+            eq(ticketsTable.assignedToId, coordinatorId),
+            sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${coordinatorId})`,
+          ),
+        );
+      }
     } else {
       whereClauses.push(
-        or(
-          eq(ticketsTable.createdById, user.userId),
-          eq(ticketsTable.assignedToId, user.userId),
-        ),
+        eq(ticketsTable.createdById, user.userId),
       );
     }
   }
@@ -98,7 +107,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     res.status(400).json({ error: "Filtro inválido" });
     return;
   }
-  if (parsedMine === true && !(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR")) {
+  if (parsedMine === true && !(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR" || user.role === "GESTOR")) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
@@ -224,8 +233,7 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   const whereClauses = [];
   if (user.role !== "ADMIN" && user.role !== "ANALYST") {
     if (user.role === "COORDINATOR") {
-      const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
-      const allowedOwners = [user.userId, ...managedUserIds];
+      const allowedOwners = await getVisibleOwnerIdsForCoordinator(user.userId);
       whereClauses.push(
         or(
           inArray(ticketsTable.createdById, allowedOwners),
@@ -233,12 +241,22 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
           sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${user.userId})`,
         ),
       );
+    } else if (user.role === "GESTOR") {
+      const { coordinatorId, ownerIds } = await getVisibleOwnerIdsForGestor(user.userId);
+      if (!coordinatorId || ownerIds.length === 0) {
+        whereClauses.push(sql`false`);
+      } else {
+        whereClauses.push(
+          or(
+            inArray(ticketsTable.createdById, ownerIds),
+            eq(ticketsTable.assignedToId, coordinatorId),
+            sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${coordinatorId})`,
+          ),
+        );
+      }
     } else {
       whereClauses.push(
-        or(
-          eq(ticketsTable.createdById, user.userId),
-          eq(ticketsTable.assignedToId, user.userId),
-        ),
+        eq(ticketsTable.createdById, user.userId),
       );
     }
   }
@@ -246,6 +264,10 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   const parsedMine = mine != null ? parseBooleanQuery(mine) : null;
   if (mine != null && parsedMine == null) {
     res.status(400).json({ error: "Filtro inválido" });
+    return;
+  }
+  if (parsedMine === true && !(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR" || user.role === "GESTOR")) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
 
@@ -354,6 +376,10 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
 
 router.post("/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+  if (user.role === "GESTOR") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
   const parsed = CreateTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

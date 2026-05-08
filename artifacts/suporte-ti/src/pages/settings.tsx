@@ -3,6 +3,9 @@ import { Link } from "wouter";
 import { 
   useListUsers, 
   useApproveUser,
+  useGetGestorConfigs,
+  getGetGestorConfigsQueryKey,
+  useUpdateGestorConfig,
   getListUsersQueryKey,
   UserStatus,
   UserRole
@@ -44,6 +47,7 @@ type RoleGroupKey = UserRole;
 
 const ROLE_GROUPS: Array<{ key: RoleGroupKey; label: string }> = [
   { key: "COORDINATOR" as UserRole, label: "Coordenadores" },
+  { key: "GESTOR" as UserRole, label: "Gestores" },
   { key: "ANALYST" as UserRole, label: "Analistas" },
   { key: "USER" as UserRole, label: "Usuários" },
   { key: "ADMIN" as UserRole, label: "Administradores" },
@@ -55,6 +59,7 @@ function AdminSettings() {
   const [selectedRoles, setSelectedRoles] = useState<Record<number, UserRole>>({});
   const [approvalCoordinatorByUser, setApprovalCoordinatorByUser] = useState<Record<number, string>>({});
   const [associationCoordinatorByUser, setAssociationCoordinatorByUser] = useState<Record<number, string>>({});
+  const [gestorAddUserByGestorId, setGestorAddUserByGestorId] = useState<Record<number, string>>({});
   const [openMunicipalities, setOpenMunicipalities] = useState<string[]>([]);
   const [openRoleGroupsByMunicipality, setOpenRoleGroupsByMunicipality] = useState<Record<string, string[]>>({});
   const [openCoordinatorGroupsByMunicipality, setOpenCoordinatorGroupsByMunicipality] = useState<Record<string, string[]>>({});
@@ -70,7 +75,29 @@ function AdminSettings() {
     },
   });
 
+  const gestorConfigsQuery = useGetGestorConfigs({
+    query: {
+      queryKey: getGetGestorConfigsQueryKey(),
+      refetchInterval: 30_000,
+      refetchIntervalInBackground: true,
+      refetchOnWindowFocus: false,
+      staleTime: 15_000,
+    },
+  });
+
   const approveMutation = useApproveUser();
+  const updateGestorConfigMutation = useUpdateGestorConfig({
+    mutation: {
+      onSuccess: () => {
+        toast({ title: "Configuração do gestor atualizada" });
+        queryClient.invalidateQueries({ queryKey: getGetGestorConfigsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+      },
+      onError: () => {
+        toast({ title: "Erro ao atualizar configuração do gestor", variant: "destructive" });
+      },
+    }
+  });
   const associateCoordinatorMutation = useMutation({
     mutationFn: async ({ userId, coordinatorId }: { userId: number; coordinatorId: number | null }) => {
       return customFetch(`/api/users/${userId}/coordinators`, {
@@ -105,6 +132,19 @@ function AdminSettings() {
     [allUsers],
   );
 
+  const activeStandardUsers = useMemo(
+    () => (allUsers ?? []).filter(user => user.role === UserRole.USER && user.status === UserStatus.ACTIVE),
+    [allUsers],
+  );
+
+  const gestorConfigById = useMemo(() => {
+    const map = new Map<number, { coordinatorId: number | null; allowedUserIds: number[] }>();
+    for (const row of gestorConfigsQuery.data ?? []) {
+      map.set(row.gestorId, { coordinatorId: row.coordinatorId ?? null, allowedUserIds: row.allowedUserIds ?? [] });
+    }
+    return map;
+  }, [gestorConfigsQuery.data]);
+
   const coordinatorById = useMemo(() => {
     const map: Record<number, UserWithCoordinator> = {};
     for (const user of allUsers ?? []) {
@@ -136,6 +176,7 @@ function AdminSettings() {
           total: 0,
           usersByRole: {
             [UserRole.COORDINATOR]: [],
+            [UserRole.GESTOR]: [],
             [UserRole.ANALYST]: [],
             [UserRole.USER]: [],
             [UserRole.ADMIN]: [],
@@ -209,7 +250,11 @@ function AdminSettings() {
     const role = selectedRoles[userId] || UserRole.USER;
     const coordinatorId = approvalCoordinatorByUser[userId];
     const payload: { role: UserRole; coordinatorId?: number } = { role };
-    if (role === UserRole.USER && coordinatorId) {
+    if ((role === UserRole.USER || role === UserRole.GESTOR) && !coordinatorId) {
+      toast({ title: "Selecione um coordenador para aprovar este perfil.", variant: "destructive" });
+      return;
+    }
+    if ((role === UserRole.USER || role === UserRole.GESTOR) && coordinatorId) {
       payload.coordinatorId = Number(coordinatorId);
     }
 
@@ -282,6 +327,9 @@ function AdminSettings() {
             {rows.map((user) => {
               const effectiveRole = user.effectiveRole;
               const effectiveCoordinatorId = user.effectiveCoordinatorId;
+              const gestorConfig = effectiveRole === UserRole.GESTOR
+                ? (gestorConfigById.get(user.id) ?? { coordinatorId: null, allowedUserIds: [] })
+                : null;
 
               return (
                 <TableRow key={user.id}>
@@ -302,16 +350,32 @@ function AdminSettings() {
                         const coordinatorId = effectiveCoordinatorId && effectiveCoordinatorId !== "__none__"
                           ? Number(effectiveCoordinatorId)
                           : undefined;
+
+                        const gestorCoordinatorId = (() => {
+                          const fromConfig = gestorConfigById.get(user.id)?.coordinatorId ?? null;
+                          if (typeof fromConfig === "number") return fromConfig;
+                          const draft = associationCoordinatorByUser[user.id];
+                          if (draft && draft !== "__none__") return Number(draft);
+                          if (effectiveCoordinatorId && effectiveCoordinatorId !== "__none__") return Number(effectiveCoordinatorId);
+                          const fallback = activeCoordinators[0]?.id;
+                          return typeof fallback === "number" ? fallback : null;
+                        })();
+
+                        if (nextRole === UserRole.GESTOR && gestorCoordinatorId == null) {
+                          toast({ title: "Selecione um coordenador para o Gestor antes de salvar.", variant: "destructive" });
+                          return;
+                        }
                         changeRoleMutation.mutate(
                           {
                             userId: user.id,
                             role: nextRole,
-                            coordinatorId: nextRole === UserRole.USER ? coordinatorId : undefined,
+                            coordinatorId: nextRole === UserRole.USER ? coordinatorId : nextRole === UserRole.GESTOR ? gestorCoordinatorId ?? undefined : undefined,
                           },
                           {
                             onSuccess: () => {
                               toast({ title: "Perfil atualizado com sucesso" });
                               queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+                              queryClient.invalidateQueries({ queryKey: getGetGestorConfigsQueryKey() });
                             },
                             onError: () => {
                               toast({ title: "Erro ao atualizar perfil", variant: "destructive" });
@@ -325,6 +389,7 @@ function AdminSettings() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={UserRole.USER}>Usuário Padrão</SelectItem>
+                        <SelectItem value={UserRole.GESTOR}>Gestor</SelectItem>
                         <SelectItem value={UserRole.COORDINATOR}>Coordenador</SelectItem>
                         <SelectItem value={UserRole.ANALYST}>Analista</SelectItem>
                         <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
@@ -355,6 +420,113 @@ function AdminSettings() {
                           ))}
                         </SelectContent>
                       </Select>
+                    ) : effectiveRole === UserRole.GESTOR ? (
+                      <div className="space-y-2">
+                        <Select
+                          value={gestorConfig?.coordinatorId != null ? String(gestorConfig.coordinatorId) : "__none__"}
+                          onValueChange={(v) => {
+                            const nextCoordinatorId = v && v !== "__none__" ? Number(v) : null;
+                            updateGestorConfigMutation.mutate({
+                              id: user.id,
+                              data: {
+                                coordinatorId: nextCoordinatorId,
+                                allowedUserIds: gestorConfig?.allowedUserIds ?? [],
+                              }
+                            });
+                          }}
+                          disabled={updateGestorConfigMutation.isPending || gestorConfigsQuery.isLoading}
+                        >
+                          <SelectTrigger className="w-[250px]">
+                            <SelectValue placeholder="Coordenador principal" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Sem coordenador</SelectItem>
+                            {activeCoordinators.map(coordinator => (
+                              <SelectItem key={coordinator.id} value={String(coordinator.id)}>
+                                {coordinator.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Usuários adicionais</div>
+                          {(gestorConfig?.allowedUserIds?.length ?? 0) === 0 ? (
+                            <div className="text-sm text-muted-foreground">Nenhum</div>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {(gestorConfig?.allowedUserIds ?? []).map((uid) => (
+                                <Badge key={uid} variant="outline" className="flex items-center gap-2">
+                                  <span>
+                                    {allUsers?.find((u) => u.id === uid)?.name ?? `ID ${uid}`}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2"
+                                    disabled={updateGestorConfigMutation.isPending}
+                                    onClick={() => {
+                                      updateGestorConfigMutation.mutate({
+                                        id: user.id,
+                                        data: {
+                                          coordinatorId: gestorConfig?.coordinatorId ?? null,
+                                          allowedUserIds: (gestorConfig?.allowedUserIds ?? []).filter((x) => x !== uid),
+                                        }
+                                      });
+                                    }}
+                                  >
+                                    Remover
+                                  </Button>
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={gestorAddUserByGestorId[user.id] ?? ""}
+                            onValueChange={(v) => setGestorAddUserByGestorId((prev) => ({ ...prev, [user.id]: v }))}
+                            disabled={updateGestorConfigMutation.isPending || gestorConfigsQuery.isLoading}
+                          >
+                            <SelectTrigger className="w-[250px]">
+                              <SelectValue placeholder="Adicionar usuário" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {activeStandardUsers
+                                .filter((u) => !(gestorConfig?.allowedUserIds ?? []).includes(u.id))
+                                .map((u) => (
+                                  <SelectItem key={u.id} value={String(u.id)}>
+                                    {u.name}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={updateGestorConfigMutation.isPending || !gestorAddUserByGestorId[user.id]}
+                            onClick={() => {
+                              const v = gestorAddUserByGestorId[user.id];
+                              if (!v) return;
+                              const uid = Number(v);
+                              const next = Array.from(new Set([...(gestorConfig?.allowedUserIds ?? []), uid]));
+                              updateGestorConfigMutation.mutate({
+                                id: user.id,
+                                data: {
+                                  coordinatorId: gestorConfig?.coordinatorId ?? null,
+                                  allowedUserIds: next,
+                                }
+                              });
+                              setGestorAddUserByGestorId((prev) => ({ ...prev, [user.id]: "" }));
+                            }}
+                          >
+                            Adicionar
+                          </Button>
+                        </div>
+                      </div>
                     ) : (
                       <span className="text-muted-foreground text-sm">Não se aplica</span>
                     )}
@@ -426,6 +598,7 @@ function AdminSettings() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={UserRole.USER}>Usuário Padrão</SelectItem>
+                          <SelectItem value={UserRole.GESTOR}>Gestor</SelectItem>
                           <SelectItem value={UserRole.COORDINATOR}>Coordenador</SelectItem>
                           <SelectItem value={UserRole.ANALYST}>Analista</SelectItem>
                           <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
@@ -436,7 +609,7 @@ function AdminSettings() {
                       <Select
                         value={approvalCoordinatorByUser[user.id] || ""}
                         onValueChange={(v) => setApprovalCoordinatorByUser(prev => ({ ...prev, [user.id]: v }))}
-                        disabled={(selectedRoles[user.id] || UserRole.USER) !== UserRole.USER}
+                        disabled={!((selectedRoles[user.id] || UserRole.USER) === UserRole.USER || (selectedRoles[user.id] || UserRole.USER) === UserRole.GESTOR)}
                       >
                         <SelectTrigger className="w-[200px]">
                           <SelectValue placeholder="Selecione" />

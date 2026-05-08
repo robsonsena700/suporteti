@@ -19,6 +19,11 @@ export function computeTicketAccess(args: {
 }): TicketAccessDecision {
   const role = args.actorRole.toUpperCase();
   const isOwner = args.ticketCreatedById === args.actorUserId;
+
+  if (role === "USER") {
+    return { canView: isOwner, canInteract: isOwner, canAssign: false };
+  }
+
   const isAssignee = args.ticketAssignedToId === args.actorUserId;
   const isCollaborator = args.isCollaborator === true;
 
@@ -27,7 +32,7 @@ export function computeTicketAccess(args: {
     || isCollaborator
     || role === "ADMIN"
     || role === "ANALYST"
-    || (role === "COORDINATOR" && args.isCoordinatorOfOwner === true);
+    || ((role === "COORDINATOR" || role === "GESTOR") && args.isCoordinatorOfOwner === true);
   const canInteract = isOwner
     || isAssignee
     || isCollaborator

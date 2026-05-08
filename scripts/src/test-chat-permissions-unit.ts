@@ -15,6 +15,7 @@ const { hasChatModuleAccess, hasFullChatAccess, canCoordinatorAccessTargetRole }
 assert.equal(hasChatModuleAccess("ADMIN"), true, "ADMIN deve acessar o módulo de chat");
 assert.equal(hasChatModuleAccess("ANALYST"), true, "ANALYST deve acessar o módulo de chat");
 assert.equal(hasChatModuleAccess("COORDINATOR"), true, "COORDINATOR deve acessar o módulo de chat");
+assert.equal(hasChatModuleAccess("GESTOR"), false, "GESTOR não deve acessar o módulo de chat");
 assert.equal(hasChatModuleAccess("USER"), false, "USER não deve acessar o módulo de chat");
 
 assert.equal(hasFullChatAccess("ADMIN"), true, "ADMIN deve ter acesso total ao chat");

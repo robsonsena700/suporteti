@@ -14,4 +14,5 @@ export const ApproveUserBodyRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;

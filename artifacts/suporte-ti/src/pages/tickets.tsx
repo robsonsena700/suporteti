@@ -198,7 +198,7 @@ function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; 
 
 export default function Tickets() {
   const { user } = useAuth();
-  const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
+  const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR || user?.role === UserRole.GESTOR;
   const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
   const [typeTab, setTypeTab] = useState<TicketsMainTab>(initialTypeTab as any);
@@ -431,12 +431,14 @@ export default function Tickets() {
             Gerencie e acompanhe as solicitações de suporte.
           </p>
         </div>
-        <Button asChild>
-          <Link href="/chamados/novo">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Abrir Chamado
-          </Link>
-        </Button>
+        {user?.role !== UserRole.GESTOR ? (
+          <Button asChild>
+            <Link href="/chamados/novo">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Abrir Chamado
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       <div className="flex items-center justify-between gap-3">

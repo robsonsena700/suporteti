@@ -28,6 +28,7 @@ import type {
   ErrorResponse,
   ExportReportsOverviewParams,
   ExportReportsTicketsParams,
+  GestorConfig,
   GetRecentActivityParams,
   GetReportSummaryParams,
   GetReportsTicketsParams,
@@ -57,6 +58,7 @@ import type {
   Ticket,
   TicketDetail,
   TypeCount,
+  UpdateGestorConfigBody,
   UpdateTicketBody,
   UpdateUserBody,
   User,
@@ -557,6 +559,168 @@ export function useListUsers<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Listar configurações de Gestores (ADMIN/ANALYST)
+ */
+export const getGetGestorConfigsUrl = () => {
+  return `/api/users/gestor-configs`;
+};
+
+export const getGestorConfigs = async (
+  options?: RequestInit,
+): Promise<GestorConfig[]> => {
+  return customFetch<GestorConfig[]>(getGetGestorConfigsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetGestorConfigsQueryKey = () => {
+  return [`/api/users/gestor-configs`] as const;
+};
+
+export const getGetGestorConfigsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGestorConfigs>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGestorConfigs>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetGestorConfigsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getGestorConfigs>>
+  > = ({ signal }) => getGestorConfigs({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGestorConfigs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGestorConfigsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGestorConfigs>>
+>;
+export type GetGestorConfigsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Listar configurações de Gestores (ADMIN/ANALYST)
+ */
+
+export function useGetGestorConfigs<
+  TData = Awaited<ReturnType<typeof getGestorConfigs>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGestorConfigs>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGestorConfigsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Atualizar configuração de Gestor (ADMIN)
+ */
+export const getUpdateGestorConfigUrl = (id: number) => {
+  return `/api/users/${id}/gestor-config`;
+};
+
+export const updateGestorConfig = async (
+  id: number,
+  updateGestorConfigBody: UpdateGestorConfigBody,
+  options?: RequestInit,
+): Promise<GestorConfig> => {
+  return customFetch<GestorConfig>(getUpdateGestorConfigUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateGestorConfigBody),
+  });
+};
+
+export const getUpdateGestorConfigMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGestorConfig>>,
+    TError,
+    { id: number; data: BodyType<UpdateGestorConfigBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateGestorConfig>>,
+  TError,
+  { id: number; data: BodyType<UpdateGestorConfigBody> },
+  TContext
+> => {
+  const mutationKey = ["updateGestorConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateGestorConfig>>,
+    { id: number; data: BodyType<UpdateGestorConfigBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateGestorConfig(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateGestorConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateGestorConfig>>
+>;
+export type UpdateGestorConfigMutationBody = BodyType<UpdateGestorConfigBody>;
+export type UpdateGestorConfigMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Atualizar configuração de Gestor (ADMIN)
+ */
+export const useUpdateGestorConfig = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGestorConfig>>,
+    TError,
+    { id: number; data: BodyType<UpdateGestorConfigBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateGestorConfig>>,
+  TError,
+  { id: number; data: BodyType<UpdateGestorConfigBody> },
+  TContext
+> => {
+  return useMutation(getUpdateGestorConfigMutationOptions(options));
+};
 
 /**
  * @summary Obter usuário por ID

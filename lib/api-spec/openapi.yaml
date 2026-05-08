@@ -142,7 +142,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [USER, COORDINATOR, ANALYST, ADMIN]
+            enum: [USER, COORDINATOR, ANALYST, ADMIN, GESTOR]
       responses:
         "200":
           description: Lista de usuários
@@ -152,6 +152,64 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/User"
+
+  /users/gestor-configs:
+    get:
+      operationId: getGestorConfigs
+      tags: [users]
+      summary: Listar configurações de Gestores (ADMIN/ANALYST)
+      responses:
+        "200":
+          description: Lista de configurações de Gestores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GestorConfig"
+
+  /users/{id}/gestor-config:
+    put:
+      operationId: updateGestorConfig
+      tags: [users]
+      summary: Atualizar configuração de Gestor (ADMIN)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateGestorConfigBody"
+      responses:
+        "200":
+          description: Configuração atualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GestorConfig"
+        "400":
+          description: Requisição inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Acesso negado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /users/{id}:
     get:
@@ -1138,7 +1196,7 @@ components:
           type: string
         role:
           type: string
-          enum: [USER, COORDINATOR, ANALYST, ADMIN]
+          enum: [USER, COORDINATOR, ANALYST, ADMIN, GESTOR]
         status:
           type: string
           enum: [PENDING, ACTIVE, INACTIVE]
@@ -1183,6 +1241,35 @@ components:
         - municipality
         - createdAt
 
+    GestorConfig:
+      type: object
+      properties:
+        gestorId:
+          type: integer
+        coordinatorId:
+          type: ["integer", "null"]
+        allowedUserIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - gestorId
+        - coordinatorId
+        - allowedUserIds
+
+    UpdateGestorConfigBody:
+      type: object
+      properties:
+        coordinatorId:
+          type: ["integer", "null"]
+        allowedUserIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - coordinatorId
+        - allowedUserIds
+
     UpdateUserBody:
       type: object
       properties:
@@ -1211,7 +1298,7 @@ components:
       properties:
         role:
           type: string
-          enum: [USER, COORDINATOR, ANALYST, ADMIN]
+          enum: [USER, COORDINATOR, ANALYST, ADMIN, GESTOR]
       required:
         - role
 
@@ -1334,7 +1421,7 @@ components:
           type: string
         role:
           type: string
-          enum: [USER, COORDINATOR, ANALYST, ADMIN]
+          enum: [USER, COORDINATOR, ANALYST, ADMIN, GESTOR]
       required:
         - id
         - name

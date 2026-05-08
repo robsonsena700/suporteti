@@ -43,9 +43,63 @@
 - Visualização:
   - Criador do chamado e responsável atual podem visualizar.
   - Admin e Analista podem visualizar chamados mesmo sem atribuição.
+  - Coordenador pode visualizar chamados dos usuários vinculados ao seu perfil (e os atribuídos a ele).
+  - Gestor pode visualizar:
+    - chamados do Coordenador principal ao qual está vinculado (inclui os usuários subordinados do Coordenador),
+    - chamados de usuários adicionais explicitamente adicionados na configuração do Gestor.
 - Interação:
   - Apenas o criador e o responsável atual podem interagir (enviar mensagens e anexar arquivos).
   - Admin/Analista não conseguem enviar mensagens até que o chamado seja atribuído a eles.
+  - Gestor possui acesso somente de leitura (não cria, não edita, não reatribui e não interage no chamado).
+
+## Perfil Gestor (Administração)
+
+### Objetivo
+
+- O perfil `Gestor` foi criado para atuar como “assistente/subordinado” de um `Coordenador`, com acesso a Relatórios e visualização de chamados, porém com acesso somente de leitura aos chamados e sem acesso ao módulo de Chat.
+
+### Criação do Perfil no Banco
+
+- O perfil é implementado como um novo valor no enum `user_role` (`GESTOR`) e novas tabelas de vínculo:
+  - `gestor_coordinators` (1:1) — Gestor → Coordenador principal
+  - `gestor_allowed_users` (N:N) — Gestor → Usuários padrão adicionais (allowlist)
+- Migração: `lib/db/migrations/0012_gestor_role_and_access.sql`
+
+### Como Vincular um Gestor a um Coordenador
+
+- Ao aprovar um usuário pendente com perfil `Gestor`, selecione um `Coordenador principal`.
+- Um Gestor ativo deve possuir um Coordenador principal vinculado.
+
+### Como Configurar Usuários Adicionais (Allowlist)
+
+- Na tela de configurações administrativas, selecione o usuário com perfil `Gestor`.
+- Defina/atualize:
+  - `Coordenador principal`
+  - Lista de `Usuários adicionais` que o Gestor também poderá visualizar
+- É possível adicionar e remover usuários da lista a qualquer momento.
+
+### Regras de Visualização (Gestor)
+
+- Um Gestor pode visualizar:
+  - todos os chamados que o Coordenador principal consegue visualizar (inclui o Coordenador e os usuários subordinados vinculados a ele),
+  - chamados de usuários padrão explicitamente adicionados na allowlist do Gestor.
+- Além disso, o Gestor enxerga chamados onde o Coordenador principal:
+  - é o responsável (atribuído), ou
+  - está como colaborador no chamado.
+
+### Limitações (Gestor = Somente Leitura)
+
+- Um Gestor não pode:
+  - abrir novos chamados,
+  - editar/atualizar chamados,
+  - atribuir/reatribuir chamados,
+  - adicionar/remover colaboradores,
+  - enviar mensagens ou anexar/remover arquivos em chamados.
+
+### Testes
+
+- Unitários (política de acesso): `pnpm run test:tickets:access-policy:unit`
+- Integração (escopo + bloqueios + não-vazamento): `pnpm run test:gestor:access-control:integration`
 
 ### Pré-visualização
 

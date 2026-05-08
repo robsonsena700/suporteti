@@ -37,12 +37,14 @@ export default function Dashboard() {
             Bem-vindo de volta, {user?.name}. Aqui está o resumo das atividades.
           </p>
         </div>
-        <Button asChild size="lg">
-          <Link href="/chamados/novo">
-            <PlusCircle className="mr-2 h-5 w-5" />
-            Abrir Chamado
-          </Link>
-        </Button>
+        {user?.role !== "GESTOR" ? (
+          <Button asChild size="lg">
+            <Link href="/chamados/novo">
+              <PlusCircle className="mr-2 h-5 w-5" />
+              Abrir Chamado
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       {isLoadingSummary ? (

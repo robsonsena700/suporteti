@@ -16,7 +16,7 @@ import { UserAvatar } from "@/components/user/user-avatar";
 import { getRoleLabel } from "@/lib/role-labels";
 
 const CHAT_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
-const REPORTS_ROLES = ["ADMIN", "COORDINATOR", "ANALYST"];
+const REPORTS_ROLES = ["ADMIN", "COORDINATOR", "ANALYST", "GESTOR"];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();

@@ -858,15 +858,19 @@ export default function TicketDetail() {
   const canManage = canManageRole;
   const isCreator = ticket.createdById === user?.id;
   const isAdminOrAnalyst = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
+  const isGestor = user?.role === UserRole.GESTOR;
   const ownerHasCoordinator = ticket.ownerHasCoordinator !== false;
   const closedAt = new Date(ticket.updatedAt).getTime();
   const withinReopenWindow = Number.isFinite(closedAt) && (Date.now() - closedAt) <= 24 * 60 * 60 * 1000;
   const canReopenClosed = ticket.status !== TicketStatus.CLOSED || (isAdminOrAnalyst && withinReopenWindow);
   const canInteractTicket =
-    ticket.createdById === user?.id
-    || ticket.assignedToId === user?.id
-    || (user?.id != null && collaboratorIdSet.has(user.id))
-    || ((user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST) && !ownerHasCoordinator);
+    !isGestor
+    && (
+      ticket.createdById === user?.id
+      || ticket.assignedToId === user?.id
+      || (user?.id != null && collaboratorIdSet.has(user.id))
+      || ((user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST) && !ownerHasCoordinator)
+    );
   const canSendNewMessage = canCreateTicketMessageUI({ canInteract: canInteractTicket, status: ticket.status });
   const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
   const hasValidAssignee = Boolean(

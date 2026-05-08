@@ -47,7 +47,7 @@ export const LoginResponse = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
     status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
     cpf: zod.string().nullish(),
     establishment: zod.string().nullish(),
@@ -78,7 +78,7 @@ export const GetMeResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
   cpf: zod.string().nullish(),
   establishment: zod.string().nullish(),
@@ -99,14 +99,16 @@ export const GetMeResponse = zod.object({
  */
 export const ListUsersQueryParams = zod.object({
   status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]).optional(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]).optional(),
+  role: zod
+    .enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"])
+    .optional(),
 });
 
 export const ListUsersResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
   cpf: zod.string().nullish(),
   establishment: zod.string().nullish(),
@@ -124,6 +126,34 @@ export const ListUsersResponseItem = zod.object({
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
 /**
+ * @summary Listar configurações de Gestores (ADMIN/ANALYST)
+ */
+export const GetGestorConfigsResponseItem = zod.object({
+  gestorId: zod.number(),
+  coordinatorId: zod.number().nullable(),
+  allowedUserIds: zod.array(zod.number()),
+});
+export const GetGestorConfigsResponse = zod.array(GetGestorConfigsResponseItem);
+
+/**
+ * @summary Atualizar configuração de Gestor (ADMIN)
+ */
+export const UpdateGestorConfigParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateGestorConfigBody = zod.object({
+  coordinatorId: zod.number().nullable(),
+  allowedUserIds: zod.array(zod.number()),
+});
+
+export const UpdateGestorConfigResponse = zod.object({
+  gestorId: zod.number(),
+  coordinatorId: zod.number().nullable(),
+  allowedUserIds: zod.array(zod.number()),
+});
+
+/**
  * @summary Obter usuário por ID
  */
 export const GetUserParams = zod.object({
@@ -134,7 +164,7 @@ export const GetUserResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
   cpf: zod.string().nullish(),
   establishment: zod.string().nullish(),
@@ -173,7 +203,7 @@ export const UpdateUserResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
   cpf: zod.string().nullish(),
   establishment: zod.string().nullish(),
@@ -197,14 +227,14 @@ export const ApproveUserParams = zod.object({
 });
 
 export const ApproveUserBody = zod.object({
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
 });
 
 export const ApproveUserResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
   cpf: zod.string().nullish(),
   establishment: zod.string().nullish(),
@@ -261,7 +291,7 @@ export const ListTicketsResponseItem = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
   assignedTo: zod
     .union([
@@ -269,7 +299,7 @@ export const ListTicketsResponseItem = zod.object({
         id: zod.number(),
         name: zod.string(),
         email: zod.string(),
-        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
       }),
       zod.null(),
     ])
@@ -332,7 +362,7 @@ export const ListResolvedTicketsResponseItem = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
   assignedTo: zod
     .union([
@@ -340,7 +370,7 @@ export const ListResolvedTicketsResponseItem = zod.object({
         id: zod.number(),
         name: zod.string(),
         email: zod.string(),
-        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
       }),
       zod.null(),
     ])
@@ -388,7 +418,7 @@ export const GetTicketResponse = zod
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+      role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
     }),
     assignedTo: zod
       .union([
@@ -396,7 +426,7 @@ export const GetTicketResponse = zod
           id: zod.number(),
           name: zod.string(),
           email: zod.string(),
-          role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+          role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
         }),
         zod.null(),
       ])
@@ -416,7 +446,13 @@ export const GetTicketResponse = zod
               id: zod.number(),
               name: zod.string(),
               email: zod.string(),
-              role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+              role: zod.enum([
+                "USER",
+                "COORDINATOR",
+                "ANALYST",
+                "ADMIN",
+                "GESTOR",
+              ]),
             }),
           }),
         )
@@ -454,7 +490,13 @@ export const GetTicketResponse = zod
             id: zod.number(),
             name: zod.string(),
             email: zod.string(),
-            role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+            role: zod.enum([
+              "USER",
+              "COORDINATOR",
+              "ANALYST",
+              "ADMIN",
+              "GESTOR",
+            ]),
           }),
         )
         .optional(),
@@ -505,7 +547,7 @@ export const UpdateTicketResponse = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
   assignedTo: zod
     .union([
@@ -513,7 +555,7 @@ export const UpdateTicketResponse = zod.object({
         id: zod.number(),
         name: zod.string(),
         email: zod.string(),
-        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
       }),
       zod.null(),
     ])
@@ -566,7 +608,7 @@ export const AssignTicketResponse = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
   assignedTo: zod
     .union([
@@ -574,7 +616,7 @@ export const AssignTicketResponse = zod.object({
         id: zod.number(),
         name: zod.string(),
         email: zod.string(),
-        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+        role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
       }),
       zod.null(),
     ])
@@ -592,7 +634,7 @@ export const ListTicketCollaboratorsResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
 });
 export const ListTicketCollaboratorsResponse = zod.array(
   ListTicketCollaboratorsResponseItem,
@@ -613,7 +655,7 @@ export const AddTicketCollaboratorsResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+  role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
 });
 export const AddTicketCollaboratorsResponse = zod.array(
   AddTicketCollaboratorsResponseItem,
@@ -648,7 +690,7 @@ export const ListMessagesResponseItem = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
 });
 export const ListMessagesResponse = zod.array(ListMessagesResponseItem);
@@ -795,7 +837,7 @@ export const GetReportsUsersStatsResponseItem = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
   totalTickets: zod.number(),
   openTickets: zod.number(),
@@ -828,7 +870,7 @@ export const GetReportsUsersRankingResponseItem = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+    role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
   totalTickets: zod.number(),
   avgResolutionHours: zod.number().nullable(),
@@ -889,7 +931,13 @@ export const GetReportsTicketsResponse = zod.object({
             id: zod.number(),
             name: zod.string(),
             email: zod.string(),
-            role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+            role: zod.enum([
+              "USER",
+              "COORDINATOR",
+              "ANALYST",
+              "ADMIN",
+              "GESTOR",
+            ]),
           }),
           zod.null(),
         ])
@@ -900,7 +948,13 @@ export const GetReportsTicketsResponse = zod.object({
             id: zod.number(),
             name: zod.string(),
             email: zod.string(),
-            role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN"]),
+            role: zod.enum([
+              "USER",
+              "COORDINATOR",
+              "ANALYST",
+              "ADMIN",
+              "GESTOR",
+            ]),
           }),
           zod.null(),
         ])

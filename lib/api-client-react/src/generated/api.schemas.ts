@@ -44,6 +44,7 @@ export const UserRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;
 
 export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus];
@@ -85,6 +86,19 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface GestorConfig {
+  gestorId: number;
+  /** @nullable */
+  coordinatorId: number | null;
+  allowedUserIds: number[];
+}
+
+export interface UpdateGestorConfigBody {
+  /** @nullable */
+  coordinatorId: number | null;
+  allowedUserIds: number[];
+}
+
 export interface UpdateUserBody {
   name?: string;
   cpf?: string;
@@ -105,6 +119,7 @@ export const ApproveUserBodyRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;
 
 export interface ApproveUserBody {
@@ -144,6 +159,7 @@ export const UserRefRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;
 
 export interface UserRef {
@@ -441,6 +457,7 @@ export const ListUsersRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;
 
 export type ListTicketsParams = {

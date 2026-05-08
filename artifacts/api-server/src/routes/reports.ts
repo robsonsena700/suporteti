@@ -4,7 +4,7 @@ import { eq, count, avg, sql, desc, inArray, and, asc } from "drizzle-orm";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import { requireAuth, requireActive } from "../middlewares/auth";
-import { getManagedUserIdsByCoordinator } from "../lib/access";
+import { getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
 
 const router: IRouter = Router();
 
@@ -80,9 +80,12 @@ async function buildReportTicketScopeWhere(user: any): Promise<any> {
     return eq(ticketsTable.createdById, user.userId);
   }
   if (user.role === "COORDINATOR") {
-    const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
-    const allowedOwners = [user.userId, ...managedUserIds];
+    const allowedOwners = await getVisibleOwnerIdsForCoordinator(user.userId);
     return allowedOwners.length > 0 ? inArray(ticketsTable.createdById, allowedOwners) : sql`false`;
+  }
+  if (user.role === "GESTOR") {
+    const { ownerIds } = await getVisibleOwnerIdsForGestor(user.userId);
+    return ownerIds.length > 0 ? inArray(ticketsTable.createdById, ownerIds) : sql`false`;
   }
   return sql`true`;
 }
@@ -208,9 +211,8 @@ function buildXlsxBuffer(sheets: Array<{ name: string; rows: any[] }>): Buffer {
 
 router.get("/reports/summary", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  const isScoped = user.role === "USER" || user.role === "COORDINATOR";
-  let ticketScopeWhere: any = sql`true`;
-  let managedUserIds: number[] = [];
+  const isScoped = user.role === "USER" || user.role === "COORDINATOR" || user.role === "GESTOR";
+  const ticketScopeWhere = await buildReportTicketScopeWhere(user);
 
   const from = parseDateQuery(req.query.from);
   const to = parseDateQuery(req.query.to);
@@ -228,14 +230,6 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
   }
   const dateWhere = buildTicketDateRangeWhere({ from, to });
 
-  if (user.role === "USER") {
-    ticketScopeWhere = eq(ticketsTable.createdById, user.userId);
-  } else if (user.role === "COORDINATOR") {
-    managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
-    const allowedOwners = [user.userId, ...managedUserIds];
-    ticketScopeWhere = allowedOwners.length > 0 ? inArray(ticketsTable.createdById, allowedOwners) : sql`false`;
-  }
-
   const scopedTicketsWhere = dateWhere ? and(ticketScopeWhere, dateWhere) : ticketScopeWhere;
 
   const [ticketCounts] = await db.select({
@@ -246,12 +240,10 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
     closed: sql<number>`count(*) filter (where status = 'CLOSED')`,
   }).from(ticketsTable).where(scopedTicketsWhere);
 
-  const [userCounts] = user.role === "COORDINATOR"
-    ? [{ total: managedUserIds.length, pending: 0 }]
-    : await db.select({
-      total: count(),
-      pending: sql<number>`count(*) filter (where status = 'PENDING')`,
-    }).from(usersTable);
+  const [userCounts] = await db.select({
+    total: count(),
+    pending: sql<number>`count(*) filter (where status = 'PENDING')`,
+  }).from(usersTable);
 
   const [resolutionData] = await db.select({
     avg: sql<number>`avg(extract(epoch from (updated_at - created_at)) / 3600)`,
@@ -267,8 +259,10 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
   } else if (user.role === "ANALYST") {
     ratingScopeWhere = eq(ticketsTable.assignedToId, user.userId);
   } else if (user.role === "COORDINATOR") {
-    const allowedTechnicians = [user.userId, ...managedUserIds];
+    const allowedTechnicians = await getVisibleOwnerIdsForCoordinator(user.userId);
     ratingScopeWhere = allowedTechnicians.length > 0 ? inArray(ticketsTable.assignedToId, allowedTechnicians) : sql`false`;
+  } else if (user.role === "GESTOR") {
+    ratingScopeWhere = sql`false`;
   }
 
   const scopedRatingWhere = dateWhere ? and(ratingScopeWhere, dateWhere) : ratingScopeWhere;
@@ -398,14 +392,7 @@ router.get("/reports/recent-activity", requireAuth, requireActive, async (req, r
     return;
   }
   const dateWhere = buildTicketDateRangeWhere({ from, to });
-
-  if (user.role === "USER") {
-    ticketScopeWhere = eq(ticketsTable.createdById, user.userId);
-  } else if (user.role === "COORDINATOR") {
-    const managedUserIds = await getManagedUserIdsByCoordinator(user.userId);
-    const allowedOwners = [user.userId, ...managedUserIds];
-    ticketScopeWhere = allowedOwners.length > 0 ? inArray(ticketsTable.createdById, allowedOwners) : sql`false`;
-  }
+  ticketScopeWhere = await buildReportTicketScopeWhere(user);
 
   const scopedTicketsWhere = dateWhere ? and(ticketScopeWhere, dateWhere) : ticketScopeWhere;
 
@@ -595,7 +582,7 @@ router.get("/reports/users/ranking", requireAuth, requireActive, async (req, res
 
 router.get("/ranking/:perfil", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  if (!(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR")) {
+  if (!(user.role === "ADMIN" || user.role === "ANALYST" || user.role === "COORDINATOR" || user.role === "GESTOR")) {
     res.status(403).json({ error: "Acesso negado" });
     return;
   }

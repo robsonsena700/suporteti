@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import multer from "multer";
-import { db, usersTable, userCoordinatorsTable, ticketsTable } from "@workspace/db";
+import { db, usersTable, userCoordinatorsTable, gestorAllowedUsersTable, gestorCoordinatorsTable, ticketsTable } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { UpdateUserBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
@@ -24,11 +24,11 @@ const avatarUpload = multer({
   },
 });
 
-type UserRole = "USER" | "COORDINATOR" | "ANALYST" | "ADMIN";
+type UserRole = "USER" | "COORDINATOR" | "ANALYST" | "ADMIN" | "GESTOR";
 type UserStatus = "ACTIVE" | "INACTIVE";
 
 function parseRole(value: unknown): UserRole | null {
-  if (value === "USER" || value === "COORDINATOR" || value === "ANALYST" || value === "ADMIN") {
+  if (value === "USER" || value === "COORDINATOR" || value === "ANALYST" || value === "ADMIN" || value === "GESTOR") {
     return value;
   }
   return null;
@@ -134,6 +134,118 @@ router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN"
 
   withLoad.sort((a, b) => a.assignedOpenTickets - b.assignedOpenTickets || a.name.localeCompare(b.name, "pt-BR"));
   res.json(withLoad);
+});
+
+router.get("/users/gestor-configs", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (_req, res): Promise<void> => {
+  const gestores = await db
+    .select({ gestorId: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.role, "GESTOR" as any));
+
+  const coordinatorLinks = await db
+    .select({ gestorId: gestorCoordinatorsTable.gestorId, coordinatorId: gestorCoordinatorsTable.coordinatorId })
+    .from(gestorCoordinatorsTable);
+
+  const allowedLinks = await db
+    .select({ gestorId: gestorAllowedUsersTable.gestorId, userId: gestorAllowedUsersTable.userId })
+    .from(gestorAllowedUsersTable);
+
+  const coordinatorByGestor = new Map<number, number>();
+  coordinatorLinks.forEach((r) => coordinatorByGestor.set(r.gestorId, r.coordinatorId));
+
+  const allowedByGestor = new Map<number, number[]>();
+  allowedLinks.forEach((r) => {
+    const existing = allowedByGestor.get(r.gestorId) ?? [];
+    existing.push(r.userId);
+    allowedByGestor.set(r.gestorId, existing);
+  });
+
+  res.json(
+    gestores.map((g) => ({
+      gestorId: g.gestorId,
+      coordinatorId: coordinatorByGestor.get(g.gestorId) ?? null,
+      allowedUserIds: allowedByGestor.get(g.gestorId) ?? [],
+    })),
+  );
+});
+
+router.put("/users/:id/gestor-config", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
+    return;
+  }
+
+  const body = req.body as { coordinatorId?: unknown; allowedUserIds?: unknown } | undefined;
+  const coordinatorIdRaw = body?.coordinatorId;
+  const coordinatorId = coordinatorIdRaw == null ? null : parseSingleCoordinatorId(coordinatorIdRaw);
+  if (coordinatorIdRaw != null && !coordinatorId) {
+    res.status(400).json({ error: "Coordenador inválido" });
+    return;
+  }
+
+  const allowedRaw = body?.allowedUserIds;
+  const allowedUserIds = Array.isArray(allowedRaw)
+    ? allowedRaw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0)
+    : [];
+
+  const uniqueAllowed = Array.from(new Set(allowedUserIds)).filter((uid) => uid !== id && uid !== coordinatorId);
+
+  const [target] = await db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(eq(usersTable.id, id));
+  if (!target) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+  if (target.role !== "GESTOR") {
+    res.status(400).json({ error: "Usuário não possui perfil Gestor" });
+    return;
+  }
+
+  if (coordinatorId != null) {
+    const [coordinator] = await db.select({ id: usersTable.id, role: usersTable.role, status: usersTable.status })
+      .from(usersTable)
+      .where(eq(usersTable.id, coordinatorId));
+    if (!coordinator) {
+      res.status(400).json({ error: "Coordenador não encontrado" });
+      return;
+    }
+    if (coordinator.role !== "COORDINATOR" || coordinator.status !== "ACTIVE") {
+      res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
+      return;
+    }
+  }
+
+  if (uniqueAllowed.length > 0) {
+    const targets = await db
+      .select({ id: usersTable.id, role: usersTable.role, status: usersTable.status })
+      .from(usersTable)
+      .where(inArray(usersTable.id, uniqueAllowed));
+    const byId = new Map(targets.map((t) => [t.id, t]));
+    const missing = uniqueAllowed.filter((uid) => !byId.has(uid));
+    if (missing.length > 0) {
+      res.status(404).json({ error: "Usuário(s) não encontrado(s)", missing });
+      return;
+    }
+    const invalid = targets.filter((t) => t.status !== "ACTIVE" || t.role !== "USER");
+    if (invalid.length > 0) {
+      res.status(400).json({ error: "Apenas usuários padrão ativos podem ser adicionados" });
+      return;
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(gestorCoordinatorsTable).where(eq(gestorCoordinatorsTable.gestorId, id));
+    if (coordinatorId != null) {
+      await tx.insert(gestorCoordinatorsTable).values({ gestorId: id, coordinatorId });
+    }
+    await tx.delete(gestorAllowedUsersTable).where(eq(gestorAllowedUsersTable.gestorId, id));
+    if (uniqueAllowed.length > 0) {
+      await tx.insert(gestorAllowedUsersTable).values(uniqueAllowed.map((uid) => ({ gestorId: id, userId: uid })));
+    }
+  });
+
+  res.json({ gestorId: id, coordinatorId: coordinatorId ?? null, allowedUserIds: uniqueAllowed });
 });
 
 router.get("/users/:id", requireAuth, requireActive, async (req, res): Promise<void> => {
@@ -432,6 +544,13 @@ router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN
       return;
     }
   }
+  if (status === "ACTIVE" && existing.role === "GESTOR") {
+    const [link] = await db.select().from(gestorCoordinatorsTable).where(eq(gestorCoordinatorsTable.gestorId, id));
+    if (!link) {
+      res.status(400).json({ error: "Gestor ativo deve possuir um coordenador principal vinculado" });
+      return;
+    }
+  }
 
   const [user] = await db.update(usersTable)
     .set({ status })
@@ -479,6 +598,14 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
     res.status(400).json({ error: "Coordenador inválido" });
     return;
   }
+  if (role === "USER" && coordinatorId == null) {
+    res.status(400).json({ error: "Usuário padrão deve possuir um coordenador" });
+    return;
+  }
+  if (role === "GESTOR" && coordinatorId == null) {
+    res.status(400).json({ error: "Gestor deve possuir um coordenador principal" });
+    return;
+  }
 
   if (coordinatorId) {
     const coordinators = await db
@@ -523,8 +650,14 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
       });
 
     await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
-    if (coordinatorId) {
+    await tx.delete(gestorCoordinatorsTable).where(eq(gestorCoordinatorsTable.gestorId, id));
+    await tx.delete(gestorAllowedUsersTable).where(eq(gestorAllowedUsersTable.gestorId, id));
+
+    if (role === "USER" && coordinatorId) {
       await tx.insert(userCoordinatorsTable).values({ userId: id, coordinatorId });
+    }
+    if (role === "GESTOR" && coordinatorId) {
+      await tx.insert(gestorCoordinatorsTable).values({ gestorId: id, coordinatorId });
     }
 
     return approvedUser;
@@ -568,27 +701,29 @@ router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN")
     ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
   const coordinatorId = coordinatorValue != null ? parseSingleCoordinatorId(coordinatorValue) : null;
 
-  if (role === "USER") {
-    if (coordinatorId != null) {
-      const coordinators = await db
-        .select({
-          id: usersTable.id,
-          role: usersTable.role,
-          status: usersTable.status,
-        })
-        .from(usersTable)
-        .where(eq(usersTable.id, coordinatorId));
+  if ((role === "USER" || role === "GESTOR") && coordinatorId == null) {
+    res.status(400).json({ error: "Informe um coordenador válido" });
+    return;
+  }
+  if ((role === "USER" || role === "GESTOR") && coordinatorId != null) {
+    const coordinators = await db
+      .select({
+        id: usersTable.id,
+        role: usersTable.role,
+        status: usersTable.status,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, coordinatorId));
 
-      if (coordinators.length !== 1) {
-        res.status(400).json({ error: "Coordenador não encontrado" });
-        return;
-      }
+    if (coordinators.length !== 1) {
+      res.status(400).json({ error: "Coordenador não encontrado" });
+      return;
+    }
 
-      const invalidCoordinator = coordinators.find(c => c.role !== "COORDINATOR" || c.status !== "ACTIVE");
-      if (invalidCoordinator) {
-        res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
-        return;
-      }
+    const invalidCoordinator = coordinators.find(c => c.role !== "COORDINATOR" || c.status !== "ACTIVE");
+    if (invalidCoordinator) {
+      res.status(400).json({ error: "Apenas coordenadores ativos podem ser vinculados" });
+      return;
     }
   }
 
@@ -616,11 +751,15 @@ router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN")
 
     if (!updated) return null;
 
-    if (role !== "USER") {
-      await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
-    } else if (coordinatorId != null) {
-      await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    await tx.delete(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
+    await tx.delete(gestorCoordinatorsTable).where(eq(gestorCoordinatorsTable.gestorId, id));
+    await tx.delete(gestorAllowedUsersTable).where(eq(gestorAllowedUsersTable.gestorId, id));
+
+    if (role === "USER" && coordinatorId != null) {
       await tx.insert(userCoordinatorsTable).values({ userId: id, coordinatorId });
+    }
+    if (role === "GESTOR" && coordinatorId != null) {
+      await tx.insert(gestorCoordinatorsTable).values({ gestorId: id, coordinatorId });
     }
 
     return updated;
@@ -648,6 +787,7 @@ router.get("/users/:id/avatar", requireAuth, requireActive, async (req, res): Pr
     && currentUser.role !== "ADMIN"
     && currentUser.role !== "ANALYST"
     && currentUser.role !== "COORDINATOR"
+    && currentUser.role !== "GESTOR"
   ) {
     res.status(403).json({ error: "Acesso negado" });
     return;

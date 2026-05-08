@@ -13,4 +13,5 @@ export const ListUsersRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;

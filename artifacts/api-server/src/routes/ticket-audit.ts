@@ -10,7 +10,7 @@ router.get(
   "/tickets/:ticketId/audit",
   requireAuth,
   requireActive,
-  requireRoles("ADMIN", "ANALYST", "COORDINATOR"),
+  requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"),
   async (req, res): Promise<void> => {
     const user = req.user!;
     const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;

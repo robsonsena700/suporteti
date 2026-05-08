@@ -83,6 +83,7 @@ const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Admin",
   COORDINATOR: "Coordenador",
   ANALYST: "Analista",
+  GESTOR: "Gestor",
 };
 
 // ── Provider ──────────────────────────────────────────────────────────────────

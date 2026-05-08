@@ -226,6 +226,7 @@ const ROLE_LABELS: Record<string, string> = {
   ADMIN: getRoleLabel("ADMIN"),
   COORDINATOR: getRoleLabel("COORDINATOR"),
   ANALYST: getRoleLabel("ANALYST"),
+  GESTOR: getRoleLabel("GESTOR"),
   USER: getRoleLabel("USER"),
 };
 
@@ -233,12 +234,14 @@ const ROLE_COLOR: Record<string, string> = {
   ADMIN: "#e11d48",
   COORDINATOR: "#7c3aed",
   ANALYST: "#0284c7",
+  GESTOR: "#0f766e",
 };
 
 const ROLE_PILL: Record<string, string> = {
   ADMIN: "bg-rose-100 text-rose-700",
   COORDINATOR: "bg-violet-100 text-violet-700",
   ANALYST: "bg-sky-100 text-sky-700",
+  GESTOR: "bg-emerald-100 text-emerald-700",
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

@@ -7,6 +7,8 @@ import { chatMessagesTable } from "./chat";
 import { directMessagesTable } from "./direct-messages";
 import { chatAttachmentsTable } from "./chat-attachments";
 import { userCoordinatorsTable } from "./user-coordinators";
+import { gestorCoordinatorsTable } from "./gestor-coordinators";
+import { gestorAllowedUsersTable } from "./gestor-allowed-users";
 import { ticketAuditLogsTable } from "./ticket-audit";
 import { ticketCollaboratorsTable } from "./ticket-collaborators";
 
@@ -23,6 +25,10 @@ export const usersRelations = relations(usersTable, ({ many }) => ({
   receivedDirectMessages: many(directMessagesTable, { relationName: "dmReceiver" }),
   coordinatorsLinks: many(userCoordinatorsTable, { relationName: "userCoordinator_user" }),
   coordinatedUsersLinks: many(userCoordinatorsTable, { relationName: "userCoordinator_coordinator" }),
+  gestorCoordinatorLinks: many(gestorCoordinatorsTable, { relationName: "gestorCoordinator_gestor" }),
+  coordinatedGestorsLinks: many(gestorCoordinatorsTable, { relationName: "gestorCoordinator_coordinator" }),
+  gestorAllowedUsersLinks: many(gestorAllowedUsersTable, { relationName: "gestorAllowed_gestor" }),
+  allowedByGestorsLinks: many(gestorAllowedUsersTable, { relationName: "gestorAllowed_user" }),
 }));
 
 export const userCoordinatorsRelations = relations(userCoordinatorsTable, ({ one }) => ({
@@ -35,6 +41,32 @@ export const userCoordinatorsRelations = relations(userCoordinatorsTable, ({ one
     fields: [userCoordinatorsTable.coordinatorId],
     references: [usersTable.id],
     relationName: "userCoordinator_coordinator",
+  }),
+}));
+
+export const gestorCoordinatorsRelations = relations(gestorCoordinatorsTable, ({ one }) => ({
+  gestor: one(usersTable, {
+    fields: [gestorCoordinatorsTable.gestorId],
+    references: [usersTable.id],
+    relationName: "gestorCoordinator_gestor",
+  }),
+  coordinator: one(usersTable, {
+    fields: [gestorCoordinatorsTable.coordinatorId],
+    references: [usersTable.id],
+    relationName: "gestorCoordinator_coordinator",
+  }),
+}));
+
+export const gestorAllowedUsersRelations = relations(gestorAllowedUsersTable, ({ one }) => ({
+  gestor: one(usersTable, {
+    fields: [gestorAllowedUsersTable.gestorId],
+    references: [usersTable.id],
+    relationName: "gestorAllowed_gestor",
+  }),
+  user: one(usersTable, {
+    fields: [gestorAllowedUsersTable.userId],
+    references: [usersTable.id],
+    relationName: "gestorAllowed_user",
   }),
 }));
 

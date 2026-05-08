@@ -13,4 +13,5 @@ export const UserRole = {
   COORDINATOR: "COORDINATOR",
   ANALYST: "ANALYST",
   ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
 } as const;

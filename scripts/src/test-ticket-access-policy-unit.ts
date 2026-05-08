@@ -26,8 +26,8 @@ const { computeTicketAccess, canCreateTicketMessage } = mod as {
     ticketAssignedToId: null,
     isCollaborator: true,
   });
-  assert.equal(a.canView, true);
-  assert.equal(a.canInteract, true);
+  assert.equal(a.canView, false);
+  assert.equal(a.canInteract, false);
   assert.equal(a.canAssign, false);
 }
 
@@ -88,6 +88,32 @@ const { computeTicketAccess, canCreateTicketMessage } = mod as {
   });
   assert.equal(a.canView, true);
   assert.equal(a.canInteract, false);
+}
+
+{
+  const a = computeTicketAccess({
+    actorRole: "GESTOR",
+    actorUserId: 10,
+    ticketCreatedById: 2,
+    ticketAssignedToId: null,
+    isCoordinatorOfOwner: true,
+  });
+  assert.equal(a.canView, true);
+  assert.equal(a.canInteract, false);
+  assert.equal(a.canAssign, false);
+}
+
+{
+  const a = computeTicketAccess({
+    actorRole: "GESTOR",
+    actorUserId: 10,
+    ticketCreatedById: 2,
+    ticketAssignedToId: null,
+    isCoordinatorOfOwner: false,
+  });
+  assert.equal(a.canView, false);
+  assert.equal(a.canInteract, false);
+  assert.equal(a.canAssign, false);
 }
 
 assert.equal(canCreateTicketMessage({ ticketStatus: "OPEN" }), true);
