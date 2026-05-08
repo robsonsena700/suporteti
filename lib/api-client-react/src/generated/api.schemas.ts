@@ -203,13 +203,32 @@ export interface TicketAttachment {
   createdAt: string;
 }
 
+export type MessageFormat = (typeof MessageFormat)[keyof typeof MessageFormat];
+
+export const MessageFormat = {
+  PLAIN: "PLAIN",
+  HTML: "HTML",
+} as const;
+
+export interface TicketMessageAttachment {
+  id: number;
+  ticketId: number;
+  messageId: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+}
+
 export interface Message {
   id: number;
   ticketId: number;
   senderId: number;
+  format: MessageFormat;
   message: string;
   createdAt: string;
   sender: UserRef;
+  attachments: TicketMessageAttachment[];
 }
 
 export interface Rating {
@@ -297,6 +316,7 @@ export interface AssignTicketBody {
 }
 
 export interface CreateMessageBody {
+  format?: MessageFormat;
   message: string;
 }
 
@@ -537,6 +557,16 @@ export type AddTicketCollaboratorsBody = {
 
 export type RemoveTicketCollaborator200 = {
   ok: boolean;
+};
+
+export type CreateMessageBodyTwo = {
+  message?: string;
+  format?: MessageFormat;
+  files?: Blob[];
+};
+
+export type GetMessageAttachmentParams = {
+  download?: boolean;
 };
 
 export type GetReportSummaryParams = {

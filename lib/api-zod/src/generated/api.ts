@@ -440,6 +440,7 @@ export const GetTicketResponse = zod
             id: zod.number(),
             ticketId: zod.number(),
             senderId: zod.number(),
+            format: zod.enum(["PLAIN", "HTML"]),
             message: zod.string(),
             createdAt: zod.coerce.date(),
             sender: zod.object({
@@ -454,6 +455,17 @@ export const GetTicketResponse = zod
                 "GESTOR",
               ]),
             }),
+            attachments: zod.array(
+              zod.object({
+                id: zod.number(),
+                ticketId: zod.number(),
+                messageId: zod.number(),
+                filename: zod.string(),
+                mimeType: zod.string(),
+                size: zod.number(),
+                createdAt: zod.coerce.date(),
+              }),
+            ),
           }),
         )
         .optional(),
@@ -684,6 +696,7 @@ export const ListMessagesResponseItem = zod.object({
   id: zod.number(),
   ticketId: zod.number(),
   senderId: zod.number(),
+  format: zod.enum(["PLAIN", "HTML"]),
   message: zod.string(),
   createdAt: zod.coerce.date(),
   sender: zod.object({
@@ -692,6 +705,17 @@ export const ListMessagesResponseItem = zod.object({
     email: zod.string(),
     role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
   }),
+  attachments: zod.array(
+    zod.object({
+      id: zod.number(),
+      ticketId: zod.number(),
+      messageId: zod.number(),
+      filename: zod.string(),
+      mimeType: zod.string(),
+      size: zod.number(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
 });
 export const ListMessagesResponse = zod.array(ListMessagesResponseItem);
 
@@ -703,7 +727,42 @@ export const CreateMessageParams = zod.object({
 });
 
 export const CreateMessageBody = zod.object({
+  format: zod.enum(["PLAIN", "HTML"]).optional(),
   message: zod.string(),
+});
+
+/**
+ * @summary Listar anexos de uma mensagem do chamado
+ */
+export const ListMessageAttachmentsParams = zod.object({
+  ticketId: zod.coerce.number(),
+  messageId: zod.coerce.number(),
+});
+
+export const ListMessageAttachmentsResponseItem = zod.object({
+  id: zod.number(),
+  ticketId: zod.number(),
+  messageId: zod.number(),
+  filename: zod.string(),
+  mimeType: zod.string(),
+  size: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+export const ListMessageAttachmentsResponse = zod.array(
+  ListMessageAttachmentsResponseItem,
+);
+
+/**
+ * @summary Baixar/visualizar um anexo de mensagem do chamado
+ */
+export const GetMessageAttachmentParams = zod.object({
+  ticketId: zod.coerce.number(),
+  messageId: zod.coerce.number(),
+  attachmentId: zod.coerce.number(),
+});
+
+export const GetMessageAttachmentQueryParams = zod.object({
+  download: zod.coerce.boolean().optional(),
 });
 
 /**

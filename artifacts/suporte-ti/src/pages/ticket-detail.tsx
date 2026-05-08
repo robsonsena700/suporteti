@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { EmojiClickData } from "emoji-picker-react";
 import { useRoute, Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { 
   useGetTicket, 
   useUpdateTicket, 
   useListMessages,
-  useCreateMessage,
   useGetTicketRating,
   useCreateTicketRating,
   useAssignTicket,
@@ -20,9 +20,10 @@ import {
 import { CreateRatingSchema } from "@workspace/api-zod";
 import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -39,7 +40,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Check, Download, Eye, FileText, Paperclip, Pencil, Printer, Save, Send, Star, Trash2, UserPlus, X } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, Check, Code, Download, Eye, FileText, Italic, Link2, List, ListOrdered, Paperclip, Pencil, Printer, Quote, Redo2, Save, Send, Smile, Star, Strikethrough, Trash2, Underline as UnderlineIcon, Undo2, UserPlus, X } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,17 @@ import { getRoleLabel } from "@/lib/role-labels";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { canCreateTicketMessage as canCreateTicketMessageUI } from "@/lib/tickets-utils";
+
+import { EditorContent, useEditor } from "@tiptap/react";
+import { Extension } from "@tiptap/core";
+import { StarterKit } from "@tiptap/starter-kit";
+import { Underline as UnderlineExtension } from "@tiptap/extension-underline";
+import { Link as LinkExtension } from "@tiptap/extension-link";
+import { TextAlign } from "@tiptap/extension-text-align";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Color } from "@tiptap/extension-color";
+
+const EmojiPicker = lazy(() => import("emoji-picker-react"));
 
 const TICKET_DETAIL_STATE_KEY = "suporte-ti:ticket:detail:state:v1";
 
@@ -136,7 +148,10 @@ export default function TicketDetail() {
   const queryClient = useQueryClient();
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR;
   
-  const [message, setMessage] = useState("");
+  const [draftHtml, setDraftHtml] = useState("");
+  const [messageFiles, setMessageFiles] = useState<Array<{ file: File; url: string }>>([]);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [rating, setRating] = useState(0);
   const [reasonLowRating, setReasonLowRating] = useState("");
   const [comment, setComment] = useState("");
@@ -177,6 +192,62 @@ export default function TicketDetail() {
   const pendingRestoreRef = useRef<TicketDetailPersistedState | null>(null);
   const pendingPreviewAttachmentIdRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
+  const messageFilesRef = useRef<Array<{ file: File; url: string }>>([]);
+  const messageFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const FontSize = useMemo(() => Extension.create({
+    name: "fontSize",
+    addGlobalAttributes() {
+      return [
+        {
+          types: ["textStyle"],
+          attributes: {
+            fontSize: {
+              default: null,
+              parseHTML: (element: HTMLElement) => element.style.fontSize || null,
+              renderHTML: (attributes: Record<string, any>) => {
+                if (!attributes.fontSize) return {};
+                return { style: `font-size: ${attributes.fontSize}` };
+              },
+            },
+          },
+        },
+      ];
+    },
+  }), []);
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      UnderlineExtension,
+      TextStyle,
+      Color,
+      FontSize,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      LinkExtension.configure({
+        autolink: true,
+        linkOnPaste: true,
+        openOnClick: true,
+        validate: (href: string) => {
+          try {
+            const u = new URL(href);
+            return u.protocol === "http:" || u.protocol === "https:" || u.protocol === "mailto:";
+          } catch {
+            return false;
+          }
+        },
+      }),
+    ],
+    content: draftHtml || "<p></p>",
+    onUpdate: ({ editor }) => {
+      setDraftHtml(editor.getHTML());
+    },
+    editorProps: {
+      attributes: {
+        class: "min-h-[90px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40",
+      },
+    },
+  });
 
   const toDatetimeLocalValue = useCallback((iso: unknown): string => {
     if (iso == null) return "";
@@ -185,7 +256,7 @@ export default function TicketDetail() {
     if (!Number.isFinite(d.getTime())) return "";
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (previewOpen) return;
@@ -196,6 +267,16 @@ export default function TicketDetail() {
       setPreviewUrl("");
     }
   }, [previewOpen, previewUrl]);
+
+  useEffect(() => {
+    messageFilesRef.current = messageFiles;
+  }, [messageFiles]);
+
+  useEffect(() => {
+    return () => {
+      messageFilesRef.current.forEach((f) => URL.revokeObjectURL(f.url));
+    };
+  }, []);
 
   useEffect(() => {
     if (!Number.isFinite(ticketId) || ticketId <= 0) return;
@@ -266,7 +347,6 @@ export default function TicketDetail() {
   });
 
   const updateMutation = useUpdateTicket();
-  const messageMutation = useCreateMessage();
   const rateMutation = useCreateTicketRating();
   const assignMutation = useAssignTicket();
   const restoreLoopStartedRef = useRef<boolean>(false);
@@ -314,6 +394,63 @@ export default function TicketDetail() {
       });
     }
   }, [fetchAttachmentBlob, toast]);
+
+  type MessageAttachment = {
+    id: number;
+    messageId: number;
+    ticketId: number;
+    filename: string;
+    mimeType: string;
+    size: number;
+    createdAt: string;
+  };
+
+  const messageAttachmentApiUrl = useCallback((messageId: number, attachmentId: number) => {
+    return `/api/tickets/${ticketId}/messages/${messageId}/attachments/${attachmentId}`;
+  }, [ticketId]);
+
+  const fetchMessageAttachmentBlob = useCallback(async (messageId: number, att: MessageAttachment) => {
+    const resp = await fetch(messageAttachmentApiUrl(messageId, att.id), {
+      headers: { Authorization: `Bearer ${localStorage.getItem("ti_support_token")}` },
+    });
+    if (!resp.ok) throw new Error("Falha ao baixar anexo");
+    return resp.blob();
+  }, [messageAttachmentApiUrl]);
+
+  const downloadMessageAttachment = useCallback(async (messageId: number, att: MessageAttachment) => {
+    try {
+      const blob = await fetchMessageAttachmentBlob(messageId, att);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({
+        title: "Erro ao baixar anexo",
+        description: "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    }
+  }, [fetchMessageAttachmentBlob, toast]);
+
+  const viewMessageAttachment = useCallback(async (messageId: number, att: MessageAttachment) => {
+    try {
+      const blob = await fetchMessageAttachmentBlob(messageId, att);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      toast({
+        title: "Erro ao visualizar anexo",
+        description: "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    }
+  }, [fetchMessageAttachmentBlob, toast]);
 
   const uploadTicketAttachments = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -482,13 +619,13 @@ export default function TicketDetail() {
       ticketId,
       scrollY: typeof window !== "undefined" ? window.scrollY : null,
       focusedMessageId,
-      draftMessage: message,
+      draftMessage: draftHtml,
       selectedAssigneeId,
       assignReason,
       previewAttachmentId: previewOpen && previewAtt ? previewAtt.id : null,
       savedAt: Date.now(),
     };
-  }, [user, ticketId, focusedMessageId, message, selectedAssigneeId, assignReason, previewOpen, previewAtt]);
+  }, [user, ticketId, focusedMessageId, draftHtml, selectedAssigneeId, assignReason, previewOpen, previewAtt]);
 
   const saveNow = useCallback(() => {
     const next = buildPersistedState();
@@ -499,7 +636,7 @@ export default function TicketDetail() {
   const applyPersisted = useCallback((next: TicketDetailPersistedState | null) => {
     if (!next) return;
     if (next.ticketId !== ticketId) return;
-    setMessage(next.draftMessage || "");
+    setDraftHtml(next.draftMessage || "");
     setSelectedAssigneeId(next.selectedAssigneeId || "");
     setAssignReason(next.assignReason || "");
     setFocusedMessageId(next.focusedMessageId ?? null);
@@ -508,6 +645,16 @@ export default function TicketDetail() {
     restoreInFlightRef.current = true;
     restoreLoopStartedRef.current = false;
   }, [ticketId]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const state = pendingRestoreRef.current;
+    if (!state) return;
+    if (state.ticketId !== ticketId) return;
+    const next = state.draftMessage || "<p></p>";
+    if (editor.getHTML() === next) return;
+    editor.commands.setContent(next);
+  }, [editor, ticketId]);
 
   const attemptRestoreUi = useCallback(() => {
     if (restoreLoopStartedRef.current) return;
@@ -589,19 +736,28 @@ export default function TicketDetail() {
       if (!state) return;
       applyPersisted(state);
     };
-    window.addEventListener("beforeunload", saveNow);
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const hasDraftText = Boolean(editor?.getText().trim());
+      const hasDraftFiles = messageFilesRef.current.length > 0;
+      if (hasDraftText || hasDraftFiles) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+      saveNow();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.removeEventListener("beforeunload", saveNow);
+      window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [user, saveNow, applyPersisted]);
+  }, [user, saveNow, applyPersisted, editor, messageFilesRef]);
 
   useEffect(() => {
     if (!user) return;
     const id = setTimeout(() => saveNow(), 200);
     return () => clearTimeout(id);
-  }, [user, ticketId, message, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt, saveNow]);
+  }, [user, ticketId, draftHtml, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt, saveNow]);
 
   const handleUpdateStatus = (status: TicketStatus) => {
     const requiresAssignee =
@@ -634,8 +790,73 @@ export default function TicketDetail() {
     );
   };
 
-  const handleSendMessage = () => {
-    if (!message.trim()) return;
+  const addMessageFiles = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const allowedMime = new Set(["image/png", "image/jpeg", "application/pdf"]);
+    const allowedExt = new Set([".png", ".jpg", ".jpeg", ".pdf"]);
+    const maxSize = 3 * 1024 * 1024;
+    const toExt = (name: string) => {
+      const idx = name.lastIndexOf(".");
+      return idx >= 0 ? name.slice(idx).toLowerCase() : "";
+    };
+
+    let invalid = 0;
+    let tooBig = 0;
+    let tooMany = 0;
+
+    setMessageFiles((prev) => {
+      const next = [...prev];
+      for (const f of Array.from(files)) {
+        if (next.length >= 5) {
+          tooMany += 1;
+          continue;
+        }
+        const ext = toExt(f.name);
+        const mimeOk = allowedMime.has(f.type);
+        const extOk = allowedExt.has(ext);
+        const sizeOk = f.size <= maxSize;
+        const pairOk =
+          (ext === ".png" && f.type === "image/png")
+          || ((ext === ".jpg" || ext === ".jpeg") && f.type === "image/jpeg")
+          || (ext === ".pdf" && f.type === "application/pdf");
+
+        if (!sizeOk) {
+          tooBig += 1;
+          continue;
+        }
+        if (!mimeOk || !extOk || !pairOk) {
+          invalid += 1;
+          continue;
+        }
+        const url = URL.createObjectURL(f);
+        next.push({ file: f, url });
+      }
+      return next;
+    });
+
+    if (invalid > 0 || tooBig > 0 || tooMany > 0) {
+      const parts: string[] = [];
+      if (invalid > 0) parts.push(`${invalid} arquivo(s) com tipo/extensão inválidos`);
+      if (tooBig > 0) parts.push(`${tooBig} arquivo(s) acima de 3MB`);
+      if (tooMany > 0) parts.push(`limite de 5 anexos atingido`);
+      toast({
+        title: "Alguns anexos não foram adicionados",
+        description: parts.join(", ") + ".",
+        variant: "destructive",
+      });
+    }
+  }, []);
+
+  const removeMessageFile = useCallback((idx: number) => {
+    setMessageFiles((prev) => {
+      const row = prev[idx];
+      if (row?.url) URL.revokeObjectURL(row.url);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  const handleSendMessage = async () => {
+    if (sendingMessage) return;
     if (!canCreateTicketMessageUI({ canInteract: true, status: ticket?.status })) {
       toast({
         title: "Chamado finalizado",
@@ -644,21 +865,53 @@ export default function TicketDetail() {
       });
       return;
     }
-    messageMutation.mutate(
-      { ticketId, data: { message: message.trim() } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
-          queryClient.invalidateQueries({ queryKey: getGetTicketQueryKey(ticketId) });
-          if (canManageRole) {
-            customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
-              .then((data) => setAuditLogs(Array.isArray(data) ? data : []))
-              .catch(() => null);
-          }
-          setMessage("");
-        }
+
+    const html = editor?.getHTML() ?? "";
+    const text = editor?.getText().trim() ?? "";
+    if (!text && messageFiles.length === 0) return;
+
+    setSendingMessage(true);
+    try {
+      const token = localStorage.getItem("ti_support_token");
+      const form = new FormData();
+      form.append("format", "HTML");
+      form.append("message", html);
+      messageFiles.forEach((f) => form.append("files", f.file));
+
+      const resp = await fetch(`/api/tickets/${ticketId}/messages`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
+      if (!resp.ok) {
+        const raw = await resp.text();
+        let data: any = null;
+        try { data = raw ? JSON.parse(raw) : null; } catch { data = { raw }; }
+        throw new Error(data?.error || "Não foi possível enviar a mensagem.");
       }
-    );
+
+      await queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(ticketId) });
+      await queryClient.invalidateQueries({ queryKey: getGetTicketQueryKey(ticketId) });
+      if (canManageRole) {
+        customFetch<TicketAuditLog[]>(`/api/tickets/${ticketId}/audit`)
+          .then((data) => setAuditLogs(Array.isArray(data) ? data : []))
+          .catch(() => null);
+      }
+
+      messageFiles.forEach((f) => URL.revokeObjectURL(f.url));
+      setMessageFiles([]);
+      setShowEmojiPicker(false);
+      editor?.commands.clearContent(true);
+      setDraftHtml("");
+    } catch (e: any) {
+      toast({
+        title: "Falha ao enviar mensagem",
+        description: e?.message || "Tente novamente em instantes.",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   const handleResolve = async () => {
@@ -1181,6 +1434,8 @@ export default function TicketDetail() {
                     const isMe = msg.senderId === user?.id;
                     const avatarName = isMe ? (user?.name ?? "Você") : msg.sender.name;
                     const avatarUserId = msg.sender?.id ?? msg.senderId;
+                    const msgFormat = (msg as any).format ?? "PLAIN";
+                    const msgAttachments = ((msg as any).attachments ?? []) as MessageAttachment[];
                     return (
                       <div
                         key={msg.id}
@@ -1208,7 +1463,46 @@ export default function TicketDetail() {
                             focusedMessageId === msg.id ? "ring-2 ring-primary/40 ring-offset-2 ring-offset-background" : null,
                             isMe ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm"
                           )}>
-                            {msg.message}
+                            {msgFormat === "HTML" ? (
+                              <div
+                                className={cn("prose prose-sm max-w-none prose-a:underline prose-a:underline-offset-2", isMe ? "prose-invert" : null)}
+                                dangerouslySetInnerHTML={{ __html: String((msg as any).message || "") }}
+                              />
+                            ) : (
+                              <span className="whitespace-pre-wrap">{msg.message}</span>
+                            )}
+
+                            {msgAttachments.length > 0 ? (
+                              <div className={cn("mt-2 pt-2 border-t border-border/40 space-y-1", isMe ? "border-primary-foreground/20" : null)}>
+                                {msgAttachments.map((att) => (
+                                  <div key={att.id} className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] truncate">
+                                      {att.filename}
+                                    </span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        onClick={() => viewMessageAttachment(msg.id, att)}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        onClick={() => downloadMessageAttachment(msg.id, att)}
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -1234,29 +1528,226 @@ export default function TicketDetail() {
                       Este chamado está finalizado e não aceita novas interações.
                     </p>
                   ) : null}
-                  <div className="flex gap-2">
-                    <Textarea
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      placeholder="Digite sua mensagem..."
-                      className="min-h-[80px] resize-none"
-                      disabled={!canSendNewMessage}
-                      onKeyDown={(e) => {
-                        if (!canSendNewMessage) return;
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendMessage();
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Negrito" onClick={() => editor?.chain().focus().toggleBold().run()} disabled={!canSendNewMessage || !editor}>
+                        <Bold className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Itálico" onClick={() => editor?.chain().focus().toggleItalic().run()} disabled={!canSendNewMessage || !editor}>
+                        <Italic className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Sublinhado" onClick={() => editor?.chain().focus().toggleUnderline().run()} disabled={!canSendNewMessage || !editor}>
+                        <UnderlineIcon className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Tachado" onClick={() => editor?.chain().focus().toggleStrike().run()} disabled={!canSendNewMessage || !editor}>
+                        <Strikethrough className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Lista" onClick={() => editor?.chain().focus().toggleBulletList().run()} disabled={!canSendNewMessage || !editor}>
+                        <List className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Lista numerada" onClick={() => editor?.chain().focus().toggleOrderedList().run()} disabled={!canSendNewMessage || !editor}>
+                        <ListOrdered className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Citação" onClick={() => editor?.chain().focus().toggleBlockquote().run()} disabled={!canSendNewMessage || !editor}>
+                        <Quote className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Código" onClick={() => editor?.chain().focus().toggleCodeBlock().run()} disabled={!canSendNewMessage || !editor}>
+                        <Code className="h-4 w-4" />
+                      </Button>
+
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Alinhar à esquerda" onClick={() => editor?.chain().focus().setTextAlign("left").run()} disabled={!canSendNewMessage || !editor}>
+                        <AlignLeft className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Centralizar" onClick={() => editor?.chain().focus().setTextAlign("center").run()} disabled={!canSendNewMessage || !editor}>
+                        <AlignCenter className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Alinhar à direita" onClick={() => editor?.chain().focus().setTextAlign("right").run()} disabled={!canSendNewMessage || !editor}>
+                        <AlignRight className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Justificar" onClick={() => editor?.chain().focus().setTextAlign("justify").run()} disabled={!canSendNewMessage || !editor}>
+                        <AlignJustify className="h-4 w-4" />
+                      </Button>
+
+                      <Select
+                        value=""
+                        onValueChange={(v) => {
+                          if (!editor) return;
+                          if (v === "__unset__") {
+                            editor.chain().focus().unsetMark("textStyle").run();
+                            return;
+                          }
+                          editor.chain().focus().setMark("textStyle", { fontSize: v }).run();
+                        }}
+                        disabled={!canSendNewMessage || !editor}
+                      >
+                        <SelectTrigger className="h-8 w-[120px]">
+                          <SelectValue placeholder="Fonte" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="12px">12px</SelectItem>
+                          <SelectItem value="14px">14px</SelectItem>
+                          <SelectItem value="16px">16px</SelectItem>
+                          <SelectItem value="18px">18px</SelectItem>
+                          <SelectItem value="__unset__">Padrão</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <Select
+                        value=""
+                        onValueChange={(v) => {
+                          if (!editor) return;
+                          if (v === "__unset__") {
+                            editor.chain().focus().unsetColor().run();
+                            return;
+                          }
+                          editor.chain().focus().setColor(v).run();
+                        }}
+                        disabled={!canSendNewMessage || !editor}
+                      >
+                        <SelectTrigger className="h-8 w-[140px]">
+                          <SelectValue placeholder="Cor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="#111827">Preto</SelectItem>
+                          <SelectItem value="#1d4ed8">Azul</SelectItem>
+                          <SelectItem value="#b91c1c">Vermelho</SelectItem>
+                          <SelectItem value="#047857">Verde</SelectItem>
+                          <SelectItem value="__unset__">Padrão</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label="Inserir link"
+                        disabled={!canSendNewMessage || !editor}
+                        onClick={() => {
+                          if (!editor) return;
+                          const url = window.prompt("Informe a URL (http/https):") || "";
+                          if (!url.trim()) return;
+                          try {
+                            const u = new URL(url);
+                            if (!(u.protocol === "http:" || u.protocol === "https:")) throw new Error("invalid");
+                          } catch {
+                            toast({ title: "URL inválida", variant: "destructive" });
+                            return;
+                          }
+                          editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+                        }}
+                      >
+                        <Link2 className="h-4 w-4" />
+                      </Button>
+
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Desfazer" onClick={() => editor?.chain().focus().undo().run()} disabled={!canSendNewMessage || !editor?.can().undo()}>
+                        <Undo2 className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Refazer" onClick={() => editor?.chain().focus().redo().run()} disabled={!canSendNewMessage || !editor?.can().redo()}>
+                        <Redo2 className="h-4 w-4" />
+                      </Button>
+
+                      <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+                        <PopoverTrigger asChild>
+                          <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Emojis" disabled={!canSendNewMessage || !editor}>
+                            <Smile className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="p-0 w-[320px]" align="start">
+                          <Suspense fallback={<div className="p-3 flex items-center justify-center"><Spinner /></div>}>
+                            <EmojiPicker
+                              onEmojiClick={(emoji: EmojiClickData) => {
+                                editor?.chain().focus().insertContent(emoji.emoji).run();
+                              }}
+                              searchDisabled={false}
+                              skinTonesDisabled={false}
+                              lazyLoadEmojis
+                            />
+                          </Suspense>
+                        </PopoverContent>
+                      </Popover>
+
+                      <input
+                        ref={messageFileInputRef}
+                        type="file"
+                        className="hidden"
+                        multiple
+                        accept=".png,.jpg,.jpeg,.pdf,application/pdf,image/png,image/jpeg"
+                        onChange={(e) => {
+                          addMessageFiles(e.target.files);
+                          e.currentTarget.value = "";
+                        }}
+                        disabled={!canSendNewMessage}
+                      />
+                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label="Anexar arquivos" onClick={() => messageFileInputRef.current?.click()} disabled={!canSendNewMessage}>
+                        <Paperclip className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <div>
+                      <EditorContent
+                        editor={editor}
+                        onKeyDown={(e) => {
+                          if (!canSendNewMessage) return;
+                          if (!editor) return;
+                          if (e.ctrlKey && e.altKey) {
+                            const map: Record<string, string> = { "1": "👍", "2": "✅", "3": "❗", "4": "🙏", "5": "🎉" };
+                            const emoji = map[e.key];
+                            if (emoji) {
+                              e.preventDefault();
+                              editor.chain().focus().insertContent(emoji).run();
+                            }
+                          }
+                          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            void handleSendMessage();
+                          }
+                        }}
+                      />
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Atalhos: Ctrl+B (negrito), Ctrl+I (itálico), Ctrl+Alt+1..5 (emojis), Ctrl+Enter (enviar).
+                      </p>
+                    </div>
+
+                    {messageFiles.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {messageFiles.map((row, idx) => {
+                          const isImage = row.file.type.startsWith("image/");
+                          return (
+                            <div key={`${row.file.name}-${idx}`} className="flex items-center gap-2 rounded-md border p-2">
+                              <div className="h-10 w-10 rounded bg-muted flex items-center justify-center overflow-hidden">
+                                {isImage ? (
+                                  <img src={row.url} alt={row.file.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <FileText className="h-5 w-5 text-muted-foreground" />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium truncate">{row.file.name}</p>
+                                <p className="text-[11px] text-muted-foreground">{Math.ceil(row.file.size / 1024)} KB</p>
+                              </div>
+                              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="Remover anexo" onClick={() => removeMessageFile(idx)}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={() => void handleSendMessage()}
+                        disabled={
+                          !canSendNewMessage
+                          || sendingMessage
+                          || (!editor?.getText().trim() && messageFiles.length === 0)
                         }
-                      }}
-                    />
-                    <Button
-                      className="self-end"
-                      size="icon"
-                      onClick={handleSendMessage}
-                      disabled={!canSendNewMessage || !message.trim() || messageMutation.isPending}
-                    >
-                      <Send className="w-4 h-4" />
-                    </Button>
+                      >
+                        {sendingMessage ? <Spinner /> : <Send className="mr-2 h-4 w-4" />}
+                        Enviar
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ) : null}

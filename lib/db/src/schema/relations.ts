@@ -11,6 +11,7 @@ import { gestorCoordinatorsTable } from "./gestor-coordinators";
 import { gestorAllowedUsersTable } from "./gestor-allowed-users";
 import { ticketAuditLogsTable } from "./ticket-audit";
 import { ticketCollaboratorsTable } from "./ticket-collaborators";
+import { ticketMessageAttachmentsTable } from "./ticket-message-attachments";
 
 export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
@@ -154,7 +155,7 @@ export const ticketAttachmentsRelations = relations(ticketAttachmentsTable, ({ o
   }),
 }));
 
-export const messagesRelations = relations(messagesTable, ({ one }) => ({
+export const messagesRelations = relations(messagesTable, ({ one, many }) => ({
   ticket: one(ticketsTable, {
     fields: [messagesTable.ticketId],
     references: [ticketsTable.id],
@@ -162,6 +163,18 @@ export const messagesRelations = relations(messagesTable, ({ one }) => ({
   sender: one(usersTable, {
     fields: [messagesTable.senderId],
     references: [usersTable.id],
+  }),
+  attachments: many(ticketMessageAttachmentsTable),
+}));
+
+export const ticketMessageAttachmentsRelations = relations(ticketMessageAttachmentsTable, ({ one }) => ({
+  message: one(messagesTable, {
+    fields: [ticketMessageAttachmentsTable.messageId],
+    references: [messagesTable.id],
+  }),
+  ticket: one(ticketsTable, {
+    fields: [ticketMessageAttachmentsTable.ticketId],
+    references: [ticketsTable.id],
   }),
 }));
 

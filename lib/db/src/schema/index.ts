@@ -4,6 +4,7 @@ export * from "./messages";
 export * from "./ratings";
 export * from "./ticket-audit";
 export * from "./ticket-collaborators";
+export * from "./ticket-message-attachments";
 export * from "./chat";
 export * from "./chat-attachments";
 export * from "./direct-messages";

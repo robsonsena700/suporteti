@@ -7,7 +7,8 @@
  */
 import type { MessageFormat } from "./messageFormat";
 
-export interface CreateMessageBody {
+export type CreateMessageBodyTwo = {
+  message?: string;
   format?: MessageFormat;
-  message: string;
-}
+  files?: Blob[];
+};

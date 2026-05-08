@@ -23,12 +23,14 @@ import type {
   AssignTicketBody,
   AuthResponse,
   CreateMessageBody,
+  CreateMessageBodyTwo,
   CreateRatingBody,
   CreateTicketBody,
   ErrorResponse,
   ExportReportsOverviewParams,
   ExportReportsTicketsParams,
   GestorConfig,
+  GetMessageAttachmentParams,
   GetRecentActivityParams,
   GetReportSummaryParams,
   GetReportsTicketsParams,
@@ -57,6 +59,7 @@ import type {
   StatusCount,
   Ticket,
   TicketDetail,
+  TicketMessageAttachment,
   TypeCount,
   UpdateGestorConfigBody,
   UpdateTicketBody,
@@ -1873,13 +1876,12 @@ export const getCreateMessageUrl = (ticketId: number) => {
 
 export const createMessage = async (
   ticketId: number,
-  createMessageBody: CreateMessageBody,
+  createMessageBody: CreateMessageBody | CreateMessageBodyTwo,
   options?: RequestInit,
 ): Promise<Message> => {
   return customFetch<Message>(getCreateMessageUrl(ticketId), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
     body: JSON.stringify(createMessageBody),
   });
 };
@@ -1891,14 +1893,20 @@ export const getCreateMessageMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createMessage>>,
     TError,
-    { ticketId: number; data: BodyType<CreateMessageBody> },
+    {
+      ticketId: number;
+      data: BodyType<CreateMessageBody | CreateMessageBodyTwo>;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof createMessage>>,
   TError,
-  { ticketId: number; data: BodyType<CreateMessageBody> },
+  {
+    ticketId: number;
+    data: BodyType<CreateMessageBody | CreateMessageBodyTwo>;
+  },
   TContext
 > => {
   const mutationKey = ["createMessage"];
@@ -1912,7 +1920,10 @@ export const getCreateMessageMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof createMessage>>,
-    { ticketId: number; data: BodyType<CreateMessageBody> }
+    {
+      ticketId: number;
+      data: BodyType<CreateMessageBody | CreateMessageBodyTwo>;
+    }
   > = (props) => {
     const { ticketId, data } = props ?? {};
 
@@ -1925,7 +1936,9 @@ export const getCreateMessageMutationOptions = <
 export type CreateMessageMutationResult = NonNullable<
   Awaited<ReturnType<typeof createMessage>>
 >;
-export type CreateMessageMutationBody = BodyType<CreateMessageBody>;
+export type CreateMessageMutationBody = BodyType<
+  CreateMessageBody | CreateMessageBodyTwo
+>;
 export type CreateMessageMutationError = ErrorType<ErrorResponse>;
 
 /**
@@ -1938,18 +1951,268 @@ export const useCreateMessage = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createMessage>>,
     TError,
-    { ticketId: number; data: BodyType<CreateMessageBody> },
+    {
+      ticketId: number;
+      data: BodyType<CreateMessageBody | CreateMessageBodyTwo>;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof createMessage>>,
   TError,
-  { ticketId: number; data: BodyType<CreateMessageBody> },
+  {
+    ticketId: number;
+    data: BodyType<CreateMessageBody | CreateMessageBodyTwo>;
+  },
   TContext
 > => {
   return useMutation(getCreateMessageMutationOptions(options));
 };
+
+/**
+ * @summary Listar anexos de uma mensagem do chamado
+ */
+export const getListMessageAttachmentsUrl = (
+  ticketId: number,
+  messageId: number,
+) => {
+  return `/api/tickets/${ticketId}/messages/${messageId}/attachments`;
+};
+
+export const listMessageAttachments = async (
+  ticketId: number,
+  messageId: number,
+  options?: RequestInit,
+): Promise<TicketMessageAttachment[]> => {
+  return customFetch<TicketMessageAttachment[]>(
+    getListMessageAttachmentsUrl(ticketId, messageId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListMessageAttachmentsQueryKey = (
+  ticketId: number,
+  messageId: number,
+) => {
+  return [
+    `/api/tickets/${ticketId}/messages/${messageId}/attachments`,
+  ] as const;
+};
+
+export const getListMessageAttachmentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMessageAttachments>>,
+  TError = ErrorType<unknown>,
+>(
+  ticketId: number,
+  messageId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMessageAttachments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListMessageAttachmentsQueryKey(ticketId, messageId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMessageAttachments>>
+  > = ({ signal }) =>
+    listMessageAttachments(ticketId, messageId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(ticketId && messageId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMessageAttachments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMessageAttachmentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMessageAttachments>>
+>;
+export type ListMessageAttachmentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Listar anexos de uma mensagem do chamado
+ */
+
+export function useListMessageAttachments<
+  TData = Awaited<ReturnType<typeof listMessageAttachments>>,
+  TError = ErrorType<unknown>,
+>(
+  ticketId: number,
+  messageId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMessageAttachments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMessageAttachmentsQueryOptions(
+    ticketId,
+    messageId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Baixar/visualizar um anexo de mensagem do chamado
+ */
+export const getGetMessageAttachmentUrl = (
+  ticketId: number,
+  messageId: number,
+  attachmentId: number,
+  params?: GetMessageAttachmentParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/tickets/${ticketId}/messages/${messageId}/attachments/${attachmentId}?${stringifiedParams}`
+    : `/api/tickets/${ticketId}/messages/${messageId}/attachments/${attachmentId}`;
+};
+
+export const getMessageAttachment = async (
+  ticketId: number,
+  messageId: number,
+  attachmentId: number,
+  params?: GetMessageAttachmentParams,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(
+    getGetMessageAttachmentUrl(ticketId, messageId, attachmentId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetMessageAttachmentQueryKey = (
+  ticketId: number,
+  messageId: number,
+  attachmentId: number,
+  params?: GetMessageAttachmentParams,
+) => {
+  return [
+    `/api/tickets/${ticketId}/messages/${messageId}/attachments/${attachmentId}`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetMessageAttachmentQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMessageAttachment>>,
+  TError = ErrorType<unknown>,
+>(
+  ticketId: number,
+  messageId: number,
+  attachmentId: number,
+  params?: GetMessageAttachmentParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMessageAttachment>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetMessageAttachmentQueryKey(ticketId, messageId, attachmentId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMessageAttachment>>
+  > = ({ signal }) =>
+    getMessageAttachment(ticketId, messageId, attachmentId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(ticketId && messageId && attachmentId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMessageAttachment>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMessageAttachmentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMessageAttachment>>
+>;
+export type GetMessageAttachmentQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Baixar/visualizar um anexo de mensagem do chamado
+ */
+
+export function useGetMessageAttachment<
+  TData = Awaited<ReturnType<typeof getMessageAttachment>>,
+  TError = ErrorType<unknown>,
+>(
+  ticketId: number,
+  messageId: number,
+  attachmentId: number,
+  params?: GetMessageAttachmentParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMessageAttachment>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMessageAttachmentQueryOptions(
+    ticketId,
+    messageId,
+    attachmentId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Obter avaliação de um chamado

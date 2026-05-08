@@ -5,9 +5,7 @@
  * API do Sistema de Suporte TI
  * OpenAPI spec version: 0.1.0
  */
-import type { MessageFormat } from "./messageFormat";
 
-export interface CreateMessageBody {
-  format?: MessageFormat;
-  message: string;
-}
+export type GetMessageAttachmentParams = {
+  download?: boolean;
+};

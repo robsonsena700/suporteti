@@ -5,13 +5,17 @@
  * API do Sistema de Suporte TI
  * OpenAPI spec version: 0.1.0
  */
+import type { MessageFormat } from "./messageFormat";
+import type { TicketMessageAttachment } from "./ticketMessageAttachment";
 import type { UserRef } from "./userRef";
 
 export interface Message {
   id: number;
   ticketId: number;
   senderId: number;
+  format: MessageFormat;
   message: string;
   createdAt: Date;
   sender: UserRef;
+  attachments: TicketMessageAttachment[];
 }

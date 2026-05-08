@@ -44,6 +44,7 @@ if (!process.env.VITE_API_PROXY_TARGET && dotEnv?.VITE_API_PROXY_TARGET) {
 
 const rawPort = process.env.PORT ?? "5174";
 const port = Number(rawPort);
+const strictPort = String(process.env.VITE_STRICT_PORT ?? "false").toLowerCase() === "true";
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -121,7 +122,7 @@ export default defineConfig(async () => {
     },
     server: {
       port,
-      strictPort: true,
+      strictPort,
       host: "0.0.0.0",
       allowedHosts: true,
       fs: {

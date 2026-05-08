@@ -636,6 +636,19 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateMessageBody"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                format:
+                  $ref: "#/components/schemas/MessageFormat"
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
       responses:
         "201":
           description: Mensagem enviada
@@ -649,6 +662,67 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /tickets/{ticketId}/messages/{messageId}/attachments:
+    get:
+      operationId: listMessageAttachments
+      tags: [messages]
+      summary: Listar anexos de uma mensagem do chamado
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Lista de anexos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TicketMessageAttachment"
+
+  /tickets/{ticketId}/messages/{messageId}/attachments/{attachmentId}:
+    get:
+      operationId: getMessageAttachment
+      tags: [messages]
+      summary: Baixar/visualizar um anexo de mensagem do chamado
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Arquivo
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
 
   # ───────── RATINGS ─────────
   /tickets/{ticketId}/rating:
@@ -1481,6 +1555,37 @@ components:
         - reason
 
     # ─── Message ───
+    MessageFormat:
+      type: string
+      enum: ["PLAIN", "HTML"]
+
+    TicketMessageAttachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        ticketId:
+          type: integer
+        messageId:
+          type: integer
+        filename:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - ticketId
+        - messageId
+        - filename
+        - mimeType
+        - size
+        - createdAt
+
     Message:
       type: object
       properties:
@@ -1490,6 +1595,8 @@ components:
           type: integer
         senderId:
           type: integer
+        format:
+          $ref: "#/components/schemas/MessageFormat"
         message:
           type: string
         createdAt:
@@ -1497,17 +1604,25 @@ components:
           format: date-time
         sender:
           $ref: "#/components/schemas/UserRef"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketMessageAttachment"
       required:
         - id
         - ticketId
         - senderId
+        - format
         - message
         - createdAt
         - sender
+        - attachments
 
     CreateMessageBody:
       type: object
       properties:
+        format:
+          $ref: "#/components/schemas/MessageFormat"
         message:
           type: string
       required:
