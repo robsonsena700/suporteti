@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v1.0.26 (2026-05-14)
+- Chamados - Filtro município e exibir unidade de saúde no card. (f4e2b83)
+- chore(release): v1.0.25 (a8b4689)
+
 ## v1.0.24 (2026-05-08)
 - Perfil Coordenador - Visualizar chamados do perfil Gestor (11f6dae)
 - Relatório - Ranking de chamados para o perfil Gestor (c16b9ca)
@@ -106,6 +110,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
