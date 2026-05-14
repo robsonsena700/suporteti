@@ -1184,7 +1184,7 @@ export default function TicketDetail() {
     || (user?.id != null && collaboratorIdSet.has(user.id))
     || ((user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST) && !ownerHasCoordinator);
   const canSendNewMessage = canCreateTicketMessageUI({ canInteract: canInteractTicket, status: ticket.status });
-  const canAssignTicket = canManageRole && (ticket.assignedToId == null || ticket.assignedToId === user?.id);
+  const canAssignTicket = canManageRole && (isAdminOrAnalyst || ticket.assignedToId == null || ticket.assignedToId === user?.id);
   const hasValidAssignee = Boolean(
     ticket.assignedToId
     && ticket.assignedTo
