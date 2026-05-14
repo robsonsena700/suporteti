@@ -32,11 +32,9 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@workspace/api-client-react/custom-fetch";
 import { cn } from "@/lib/utils";
+import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
+import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 
-const UFS = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", 
-  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
-];
 const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
 const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v2";
@@ -203,6 +201,7 @@ function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; 
 
 export default function Tickets() {
   const { user } = useAuth();
+  const canSelectUf = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR || user?.role === UserRole.GESTOR;
   const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
@@ -228,8 +227,21 @@ export default function Tickets() {
   const [lastActiveTicketId, setLastActiveTicketId] = useState<number | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
+  const municipalityValueRef = useRef<string | undefined>(undefined);
+  const [municipalities, setMunicipalities] = useState<string[]>([]);
+  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
 
   const activeMineOnly = mineOnlyByTab[typeTab] ?? true;
+
+  useEffect(() => {
+    municipalityValueRef.current = filters.municipality;
+  }, [filters.municipality]);
+
+  const municipalityUf = useMemo(() => {
+    if (!user) return "";
+    if (canSelectUf) return filters.uf ?? "";
+    return user.uf ?? "";
+  }, [user, canSelectUf, filters.uf]);
 
   useEffect(() => {
     if (typeTab !== "RESOLVED" && (filters.status === TicketStatus.RESOLVED || filters.status === TicketStatus.CLOSED)) {
@@ -252,6 +264,53 @@ export default function Tickets() {
       return next;
     });
   }, [canManageRole, activeMineOnly, canSeeNoCoordinatorFilter, noCoordinatorOnly]);
+
+  useEffect(() => {
+    if (!municipalityUf) {
+      setMunicipalities([]);
+      setFilters((f) => (f.municipality ? { ...f, municipality: undefined } : f));
+      return;
+    }
+
+    const cached = getCachedMunicipalities(municipalityUf);
+    if (cached.length > 0) {
+      setMunicipalities(cached);
+    }
+
+    if (typeof navigator !== "undefined" && !navigator.onLine && cached.length > 0) {
+      const current = municipalityValueRef.current;
+      if (current && !cached.includes(current)) {
+        setFilters((f) => ({ ...f, municipality: undefined }));
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingMunicipalities(true);
+
+    fetchMunicipalitiesByUf(municipalityUf)
+      .then((data) => {
+        if (cancelled) return;
+        setMunicipalities(data);
+        const current = municipalityValueRef.current;
+        if (current && !data.includes(current)) {
+          setFilters((f) => ({ ...f, municipality: undefined }));
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMunicipalities([]);
+        setFilters((f) => ({ ...f, municipality: undefined }));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingMunicipalities(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [municipalityUf]);
 
   const listTicketsParams: ListTicketsParams = {
     status:
@@ -543,12 +602,12 @@ export default function Tickets() {
               >
                 <div className="text-left">
                   <p className="text-sm font-semibold">Filtros de chamados</p>
-                  <p className="text-xs text-muted-foreground">Status, prioridade, localização, responsável e ordenação</p>
+                  <p className="text-xs text-muted-foreground">Status, prioridade, UF, município, localização, responsável e ordenação</p>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="pt-2">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className={cn("grid grid-cols-1 gap-4", canSelectUf ? "md:grid-cols-4" : "md:grid-cols-3")}>
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Status</label>
                       <Select
@@ -617,12 +676,12 @@ export default function Tickets() {
                       </Select>
                     </div>
 
-                    {(user?.role === "ADMIN" || user?.role === "ANALYST") && (
+                    {canSelectUf ? (
                       <div className="space-y-2">
                         <label className="text-sm font-medium">UF</label>
                         <Select
                           value={filters.uf || "all"}
-                          onValueChange={(v) => setFilters(f => ({ ...f, uf: v === "all" ? undefined : v }))}
+                          onValueChange={(v) => setFilters((f) => ({ ...f, uf: v === "all" ? undefined : v, municipality: undefined }))}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Todas as UFs" />
@@ -635,7 +694,32 @@ export default function Tickets() {
                           </SelectContent>
                         </Select>
                       </div>
-                    )}
+                    ) : null}
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-sm font-medium">Município</label>
+                        {filters.municipality ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setFilters((f) => ({ ...f, municipality: undefined }))}
+                          >
+                            Limpar
+                          </Button>
+                        ) : null}
+                      </div>
+                      <MunicipalityCombobox
+                        uf={municipalityUf}
+                        value={filters.municipality ?? ""}
+                        options={municipalities}
+                        loading={isLoadingMunicipalities}
+                        disabled={!municipalityUf}
+                        onChange={(value) => setFilters((f) => ({ ...f, municipality: value }))}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -751,6 +835,11 @@ export default function Tickets() {
                         <p className="text-xs text-muted-foreground mt-1 truncate">
                           {ticket.createdBy?.name ?? "—"} • {ticket.uf} - {ticket.municipality}
                         </p>
+                        {ticket.establishment ? (
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                            {ticket.establishment}
+                          </p>
+                        ) : null}
                         {ticket.createdBy?.role === UserRole.GESTOR ? (
                           <div className="mt-1">
                             <span className="rounded-full border border-indigo-300/50 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
