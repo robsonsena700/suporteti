@@ -150,6 +150,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Conta desativada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetErrorResponse"
         "404":
           description: E-mail não encontrado
           content:
@@ -183,6 +189,43 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "400":
           description: Token inválido ou expirado / senha inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetErrorResponse"
+        "403":
+          description: Conta desativada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetErrorResponse"
+
+  /auth/reset-password/validate:
+    post:
+      operationId: validateResetPasswordToken
+      tags: [auth]
+      summary: Validar token de redefinição de senha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateResetPasswordTokenBody"
+      responses:
+        "200":
+          description: Token válido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetErrorResponse"
+        "403":
+          description: Conta desativada
           content:
             application/json:
               schema:
@@ -1491,6 +1534,14 @@ components:
         - token
         - newPassword
 
+    ValidateResetPasswordTokenBody:
+      type: object
+      properties:
+        token:
+          type: string
+      required:
+        - token
+
     AdminUpdateUserEmailBody:
       type: object
       properties:
@@ -1512,7 +1563,7 @@ components:
           type: string
         code:
           type: ["string", "null"]
-          enum: [TOKEN_INVALID, TOKEN_EXPIRED]
+          enum: [TOKEN_INVALID, TOKEN_EXPIRED, PASSWORD_WEAK, PASSWORD_REUSED, ACCOUNT_INACTIVE]
       required:
         - error
 

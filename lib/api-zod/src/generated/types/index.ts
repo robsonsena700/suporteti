@@ -108,3 +108,4 @@ export * from "./userRef";
 export * from "./userRefRole";
 export * from "./userRole";
 export * from "./userStatus";
+export * from "./validateResetPasswordTokenBody";

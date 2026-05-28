@@ -72,6 +72,7 @@ import type {
   UpdateUserBody,
   User,
   UserRef,
+  ValidateResetPasswordTokenBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -495,7 +496,7 @@ export const forgotPassword = async (
 };
 
 export const getForgotPasswordMutationOptions = <
-  TError = ErrorType<ErrorResponse>,
+  TError = ErrorType<ErrorResponse | PasswordResetErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -536,13 +537,15 @@ export type ForgotPasswordMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgotPassword>>
 >;
 export type ForgotPasswordMutationBody = BodyType<ForgotPasswordBody>;
-export type ForgotPasswordMutationError = ErrorType<ErrorResponse>;
+export type ForgotPasswordMutationError = ErrorType<
+  ErrorResponse | PasswordResetErrorResponse
+>;
 
 /**
  * @summary Solicitar recuperação de senha por e-mail
  */
 export const useForgotPassword = <
-  TError = ErrorType<ErrorResponse>,
+  TError = ErrorType<ErrorResponse | PasswordResetErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -645,6 +648,94 @@ export const useResetPassword = <
   TContext
 > => {
   return useMutation(getResetPasswordMutationOptions(options));
+};
+
+/**
+ * @summary Validar token de redefinição de senha
+ */
+export const getValidateResetPasswordTokenUrl = () => {
+  return `/api/auth/reset-password/validate`;
+};
+
+export const validateResetPasswordToken = async (
+  validateResetPasswordTokenBody: ValidateResetPasswordTokenBody,
+  options?: RequestInit,
+): Promise<MessageResponse> => {
+  return customFetch<MessageResponse>(getValidateResetPasswordTokenUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(validateResetPasswordTokenBody),
+  });
+};
+
+export const getValidateResetPasswordTokenMutationOptions = <
+  TError = ErrorType<PasswordResetErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateResetPasswordToken>>,
+    TError,
+    { data: BodyType<ValidateResetPasswordTokenBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof validateResetPasswordToken>>,
+  TError,
+  { data: BodyType<ValidateResetPasswordTokenBody> },
+  TContext
+> => {
+  const mutationKey = ["validateResetPasswordToken"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof validateResetPasswordToken>>,
+    { data: BodyType<ValidateResetPasswordTokenBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return validateResetPasswordToken(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ValidateResetPasswordTokenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof validateResetPasswordToken>>
+>;
+export type ValidateResetPasswordTokenMutationBody =
+  BodyType<ValidateResetPasswordTokenBody>;
+export type ValidateResetPasswordTokenMutationError =
+  ErrorType<PasswordResetErrorResponse>;
+
+/**
+ * @summary Validar token de redefinição de senha
+ */
+export const useValidateResetPasswordToken = <
+  TError = ErrorType<PasswordResetErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateResetPasswordToken>>,
+    TError,
+    { data: BodyType<ValidateResetPasswordTokenBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof validateResetPasswordToken>>,
+  TError,
+  { data: BodyType<ValidateResetPasswordTokenBody> },
+  TContext
+> => {
+  return useMutation(getValidateResetPasswordTokenMutationOptions(options));
 };
 
 /**

@@ -14,5 +14,6 @@ export * from "./gestor-allowed-users";
 export * from "./municipalities";
 export * from "./password-reset-tokens";
 export * from "./security-audit-logs";
+export * from "./user-password-history";
 export * from "./relations";
 export { ticketAttachmentsTable } from "./tickets";

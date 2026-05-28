@@ -46,6 +46,10 @@ export interface ResetPasswordBody {
   newPassword: string;
 }
 
+export interface ValidateResetPasswordTokenBody {
+  token: string;
+}
+
 export interface AdminUpdateUserEmailBody {
   newEmail: string;
   confirmNewEmail: string;
@@ -62,6 +66,9 @@ export type PasswordResetErrorResponseCode =
 export const PasswordResetErrorResponseCode = {
   TOKEN_INVALID: "TOKEN_INVALID",
   TOKEN_EXPIRED: "TOKEN_EXPIRED",
+  PASSWORD_WEAK: "PASSWORD_WEAK",
+  PASSWORD_REUSED: "PASSWORD_REUSED",
+  ACCOUNT_INACTIVE: "ACCOUNT_INACTIVE",
 } as const;
 
 export interface PasswordResetErrorResponse {

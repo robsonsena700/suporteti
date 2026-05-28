@@ -58,7 +58,7 @@ try {
   const adminToken = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
   const userToken = await login(USER_EMAIL, USER_PASSWORD);
 
-  const allUsers = await db.select({ id: usersTable.id, email: usersTable.email }).from(usersTable);
+  const allUsers = await db.select({ id: usersTable.id, email: usersTable.email, status: usersTable.status }).from(usersTable);
   const userRow = allUsers.find((u: any) => String(u.email || "").toLowerCase() === String(USER_EMAIL).toLowerCase());
   assert.ok(userRow?.id, "Usuário de teste não encontrado no banco.");
 
@@ -97,6 +97,14 @@ try {
       expiresAt: new Date(Date.now() - 60_000),
     });
 
+    const v = await jsonFetch(`${API_BASE}/auth/reset-password/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    assert.equal(v.status, 400);
+    assert.equal(v.data?.code, "TOKEN_EXPIRED");
+
     const r = await jsonFetch(`${API_BASE}/auth/reset-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -117,6 +125,77 @@ try {
   }
 
   {
+    const v = await jsonFetch(`${API_BASE}/auth/reset-password/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: `invalid_${Date.now()}` }),
+    });
+    assert.equal(v.status, 400);
+    assert.equal(v.data?.code, "TOKEN_INVALID");
+  }
+
+  {
+    const token = `weak_${Date.now()}`;
+    const tokenHash = hashResetToken(token);
+    await db.insert(passwordResetTokensTable).values({
+      userId: userRow.id,
+      tokenHash,
+      purpose: "forgot_password",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const r = await jsonFetch(`${API_BASE}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword: "Senha1234" }),
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.data?.code, "PASSWORD_WEAK");
+  }
+
+  {
+    const oldStatus = userRow.status;
+    const deactivate = await jsonFetch(`${API_BASE}/users/${userRow.id}/status`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "INACTIVE" }),
+    });
+    assert.equal(deactivate.status, 200);
+
+    const token = `inactive_${Date.now()}`;
+    const tokenHash = hashResetToken(token);
+    await db.insert(passwordResetTokensTable).values({
+      userId: userRow.id,
+      tokenHash,
+      purpose: "forgot_password",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const v = await jsonFetch(`${API_BASE}/auth/reset-password/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    assert.equal(v.status, 403);
+    assert.equal(v.data?.code, "ACCOUNT_INACTIVE");
+
+    const r = await jsonFetch(`${API_BASE}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword: "NovaSenha#123" }),
+    });
+    assert.equal(r.status, 403);
+    assert.equal(r.data?.code, "ACCOUNT_INACTIVE");
+
+    const restore = await jsonFetch(`${API_BASE}/users/${userRow.id}/status`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: oldStatus || "ACTIVE" }),
+    });
+    assert.equal(restore.status, 200);
+  }
+
+  {
     const token = `ok_${Date.now()}`;
     const tokenHash = hashResetToken(token);
     await db.insert(passwordResetTokensTable).values({
@@ -125,6 +204,13 @@ try {
       purpose: "forgot_password",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     });
+
+    const v = await jsonFetch(`${API_BASE}/auth/reset-password/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    assert.equal(v.status, 200);
 
     const newPassword = "SenhaTemp#123";
     const r = await jsonFetch(`${API_BASE}/auth/reset-password`, {
@@ -135,6 +221,22 @@ try {
     assert.equal(r.status, 200);
 
     await login(USER_EMAIL, newPassword);
+
+    const tokenReuse = `reuse_${Date.now()}`;
+    const tokenReuseHash = hashResetToken(tokenReuse);
+    await db.insert(passwordResetTokensTable).values({
+      userId: userRow.id,
+      tokenHash: tokenReuseHash,
+      purpose: "forgot_password",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const reuse = await jsonFetch(`${API_BASE}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: tokenReuse, newPassword }),
+    });
+    assert.equal(reuse.status, 400);
+    assert.equal(reuse.data?.code, "PASSWORD_REUSED");
 
     const tokenRestore = `restore_${Date.now()}`;
     const tokenRestoreHash = hashResetToken(tokenRestore);

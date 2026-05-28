@@ -118,6 +118,17 @@ export const ResetPasswordResponse = zod.object({
 });
 
 /**
+ * @summary Validar token de redefinição de senha
+ */
+export const ValidateResetPasswordTokenBody = zod.object({
+  token: zod.string(),
+});
+
+export const ValidateResetPasswordTokenResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
  * @summary Listar usuários (ADMIN)
  */
 export const ListUsersQueryParams = zod.object({

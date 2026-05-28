@@ -14,6 +14,7 @@ import { ticketCollaboratorsTable } from "./ticket-collaborators";
 import { ticketMessageAttachmentsTable } from "./ticket-message-attachments";
 import { passwordResetTokensTable } from "./password-reset-tokens";
 import { securityAuditLogsTable } from "./security-audit-logs";
+import { userPasswordHistoryTable } from "./user-password-history";
 
 export const usersRelations = relations(usersTable, ({ many }) => ({
   createdTickets: many(ticketsTable, { relationName: "createdBy" }),
@@ -34,6 +35,7 @@ export const usersRelations = relations(usersTable, ({ many }) => ({
   allowedByGestorsLinks: many(gestorAllowedUsersTable, { relationName: "gestorAllowed_user" }),
   passwordResetTokens: many(passwordResetTokensTable),
   securityAuditLogs: many(securityAuditLogsTable),
+  passwordHistory: many(userPasswordHistoryTable),
 }));
 
 export const userCoordinatorsRelations = relations(userCoordinatorsTable, ({ one }) => ({

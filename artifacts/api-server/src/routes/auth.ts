@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { db, passwordResetTokensTable, securityAuditLogsTable, usersTable } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { db, passwordResetTokensTable, securityAuditLogsTable, userPasswordHistoryTable, usersTable } from "@workspace/db";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { RegisterBody, LoginBody } from "@workspace/api-zod";
 import { signToken, requireAuth } from "../middlewares/auth";
 import { isValidCpf, normalizeCpf } from "../lib/cpf";
@@ -10,6 +10,7 @@ import { validateMunicipalityForUf } from "../lib/ibge";
 import { logger } from "../lib/logger";
 import { sendEmail } from "../lib/mailer";
 import { buildPasswordResetEmail, buildPasswordResetLink, generateResetToken, hashResetToken } from "../lib/password-reset";
+import { isPasswordReused, validatePasswordStrength } from "../lib/password-policy";
 
 const router: IRouter = Router();
 
@@ -241,8 +242,8 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     res.status(400).json({ error: "Informe a senha atual" });
     return;
   }
-  if (typeof newPassword !== "string" || newPassword.length < 8) {
-    res.status(400).json({ error: "A nova senha deve possuir no mínimo 8 caracteres" });
+  if (typeof newPassword !== "string") {
+    res.status(400).json({ error: "Informe a nova senha", code: "PASSWORD_WEAK" });
     return;
   }
 
@@ -252,6 +253,10 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     res.status(404).json({ error: "Usuário não encontrado" });
     return;
   }
+  if (user.status !== "ACTIVE") {
+    res.status(403).json({ error: "Sua conta está desativada. Entre em contato com o suporte.", code: "ACCOUNT_INACTIVE" });
+    return;
+  }
 
   const valid = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!valid) {
@@ -259,10 +264,38 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     return;
   }
 
+  const strength = validatePasswordStrength(newPassword);
+  if (!strength.ok) {
+    res.status(400).json({ error: strength.message, code: strength.code });
+    return;
+  }
+
+  const historyRows = await db
+    .select({ passwordHash: userPasswordHistoryTable.passwordHash })
+    .from(userPasswordHistoryTable)
+    .where(eq(userPasswordHistoryTable.userId, userId))
+    .orderBy(desc(userPasswordHistoryTable.createdAt))
+    .limit(2);
+  const recentHashes = [user.passwordHash, ...historyRows.map((r) => r.passwordHash)];
+  if (await isPasswordReused({ password: newPassword, hashes: recentHashes })) {
+    res.status(400).json({ error: "A nova senha não pode ser igual às últimas senhas utilizadas.", code: "PASSWORD_REUSED" });
+    return;
+  }
+
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  await db.update(usersTable)
-    .set({ passwordHash, mustChangePassword: false })
-    .where(eq(usersTable.id, userId));
+  await db.transaction(async (tx) => {
+    await tx.insert(userPasswordHistoryTable).values({ userId, passwordHash: user.passwordHash });
+    await tx.update(usersTable).set({ passwordHash, mustChangePassword: false }).where(eq(usersTable.id, userId));
+    const oldIds = await tx
+      .select({ id: userPasswordHistoryTable.id })
+      .from(userPasswordHistoryTable)
+      .where(eq(userPasswordHistoryTable.userId, userId))
+      .orderBy(desc(userPasswordHistoryTable.createdAt))
+      .offset(2);
+    if (oldIds.length > 0) {
+      await tx.delete(userPasswordHistoryTable).where(inArray(userPasswordHistoryTable.id, oldIds.map((r) => r.id)));
+    }
+  });
 
   res.json({ message: "Senha atualizada com sucesso" });
 });
@@ -304,7 +337,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
       ip,
       userAgent,
     });
-    res.status(403).json({ error: "Conta não está ativa" });
+    res.status(403).json({ error: "Sua conta está desativada. Entre em contato com o suporte.", code: "ACCOUNT_INACTIVE" });
     return;
   }
 
@@ -388,6 +421,45 @@ function resolvePublicBaseUrlFromRequest(req: any): string {
   return `http://localhost:${port}`;
 }
 
+router.post("/auth/reset-password/validate", async (req, res): Promise<void> => {
+  const body = req.body as { token?: unknown } | undefined;
+  const token = typeof body?.token === "string" ? body.token.trim() : "";
+  if (!token) {
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+
+  const tokenHash = hashResetToken(token);
+  const [row] = await db.select({
+    userId: passwordResetTokensTable.userId,
+    expiresAt: passwordResetTokensTable.expiresAt,
+    usedAt: passwordResetTokensTable.usedAt,
+  }).from(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+
+  if (!row || row.usedAt) {
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+
+  const now = new Date();
+  if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
+    res.status(400).json({ error: "Token expirado", code: "TOKEN_EXPIRED" });
+    return;
+  }
+
+  const [user] = await db.select({ status: usersTable.status }).from(usersTable).where(eq(usersTable.id, row.userId));
+  if (!user) {
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+  if (user.status !== "ACTIVE") {
+    res.status(403).json({ error: "Sua conta está desativada. Entre em contato com o suporte.", code: "ACCOUNT_INACTIVE" });
+    return;
+  }
+
+  res.json({ message: "OK" });
+});
+
 router.post("/auth/reset-password", async (req, res): Promise<void> => {
   const body = req.body as { token?: unknown; newPassword?: unknown } | undefined;
   const token = typeof body?.token === "string" ? body.token.trim() : "";
@@ -397,8 +469,9 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
     return;
   }
-  if (newPassword.length < 8) {
-    res.status(400).json({ error: "A nova senha deve possuir no mínimo 8 caracteres" });
+  const strength = validatePasswordStrength(newPassword);
+  if (!strength.ok) {
+    res.status(400).json({ error: strength.message, code: strength.code });
     return;
   }
 
@@ -447,13 +520,59 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
     return;
   }
 
+  const [user] = await db.select({ passwordHash: usersTable.passwordHash, status: usersTable.status }).from(usersTable).where(eq(usersTable.id, row.userId));
+  if (!user) {
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+  if (user.status !== "ACTIVE") {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_DENIED_INACTIVE",
+      targetUserId: row.userId,
+      ip,
+      userAgent,
+    });
+    res.status(403).json({ error: "Sua conta está desativada. Entre em contato com o suporte.", code: "ACCOUNT_INACTIVE" });
+    return;
+  }
+
+  const historyRows = await db
+    .select({ passwordHash: userPasswordHistoryTable.passwordHash })
+    .from(userPasswordHistoryTable)
+    .where(eq(userPasswordHistoryTable.userId, row.userId))
+    .orderBy(desc(userPasswordHistoryTable.createdAt))
+    .limit(2);
+  const recentHashes = [user.passwordHash, ...historyRows.map((r) => r.passwordHash)];
+  if (await isPasswordReused({ password: newPassword, hashes: recentHashes })) {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_DENIED_REUSED_PASSWORD",
+      targetUserId: row.userId,
+      ip,
+      userAgent,
+    });
+    res.status(400).json({ error: "A nova senha não pode ser igual às últimas senhas utilizadas.", code: "PASSWORD_REUSED" });
+    return;
+  }
+
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  await db.update(usersTable).set({ passwordHash, mustChangePassword: false }).where(eq(usersTable.id, row.userId));
-  await db.update(passwordResetTokensTable).set({
-    usedAt: now,
-    usedIp: ip,
-    usedUserAgent: userAgent,
-  }).where(and(eq(passwordResetTokensTable.id, row.id), sql`${passwordResetTokensTable.usedAt} is null`));
+  await db.transaction(async (tx) => {
+    await tx.insert(userPasswordHistoryTable).values({ userId: row.userId, passwordHash: user.passwordHash });
+    await tx.update(usersTable).set({ passwordHash, mustChangePassword: false }).where(eq(usersTable.id, row.userId));
+    await tx.update(passwordResetTokensTable).set({
+      usedAt: now,
+      usedIp: ip,
+      usedUserAgent: userAgent,
+    }).where(and(eq(passwordResetTokensTable.id, row.id), sql`${passwordResetTokensTable.usedAt} is null`));
+    const oldIds = await tx
+      .select({ id: userPasswordHistoryTable.id })
+      .from(userPasswordHistoryTable)
+      .where(eq(userPasswordHistoryTable.userId, row.userId))
+      .orderBy(desc(userPasswordHistoryTable.createdAt))
+      .offset(2);
+    if (oldIds.length > 0) {
+      await tx.delete(userPasswordHistoryTable).where(inArray(userPasswordHistoryTable.id, oldIds.map((r) => r.id)));
+    }
+  });
 
   await db.insert(securityAuditLogsTable).values({
     eventType: "PASSWORD_RESET_COMPLETED",
