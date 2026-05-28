@@ -382,6 +382,24 @@ export default function Tickets() {
     });
   }, [tickets, userFilter, locationFilter, responsibleFilter, sortBy, sortDir]);
 
+  const summaryCounts = useMemo(() => {
+    let openCount = 0;
+    let inProgressCount = 0;
+    let resolvedCount = 0;
+    let closedCount = 0;
+    let noCoordinatorCount = 0;
+
+    for (const t of visibleTickets) {
+      if (t.status === TicketStatus.OPEN) openCount += 1;
+      if (t.status === TicketStatus.IN_PROGRESS || t.status === TicketStatus.AWAITING_CUSTOMER) inProgressCount += 1;
+      if (t.status === TicketStatus.RESOLVED) resolvedCount += 1;
+      if (t.status === TicketStatus.CLOSED) closedCount += 1;
+      if (t.ownerHasCoordinator === false) noCoordinatorCount += 1;
+    }
+
+    return { openCount, inProgressCount, resolvedCount, closedCount, noCoordinatorCount };
+  }, [visibleTickets]);
+
   const buildPersisted = useCallback((): TicketsListPersistedState | null => {
     if (!user) return null;
     return {
@@ -771,6 +789,43 @@ export default function Tickets() {
           </Accordion>
         </CardContent>
       </Card>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {typeTab === "RESOLVED" ? (
+          <>
+            <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+              <span className="h-2 w-2 rounded-full bg-emerald-600" />
+              <span className="font-medium">Resolvidos:</span>
+              <span className="font-semibold">{summaryCounts.resolvedCount}</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+              <span className="h-2 w-2 rounded-full bg-slate-600" />
+              <span className="font-medium">Cancelados:</span>
+              <span className="font-semibold">{summaryCounts.closedCount}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+              <span className="h-2 w-2 rounded-full bg-slate-900" />
+              <span className="font-medium">Abertos:</span>
+              <span className="font-semibold">{summaryCounts.openCount}</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+              <span className="h-2 w-2 rounded-full bg-orange-500" />
+              <span className="font-medium">Em Andamento:</span>
+              <span className="font-semibold">{summaryCounts.inProgressCount}</span>
+            </div>
+          </>
+        )}
+        {canSeeNoCoordinatorFilter ? (
+          <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            <span className="font-medium">Sem Coordenador:</span>
+            <span className="font-semibold">{summaryCounts.noCoordinatorCount}</span>
+          </div>
+        ) : null}
+      </div>
 
       <Card>
         <CardContent className="p-4">
