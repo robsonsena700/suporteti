@@ -20,6 +20,7 @@ import type {
   ActivityItem,
   AddTicketCollaboratorsBody,
   AdminListUsersParams,
+  AdminUpdateUserEmailBody,
   AdminUsersPage,
   ApproveUserBody,
   AssignTicketBody,
@@ -916,6 +917,94 @@ export const useAdminResetUserPassword = <
   TContext
 > => {
   return useMutation(getAdminResetUserPasswordMutationOptions(options));
+};
+
+/**
+ * @summary Atualizar e-mail de um usuário (ADMIN)
+ */
+export const getAdminUpdateUserEmailUrl = (id: number) => {
+  return `/api/admin/users/${id}/email`;
+};
+
+export const adminUpdateUserEmail = async (
+  id: number,
+  adminUpdateUserEmailBody: AdminUpdateUserEmailBody,
+  options?: RequestInit,
+): Promise<MessageResponse> => {
+  return customFetch<MessageResponse>(getAdminUpdateUserEmailUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(adminUpdateUserEmailBody),
+  });
+};
+
+export const getAdminUpdateUserEmailMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateUserEmail>>,
+    TError,
+    { id: number; data: BodyType<AdminUpdateUserEmailBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUpdateUserEmail>>,
+  TError,
+  { id: number; data: BodyType<AdminUpdateUserEmailBody> },
+  TContext
+> => {
+  const mutationKey = ["adminUpdateUserEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUpdateUserEmail>>,
+    { id: number; data: BodyType<AdminUpdateUserEmailBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminUpdateUserEmail(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUpdateUserEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUpdateUserEmail>>
+>;
+export type AdminUpdateUserEmailMutationBody =
+  BodyType<AdminUpdateUserEmailBody>;
+export type AdminUpdateUserEmailMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Atualizar e-mail de um usuário (ADMIN)
+ */
+export const useAdminUpdateUserEmail = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateUserEmail>>,
+    TError,
+    { id: number; data: BodyType<AdminUpdateUserEmailBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUpdateUserEmail>>,
+  TError,
+  { id: number; data: BodyType<AdminUpdateUserEmailBody> },
+  TContext
+> => {
+  return useMutation(getAdminUpdateUserEmailMutationOptions(options));
 };
 
 /**

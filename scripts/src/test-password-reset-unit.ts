@@ -9,7 +9,7 @@ const mod = await import(pathToFileURL(utilPath).href);
 const { generateResetToken, hashResetToken, buildPasswordResetLink } = mod as {
   generateResetToken: () => string;
   hashResetToken: (t: string) => string;
-  buildPasswordResetLink: (t: string) => string;
+  buildPasswordResetLink: (t: string, baseUrl?: string) => string;
 };
 
 process.env.APP_PUBLIC_URL = "https://suporteti.exemplo.com";
@@ -25,3 +25,5 @@ assert.notEqual(hashResetToken("abc"), hashResetToken("abcd"));
 const link = buildPasswordResetLink("token123");
 assert.ok(link.startsWith("https://suporteti.exemplo.com/redefinir-senha?token="));
 
+const link2 = buildPasswordResetLink("token123", "http://localhost:5111");
+assert.equal(link2, "http://localhost:5111/redefinir-senha?token=token123");

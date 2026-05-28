@@ -35,6 +35,10 @@ export async function sendEmail(args: { to: string; subject: string; text: strin
   const from = process.env.SMTP_FROM;
 
   if (!host || !from) {
+    if (process.env.NODE_ENV !== "production") {
+      logger.info({ to: redactEmail(args.to), subject: args.subject }, "E-mail não enviado (SMTP não configurado)");
+      return;
+    }
     throw new Error("Configuração SMTP incompleta (SMTP_HOST/SMTP_FROM).");
   }
 

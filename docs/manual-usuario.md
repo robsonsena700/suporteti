@@ -111,3 +111,35 @@
   - TXT
 - Para documentos Office, o arquivo pode ser baixado e aberto no aplicativo do dispositivo.
 
+## Administração — Alteração de E-mail (ADMIN)
+
+### Permissão
+
+- Apenas usuários com perfil **Administrador (ADMIN)** podem alterar o e-mail de qualquer usuário.
+- Tentativas de acesso por outros perfis retornam **403 Forbidden**.
+
+### Onde fica
+
+- Menu **Configurações** → seção administrativa → ação **Editar E-mail** ao lado de cada usuário.
+
+### Fluxo de uso
+
+- Clique em **Editar E-mail** no usuário desejado.
+- Informe o **novo e-mail** e a **confirmação do novo e-mail** (validação de formato em tempo real).
+- Informe a **senha do administrador** para confirmar a ação.
+- Clique em **Salvar Alterações**.
+
+### Notificações
+
+- Após uma alteração bem-sucedida, o sistema envia um e-mail de notificação:
+  - para o **e-mail antigo** do usuário, e
+  - para o **novo e-mail** do usuário.
+
+### Auditoria
+
+- Toda alteração gera registros em `security_audit_logs`, incluindo:
+  - `actor_user_id` (administrador),
+  - `target_user_id` (usuário afetado),
+  - data/hora,
+  - e os e-mails antigo e novo (no campo `detail`).
+

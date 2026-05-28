@@ -193,6 +193,23 @@ export const AdminResetUserPasswordResponse = zod.object({
 });
 
 /**
+ * @summary Atualizar e-mail de um usuário (ADMIN)
+ */
+export const AdminUpdateUserEmailParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const AdminUpdateUserEmailBody = zod.object({
+  newEmail: zod.string(),
+  confirmNewEmail: zod.string(),
+  adminPassword: zod.string(),
+});
+
+export const AdminUpdateUserEmailResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
  * @summary Listar configurações de Gestores (ADMIN/ANALYST)
  */
 export const GetGestorConfigsResponseItem = zod.object({

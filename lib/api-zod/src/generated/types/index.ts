@@ -9,6 +9,7 @@
 export * from "./activityItem";
 export * from "./addTicketCollaboratorsBody";
 export * from "./adminListUsersParams";
+export * from "./adminUpdateUserEmailBody";
 export * from "./adminUsersPage";
 export * from "./adminUserSummary";
 export * from "./adminUserSummaryRole";

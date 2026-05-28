@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -25,6 +26,7 @@ import { ptBR } from "date-fns/locale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRoleLabel } from "@/lib/role-labels";
 import { useAuth } from "@/lib/auth";
+import { z } from "zod";
 
 type UserWithCoordinator = {
   id: number;
@@ -66,6 +68,12 @@ function AdminSettings() {
   const [openCoordinatorGroupsByMunicipality, setOpenCoordinatorGroupsByMunicipality] = useState<Record<string, string[]>>({});
   const [resetSearch, setResetSearch] = useState("");
   const [resetPage, setResetPage] = useState(1);
+  const [editEmailOpen, setEditEmailOpen] = useState(false);
+  const [editEmailUser, setEditEmailUser] = useState<{ id: number; name: string; email: string } | null>(null);
+  const [editNewEmail, setEditNewEmail] = useState("");
+  const [editConfirmNewEmail, setEditConfirmNewEmail] = useState("");
+  const [editAdminPassword, setEditAdminPassword] = useState("");
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setResetPage(1);
@@ -153,6 +161,67 @@ function AdminSettings() {
       });
     },
   });
+
+  const adminEditEmailMutation = useMutation({
+    mutationFn: async (payload: { userId: number; newEmail: string; confirmNewEmail: string; adminPassword: string }) => {
+      return customFetch(`/api/admin/users/${payload.userId}/email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: JSON.stringify({
+          newEmail: payload.newEmail,
+          confirmNewEmail: payload.confirmNewEmail,
+          adminPassword: payload.adminPassword,
+        }),
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "E-mail atualizado com sucesso" });
+      setEditEmailOpen(false);
+      setEditEmailUser(null);
+      setEditNewEmail("");
+      setEditConfirmNewEmail("");
+      setEditAdminPassword("");
+      setEditErrors({});
+      queryClient.invalidateQueries({ queryKey: ["admin-users-password-reset"] });
+      queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Erro ao atualizar e-mail",
+        description: err?.data?.error || "Tente novamente.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const emailEditSchema = z.object({
+    newEmail: z.string().email("E-mail inválido"),
+    confirmNewEmail: z.string().email("E-mail inválido"),
+    adminPassword: z.string().min(1, "Informe sua senha"),
+  }).refine((v) => v.newEmail === v.confirmNewEmail, { path: ["confirmNewEmail"], message: "Os e-mails não conferem" });
+
+  const validateEditEmailForm = (values: { newEmail: string; confirmNewEmail: string; adminPassword: string }) => {
+    const parsed = emailEditSchema.safeParse(values);
+    if (parsed.success) return {};
+    const out: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0] ? String(issue.path[0]) : "form";
+      if (!out[key]) out[key] = issue.message;
+    }
+    return out;
+  };
+
+  const openEditEmail = (u: { id: number; name: string; email: string }) => {
+    setEditEmailUser({ id: u.id, name: u.name, email: u.email });
+    setEditNewEmail(u.email);
+    setEditConfirmNewEmail(u.email);
+    setEditAdminPassword("");
+    setEditErrors({});
+    setEditEmailOpen(true);
+  };
 
   const changeRoleMutation = useMutation({
     mutationFn: async ({ userId, role, coordinatorId }: { userId: number; role: UserRole; coordinatorId?: number }) => {
@@ -656,13 +725,23 @@ function AdminSettings() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            onClick={() => adminResetMutation.mutate(u.id)}
-                            disabled={adminResetMutation.isPending}
-                          >
-                            Resetar senha
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditEmail({ id: u.id, name: u.name, email: u.email })}
+                              disabled={adminEditEmailMutation.isPending}
+                            >
+                              Editar E-mail
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => adminResetMutation.mutate(u.id)}
+                              disabled={adminResetMutation.isPending}
+                            >
+                              Resetar senha
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -680,6 +759,102 @@ function AdminSettings() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={editEmailOpen} onOpenChange={(v) => {
+        if (!v) {
+          setEditEmailOpen(false);
+          setEditErrors({});
+          return;
+        }
+        setEditEmailOpen(true);
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar e-mail</DialogTitle>
+            <DialogDescription>
+              Atualize o e-mail do usuário selecionado. Uma notificação será enviada para o e-mail antigo e para o novo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="text-sm">
+              <span className="font-medium">Usuário:</span>{" "}
+              <span className="text-muted-foreground">{editEmailUser?.name ?? "—"}</span>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Novo e-mail</div>
+              <Input
+                type="email"
+                value={editNewEmail}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEditNewEmail(v);
+                  setEditErrors(validateEditEmailForm({ newEmail: v, confirmNewEmail: editConfirmNewEmail, adminPassword: editAdminPassword }));
+                }}
+              />
+              {editErrors.newEmail ? <div className="text-xs text-destructive">{editErrors.newEmail}</div> : null}
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Confirmar novo e-mail</div>
+              <Input
+                type="email"
+                value={editConfirmNewEmail}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEditConfirmNewEmail(v);
+                  setEditErrors(validateEditEmailForm({ newEmail: editNewEmail, confirmNewEmail: v, adminPassword: editAdminPassword }));
+                }}
+              />
+              {editErrors.confirmNewEmail ? <div className="text-xs text-destructive">{editErrors.confirmNewEmail}</div> : null}
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Senha do administrador</div>
+              <Input
+                type="password"
+                value={editAdminPassword}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEditAdminPassword(v);
+                  setEditErrors(validateEditEmailForm({ newEmail: editNewEmail, confirmNewEmail: editConfirmNewEmail, adminPassword: v }));
+                }}
+              />
+              {editErrors.adminPassword ? <div className="text-xs text-destructive">{editErrors.adminPassword}</div> : null}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEditEmailOpen(false)}
+              disabled={adminEditEmailMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (!editEmailUser) return;
+                const errors = validateEditEmailForm({ newEmail: editNewEmail, confirmNewEmail: editConfirmNewEmail, adminPassword: editAdminPassword });
+                setEditErrors(errors);
+                if (Object.keys(errors).length > 0) return;
+                adminEditEmailMutation.mutate({
+                  userId: editEmailUser.id,
+                  newEmail: editNewEmail.trim(),
+                  confirmNewEmail: editConfirmNewEmail.trim(),
+                  adminPassword: editAdminPassword,
+                });
+              }}
+              disabled={adminEditEmailMutation.isPending || !editEmailUser}
+            >
+              {adminEditEmailMutation.isPending ? "Salvando..." : "Salvar Alterações"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card className="border-primary/20 shadow-md">
         <CardHeader>

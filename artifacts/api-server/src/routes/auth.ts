@@ -321,8 +321,25 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
     expiresAt,
   });
 
-  const resetLink = buildPasswordResetLink(token);
-  const mail = buildPasswordResetEmail({ recipientName: user.name, resetLink, expiresAt });
+  let resetLink = "";
+  let mail: { subject: string; text: string; html: string };
+  try {
+    const baseUrl = resolvePublicBaseUrlFromRequest(req);
+    resetLink = buildPasswordResetLink(token, baseUrl);
+    mail = buildPasswordResetEmail({ recipientName: user.name, resetLink, expiresAt });
+  } catch (err) {
+    await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_LINK_FAILED",
+      targetUserId: user.id,
+      targetEmail: user.email,
+      ip,
+      userAgent,
+      detail: err instanceof Error ? String(err.message).slice(0, 500) : "Falha ao gerar link",
+    });
+    res.status(503).json({ error: "Falha ao gerar link de redefinição" });
+    return;
+  }
 
   try {
     await sendEmail({ to: user.email, subject: mail.subject, text: mail.text, html: mail.html });
@@ -348,6 +365,28 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
     res.status(503).json({ error: "Falha ao enviar e-mail de recuperação" });
   }
 });
+
+function resolvePublicBaseUrlFromRequest(req: any): string {
+  const configured = String(process.env.APP_PUBLIC_URL || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+
+  const origin = typeof req?.headers?.origin === "string" ? String(req.headers.origin).trim().replace(/\/$/, "") : "";
+  if (origin) return origin;
+
+  const referer = typeof req?.headers?.referer === "string" ? String(req.headers.referer).trim() : "";
+  if (referer) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+    }
+  }
+
+  const webPort = String(process.env.WEB_PORT || "").trim();
+  if (webPort) return `http://localhost:${webPort}`;
+
+  const port = String(process.env.PORT || process.env.API_PORT || "3001").trim();
+  return `http://localhost:${port}`;
+}
 
 router.post("/auth/reset-password", async (req, res): Promise<void> => {
   const body = req.body as { token?: unknown; newPassword?: unknown } | undefined;

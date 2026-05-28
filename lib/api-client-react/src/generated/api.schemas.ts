@@ -46,6 +46,12 @@ export interface ResetPasswordBody {
   newPassword: string;
 }
 
+export interface AdminUpdateUserEmailBody {
+  newEmail: string;
+  confirmNewEmail: string;
+  adminPassword: string;
+}
+
 /**
  * @nullable
  */

@@ -19,11 +19,15 @@ import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { listCoordinatorsForUser } from "../lib/access";
+import { requireHttpsInProduction, requireSameOriginInProduction } from "../middlewares/security";
 import { logger } from "../lib/logger";
 import { sendEmail } from "../lib/mailer";
 import { buildPasswordResetEmail, buildPasswordResetLink, generateResetToken, hashResetToken } from "../lib/password-reset";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
+
+const adminEditEmailLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 10 });
 
 const AVATAR_MAX_SIZE = 1 * 1024 * 1024; // 1 MB
 const avatarUpload = multer({
@@ -187,8 +191,26 @@ router.post("/admin/users/:id/password-reset", requireAuth, requireActive, requi
     expiresAt,
   });
 
-  const resetLink = buildPasswordResetLink(token);
-  const mail = buildPasswordResetEmail({ recipientName: target.name, resetLink, expiresAt });
+  let resetLink = "";
+  let mail: { subject: string; text: string; html: string };
+  try {
+    const baseUrl = resolvePublicBaseUrlFromRequest(req);
+    resetLink = buildPasswordResetLink(token, baseUrl);
+    mail = buildPasswordResetEmail({ recipientName: target.name, resetLink, expiresAt });
+  } catch (err) {
+    await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "ADMIN_PASSWORD_RESET_LINK_FAILED",
+      actorUserId,
+      targetUserId: target.id,
+      targetEmail: target.email,
+      ip,
+      userAgent,
+      detail: err instanceof Error ? String(err.message).slice(0, 500) : "Falha ao gerar link",
+    });
+    res.status(503).json({ error: "Falha ao gerar link de redefinição" });
+    return;
+  }
 
   try {
     await sendEmail({ to: target.email, subject: mail.subject, text: mail.text, html: mail.html });
@@ -218,6 +240,156 @@ router.post("/admin/users/:id/password-reset", requireAuth, requireActive, requi
   }
 });
 
+router.post(
+  "/admin/users/:id/email",
+  requireAuth,
+  requireActive,
+  requireRoles("ADMIN"),
+  requireHttpsInProduction,
+  requireSameOriginInProduction,
+  async (req, res): Promise<void> => {
+    const actorUserId = req.user!.userId;
+    const targetUserId = Number(req.params.id);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ error: "Usuário inválido" });
+      return;
+    }
+
+    const ip = String(req.ip || "");
+    const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "";
+
+    const rateKey = `${actorUserId}:${ip}`;
+    const rate = adminEditEmailLimiter.check(rateKey);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+      res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+      return;
+    }
+
+    const body = req.body as { newEmail?: unknown; confirmNewEmail?: unknown; adminPassword?: unknown } | undefined;
+    const newEmail = typeof body?.newEmail === "string" ? body.newEmail.trim().toLowerCase() : "";
+    const confirmNewEmail = typeof body?.confirmNewEmail === "string" ? body.confirmNewEmail.trim().toLowerCase() : "";
+    const adminPassword = typeof body?.adminPassword === "string" ? body.adminPassword : "";
+
+    if (!newEmail || !isEmailLike(newEmail)) {
+      res.status(400).json({ error: "E-mail inválido" });
+      return;
+    }
+    if (newEmail !== confirmNewEmail) {
+      res.status(400).json({ error: "Os e-mails não conferem" });
+      return;
+    }
+    if (!adminPassword) {
+      res.status(400).json({ error: "Informe a senha do administrador" });
+      return;
+    }
+
+    const [admin] = await db.select({
+      id: usersTable.id,
+      email: usersTable.email,
+      passwordHash: usersTable.passwordHash,
+    }).from(usersTable).where(eq(usersTable.id, actorUserId));
+
+    if (!admin) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+
+    const ok = await bcrypt.compare(adminPassword, admin.passwordHash);
+    if (!ok) {
+      await db.insert(securityAuditLogsTable).values({
+        eventType: "ADMIN_USER_EMAIL_CHANGE_DENIED_BAD_PASSWORD",
+        actorUserId,
+        targetUserId,
+        ip,
+        userAgent,
+      });
+      res.status(403).json({ error: "Senha do administrador inválida" });
+      return;
+    }
+
+    const [target] = await db.select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+    }).from(usersTable).where(eq(usersTable.id, targetUserId));
+
+    if (!target) {
+      res.status(404).json({ error: "Usuário não encontrado" });
+      return;
+    }
+
+    const oldEmail = String(target.email || "").toLowerCase();
+    if (oldEmail === newEmail) {
+      res.status(400).json({ error: "O novo e-mail é igual ao e-mail atual" });
+      return;
+    }
+
+    const [duplicate] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, newEmail));
+    if (duplicate && duplicate.id !== target.id) {
+      res.status(409).json({ error: "E-mail já cadastrado para outro usuário" });
+      return;
+    }
+
+    const detail = JSON.stringify({
+      oldEmail: target.email,
+      newEmail,
+      adminEmail: admin.email,
+    });
+
+    await db.transaction(async (tx) => {
+      await tx.update(usersTable).set({ email: newEmail }).where(eq(usersTable.id, target.id));
+      await tx.insert(securityAuditLogsTable).values({
+        eventType: "ADMIN_USER_EMAIL_CHANGED",
+        actorUserId,
+        targetUserId: target.id,
+        targetEmail: newEmail,
+        ip,
+        userAgent,
+        detail,
+      });
+    });
+
+    const mailOld = buildEmailChangedNotification({
+      recipientEmail: target.email,
+      recipientName: target.name,
+      oldEmail: target.email,
+      newEmail,
+      adminEmail: admin.email,
+    });
+    const mailNew = buildEmailChangedNotification({
+      recipientEmail: newEmail,
+      recipientName: target.name,
+      oldEmail: target.email,
+      newEmail,
+      adminEmail: admin.email,
+    });
+
+    try {
+      await sendEmail({ to: target.email, subject: mailOld.subject, text: mailOld.text, html: mailOld.html });
+      await sendEmail({ to: newEmail, subject: mailNew.subject, text: mailNew.text, html: mailNew.html });
+    } catch (err) {
+      await db.transaction(async (tx) => {
+        await tx.update(usersTable).set({ email: target.email }).where(eq(usersTable.id, target.id));
+        await tx.insert(securityAuditLogsTable).values({
+          eventType: "ADMIN_USER_EMAIL_CHANGE_REVERTED_EMAIL_NOTIFICATION_FAILED",
+          actorUserId,
+          targetUserId: target.id,
+          targetEmail: target.email,
+          ip,
+          userAgent,
+          detail: err instanceof Error ? String(err.message).slice(0, 500) : "Falha ao enviar e-mails",
+        });
+      });
+      logger.error({ err }, "Falha ao enviar e-mails de notificação da troca de e-mail");
+      res.status(503).json({ error: "Falha ao enviar e-mails de notificação" });
+      return;
+    }
+
+    res.json({ message: "E-mail atualizado com sucesso" });
+  },
+);
+
 router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"), async (_req, res): Promise<void> => {
   const assignable = await db.select({
     id: usersTable.id,
@@ -246,6 +418,83 @@ router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN"
   withLoad.sort((a, b) => a.assignedOpenTickets - b.assignedOpenTickets || a.name.localeCompare(b.name, "pt-BR"));
   res.json(withLoad);
 });
+
+function isEmailLike(value: string): boolean {
+  const v = value.trim();
+  if (v.length < 6) return false;
+  const at = v.indexOf("@");
+  if (at <= 0) return false;
+  if (at !== v.lastIndexOf("@")) return false;
+  const domain = v.slice(at + 1);
+  if (domain.length < 3 || !domain.includes(".")) return false;
+  if (v.includes(" ")) return false;
+  return true;
+}
+
+function buildEmailChangedNotification(args: {
+  recipientEmail: string;
+  recipientName: string;
+  oldEmail: string;
+  newEmail: string;
+  adminEmail: string;
+}): { subject: string; text: string; html: string } {
+  const subject = "SuporteTI — E-mail atualizado";
+  const when = new Date().toLocaleString("pt-BR");
+
+  const text =
+    `Olá, ${args.recipientName}.\n\n` +
+    `O e-mail da sua conta no SuporteTI foi atualizado por um administrador em ${when}.\n\n` +
+    `E-mail anterior: ${args.oldEmail}\n` +
+    `Novo e-mail: ${args.newEmail}\n\n` +
+    `Se você não reconhece esta alteração, entre em contato com o suporte imediatamente.\n\n` +
+    `Atenciosamente,\nEquipe SuporteTI\n`;
+
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111">` +
+    `<h2 style="margin:0 0 12px 0">SuporteTI</h2>` +
+    `<p>Olá, <strong>${escapeHtml(args.recipientName)}</strong>.</p>` +
+    `<p>O e-mail da sua conta foi atualizado por um administrador em <strong>${escapeHtml(when)}</strong>.</p>` +
+    `<ul>` +
+    `<li><strong>E-mail anterior:</strong> ${escapeHtml(args.oldEmail)}</li>` +
+    `<li><strong>Novo e-mail:</strong> ${escapeHtml(args.newEmail)}</li>` +
+    `</ul>` +
+    `<p>Se você não reconhece esta alteração, entre em contato com o suporte imediatamente.</p>` +
+    `<p style="margin-top:24px">Atenciosamente,<br/>Equipe SuporteTI</p>` +
+    `</div>`;
+
+  return { subject, text, html };
+}
+
+function escapeHtml(value: string) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function resolvePublicBaseUrlFromRequest(req: any): string {
+  const configured = String(process.env.APP_PUBLIC_URL || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+
+  const origin = typeof req?.headers?.origin === "string" ? String(req.headers.origin).trim().replace(/\/$/, "") : "";
+  if (origin) return origin;
+
+  const referer = typeof req?.headers?.referer === "string" ? String(req.headers.referer).trim() : "";
+  if (referer) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+    }
+  }
+
+  const webPort = String(process.env.WEB_PORT || "").trim();
+  if (webPort) return `http://localhost:${webPort}`;
+
+  const port = String(process.env.PORT || process.env.API_PORT || "3001").trim();
+  return `http://localhost:${port}`;
+}
 
 router.get("/users/gestor-configs", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (_req, res): Promise<void> => {
   const gestores = await db

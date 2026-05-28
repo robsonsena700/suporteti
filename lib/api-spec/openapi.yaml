@@ -305,6 +305,73 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /admin/users/{id}/email:
+    post:
+      operationId: adminUpdateUserEmail
+      tags: [users]
+      summary: Atualizar e-mail de um usuário (ADMIN)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateUserEmailBody"
+      responses:
+        "200":
+          description: E-mail atualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Requisição inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: E-mail já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Falha no envio de e-mails de notificação
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /users/gestor-configs:
     get:
       operationId: getGestorConfigs
@@ -1423,6 +1490,20 @@ components:
       required:
         - token
         - newPassword
+
+    AdminUpdateUserEmailBody:
+      type: object
+      properties:
+        newEmail:
+          type: string
+        confirmNewEmail:
+          type: string
+        adminPassword:
+          type: string
+      required:
+        - newEmail
+        - confirmNewEmail
+        - adminPassword
 
     PasswordResetErrorResponse:
       type: object

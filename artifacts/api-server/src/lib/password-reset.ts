@@ -19,8 +19,11 @@ export function getAppPublicUrl(): string {
   return raw;
 }
 
-export function buildPasswordResetLink(token: string): string {
-  const base = getAppPublicUrl();
+export function buildPasswordResetLink(token: string, baseUrl?: string): string {
+  const base = String(baseUrl || "").trim().replace(/\/$/, "") || getAppPublicUrl();
+  if (process.env.NODE_ENV === "production" && !base.startsWith("https://")) {
+    throw new Error("URL pública deve utilizar HTTPS em produção.");
+  }
   return `${base}/redefinir-senha?token=${encodeURIComponent(token)}`;
 }
 
@@ -65,4 +68,3 @@ function escapeHtml(value: string) {
 function escapeAttr(value: string) {
   return escapeHtml(value);
 }
-
