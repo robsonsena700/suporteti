@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## v1.0.28 (2026-05-28)
+- Reset Senha - Tela de alteração oriunda do link gerado (edd8a7a)
+- Reset senha via e-mail (7dadd4a)
+- Chamados - Hardware >> Equip e Software >> Sistema (7447320)
+- Chamados - Barra com quantidades por tipo (533bf61)
+
 ## v1.0.27 (2026-05-14)
 - Chamado - Permitir alterar retribuir responsável do chamado. (dfeb026)
 
@@ -113,6 +119,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
