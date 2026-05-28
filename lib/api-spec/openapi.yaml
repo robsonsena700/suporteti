@@ -126,6 +126,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Solicitar recuperação de senha por e-mail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordBody"
+      responses:
+        "200":
+          description: Solicitação processada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: E-mail não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Falha no envio de e-mail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Redefinir senha a partir de token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordBody"
+      responses:
+        "200":
+          description: Senha redefinida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Token inválido ou expirado / senha inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetErrorResponse"
+
   # ───────── USERS ─────────
   /users:
     get:
@@ -152,6 +214,96 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/User"
+
+  /admin/users:
+    get:
+      operationId: adminListUsers
+      tags: [users]
+      summary: Listar usuários com paginação e filtro (ADMIN)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 50
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Página de usuários
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUsersPage"
+        "401":
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/password-reset:
+    post:
+      operationId: adminResetUserPassword
+      tags: [users]
+      summary: Disparar reset manual de senha por e-mail (ADMIN)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reset disparado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Requisição inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Falha no envio de e-mail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /users/gestor-configs:
     get:
@@ -493,7 +645,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ticket"
         "400":
-          description: Dados inválidos ou regra de negócio bloqueou a atribuição (ex.: não é permitido atribuir para Gestor)
+          description: "Dados inválidos ou regra de negócio bloqueou a atribuição (ex.: não é permitido atribuir para Gestor)"
           content:
             application/json:
               schema:
@@ -1253,6 +1405,36 @@ components:
         - email
         - password
 
+    ForgotPasswordBody:
+      type: object
+      properties:
+        email:
+          type: string
+      required:
+        - email
+
+    ResetPasswordBody:
+      type: object
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+      required:
+        - token
+        - newPassword
+
+    PasswordResetErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: ["string", "null"]
+          enum: [TOKEN_INVALID, TOKEN_EXPIRED]
+      required:
+        - error
+
     AuthResponse:
       type: object
       properties:
@@ -1320,6 +1502,51 @@ components:
         - uf
         - municipality
         - createdAt
+
+    AdminUserSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [USER, COORDINATOR, ANALYST, ADMIN, GESTOR]
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+        - role
+        - status
+        - createdAt
+
+    AdminUsersPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserSummary"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+      required:
+        - items
+        - page
+        - pageSize
+        - total
 
     GestorConfig:
       type: object

@@ -95,6 +95,29 @@ export const GetMeResponse = zod.object({
 });
 
 /**
+ * @summary Solicitar recuperação de senha por e-mail
+ */
+export const ForgotPasswordBody = zod.object({
+  email: zod.string(),
+});
+
+export const ForgotPasswordResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
+ * @summary Redefinir senha a partir de token
+ */
+export const ResetPasswordBody = zod.object({
+  token: zod.string(),
+  newPassword: zod.string(),
+});
+
+export const ResetPasswordResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
  * @summary Listar usuários (ADMIN)
  */
 export const ListUsersQueryParams = zod.object({
@@ -124,6 +147,50 @@ export const ListUsersResponseItem = zod.object({
   lastLoginAt: zod.coerce.date().nullish(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
+
+/**
+ * @summary Listar usuários com paginação e filtro (ADMIN)
+ */
+
+export const adminListUsersQueryPageSizeMin = 5;
+export const adminListUsersQueryPageSizeMax = 50;
+
+export const AdminListUsersQueryParams = zod.object({
+  page: zod.coerce.number().min(1).optional(),
+  pageSize: zod.coerce
+    .number()
+    .min(adminListUsersQueryPageSizeMin)
+    .max(adminListUsersQueryPageSizeMax)
+    .optional(),
+  q: zod.coerce.string().optional(),
+});
+
+export const AdminListUsersResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      email: zod.string(),
+      role: zod.enum(["USER", "COORDINATOR", "ANALYST", "ADMIN", "GESTOR"]),
+      status: zod.enum(["PENDING", "ACTIVE", "INACTIVE"]),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  page: zod.number(),
+  pageSize: zod.number(),
+  total: zod.number(),
+});
+
+/**
+ * @summary Disparar reset manual de senha por e-mail (ADMIN)
+ */
+export const AdminResetUserPasswordParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const AdminResetUserPasswordResponse = zod.object({
+  message: zod.string(),
+});
 
 /**
  * @summary Listar configurações de Gestores (ADMIN/ANALYST)
@@ -575,7 +642,7 @@ export const UpdateTicketResponse = zod.object({
 });
 
 /**
- * @summary Atribuir chamado a analista
+ * @summary Atribuir chamado a responsável
  */
 export const AssignTicketParams = zod.object({
   id: zod.coerce.number(),

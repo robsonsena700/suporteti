@@ -777,8 +777,8 @@ export default function NewTicket() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value={TicketType.SOFTWARE}>Software</SelectItem>
-                        <SelectItem value={TicketType.HARDWARE}>Hardware</SelectItem>
+                        <SelectItem value={TicketType.SOFTWARE}>Sistema</SelectItem>
+                        <SelectItem value={TicketType.HARDWARE}>Equipamentos</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

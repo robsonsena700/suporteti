@@ -37,6 +37,33 @@ export interface LoginBody {
   password: string;
 }
 
+export interface ForgotPasswordBody {
+  email: string;
+}
+
+export interface ResetPasswordBody {
+  token: string;
+  newPassword: string;
+}
+
+/**
+ * @nullable
+ */
+export type PasswordResetErrorResponseCode =
+  | (typeof PasswordResetErrorResponseCode)[keyof typeof PasswordResetErrorResponseCode]
+  | null;
+
+export const PasswordResetErrorResponseCode = {
+  TOKEN_INVALID: "TOKEN_INVALID",
+  TOKEN_EXPIRED: "TOKEN_EXPIRED",
+} as const;
+
+export interface PasswordResetErrorResponse {
+  error: string;
+  /** @nullable */
+  code?: PasswordResetErrorResponseCode;
+}
+
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 export const UserRole = {
@@ -84,6 +111,42 @@ export interface User {
 export interface AuthResponse {
   token: string;
   user: User;
+}
+
+export type AdminUserSummaryRole =
+  (typeof AdminUserSummaryRole)[keyof typeof AdminUserSummaryRole];
+
+export const AdminUserSummaryRole = {
+  USER: "USER",
+  COORDINATOR: "COORDINATOR",
+  ANALYST: "ANALYST",
+  ADMIN: "ADMIN",
+  GESTOR: "GESTOR",
+} as const;
+
+export type AdminUserSummaryStatus =
+  (typeof AdminUserSummaryStatus)[keyof typeof AdminUserSummaryStatus];
+
+export const AdminUserSummaryStatus = {
+  PENDING: "PENDING",
+  ACTIVE: "ACTIVE",
+  INACTIVE: "INACTIVE",
+} as const;
+
+export interface AdminUserSummary {
+  id: number;
+  name: string;
+  email: string;
+  role: AdminUserSummaryRole;
+  status: AdminUserSummaryStatus;
+  createdAt: string;
+}
+
+export interface AdminUsersPage {
+  items: AdminUserSummary[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
 export interface GestorConfig {
@@ -479,6 +542,19 @@ export const ListUsersRole = {
   ADMIN: "ADMIN",
   GESTOR: "GESTOR",
 } as const;
+
+export type AdminListUsersParams = {
+  /**
+   * @minimum 1
+   */
+  page?: number;
+  /**
+   * @minimum 5
+   * @maximum 50
+   */
+  pageSize?: number;
+  q?: string;
+};
 
 export type ListTicketsParams = {
   status?: ListTicketsStatus;

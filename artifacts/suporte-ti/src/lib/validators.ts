@@ -57,3 +57,12 @@ export function isValidBrazilMobile(value: string): boolean {
   return true;
 }
 
+export function maskEmail(value: string): string {
+  const email = String(value || "").trim();
+  const at = email.indexOf("@");
+  if (at <= 0) return "";
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const visible = local.slice(0, 3);
+  return `${visible}***@${domain}`;
+}

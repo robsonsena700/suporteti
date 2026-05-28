@@ -27,7 +27,11 @@ export function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  const isPublicRoute = location === "/" || location === "/registro";
+  const isPublicRoute =
+    location === "/"
+    || location === "/registro"
+    || location.startsWith("/esqueci-senha")
+    || location.startsWith("/redefinir-senha");
   const isPendingRoute = location === "/pendente";
   const isReceiptRoute = location.includes("/comprovante");
 

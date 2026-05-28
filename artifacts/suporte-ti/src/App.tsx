@@ -9,6 +9,8 @@ import { Suspense, lazy, useEffect } from "react";
 
 // Pages
 const Login = lazy(() => import("@/pages/login"));
+const ForgotPassword = lazy(() => import("@/pages/forgot-password"));
+const ResetPassword = lazy(() => import("@/pages/reset-password"));
 const Register = lazy(() => import("@/pages/register"));
 const Pending = lazy(() => import("@/pages/pending"));
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -76,6 +78,8 @@ function Router() {
       >
         <Switch>
           <Route path="/" component={Login} />
+          <Route path="/esqueci-senha" component={ForgotPassword} />
+          <Route path="/redefinir-senha" component={ResetPassword} />
           <Route path="/registro" component={Register} />
           
           <ProtectedRoute path="/pendente" component={Pending} />

@@ -269,8 +269,8 @@ export default function Reports() {
   }, []);
 
   const labelType = useCallback((value: unknown): string => {
-    if (value === "SOFTWARE") return "Software";
-    if (value === "HARDWARE") return "Hardware";
+    if (value === "SOFTWARE") return "Sistema";
+    if (value === "HARDWARE") return "Equipamentos";
     return String(value ?? "—");
   }, []);
 
@@ -1490,8 +1490,8 @@ export default function Reports() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">Todas</SelectItem>
-                  <SelectItem value="SOFTWARE">Software</SelectItem>
-                  <SelectItem value="HARDWARE">Hardware</SelectItem>
+                  <SelectItem value="SOFTWARE">Sistema</SelectItem>
+                  <SelectItem value="HARDWARE">Equipamentos</SelectItem>
                 </SelectContent>
               </Select>
             </div>

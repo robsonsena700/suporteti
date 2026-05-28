@@ -23,8 +23,8 @@ export function labelPriority(priority: TicketPriority): string {
 }
 
 export function labelType(type: TicketType, hardwareSubtype?: string | null): string {
-  if (type === TicketType.HARDWARE) return hardwareSubtype ? `Hardware • ${hardwareSubtype}` : "Hardware";
-  return "Software";
+  if (type === TicketType.HARDWARE) return hardwareSubtype ? `Equipamentos • ${hardwareSubtype}` : "Equipamentos";
+  return "Sistema";
 }
 
 export default function TicketReceipt() {

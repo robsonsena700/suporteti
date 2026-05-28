@@ -32,6 +32,8 @@
     "test:tickets:messages:attachments:integration": "node ./scripts/test-ticket-message-attachments-integration.cjs",
     "test:tickets:no-coordinator:integration": "node ./scripts/test-no-coordinator-access.cjs",
     "test:tickets:resolved:integration": "node ./scripts/test-tickets-resolved-integration.cjs",
+    "test:auth:password-reset:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-password-reset-unit.ts && pnpm --filter @workspace/scripts exec tsx ./src/test-email-mask-unit.ts",
+    "test:auth:password-reset:integration": "pnpm --filter @workspace/scripts exec tsx ./src/test-password-reset-integration.ts",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"

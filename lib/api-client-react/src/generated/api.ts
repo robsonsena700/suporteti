@@ -19,6 +19,8 @@ import type {
 import type {
   ActivityItem,
   AddTicketCollaboratorsBody,
+  AdminListUsersParams,
+  AdminUsersPage,
   ApproveUserBody,
   AssignTicketBody,
   AuthResponse,
@@ -29,6 +31,7 @@ import type {
   ErrorResponse,
   ExportReportsOverviewParams,
   ExportReportsTicketsParams,
+  ForgotPasswordBody,
   GestorConfig,
   GetMessageAttachmentParams,
   GetRecentActivityParams,
@@ -47,6 +50,7 @@ import type {
   LoginBody,
   Message,
   MessageResponse,
+  PasswordResetErrorResponse,
   Rating,
   RegionCount,
   RegisterBody,
@@ -56,6 +60,7 @@ import type {
   ReportTicketsPage,
   ReportUserRankingRow,
   ReportUserStats,
+  ResetPasswordBody,
   StatusCount,
   Ticket,
   TicketDetail,
@@ -470,6 +475,178 @@ export function useGetMe<
 }
 
 /**
+ * @summary Solicitar recuperação de senha por e-mail
+ */
+export const getForgotPasswordUrl = () => {
+  return `/api/auth/forgot-password`;
+};
+
+export const forgotPassword = async (
+  forgotPasswordBody: ForgotPasswordBody,
+  options?: RequestInit,
+): Promise<MessageResponse> => {
+  return customFetch<MessageResponse>(getForgotPasswordUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(forgotPasswordBody),
+  });
+};
+
+export const getForgotPasswordMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgotPassword>>,
+    TError,
+    { data: BodyType<ForgotPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgotPassword>>,
+  TError,
+  { data: BodyType<ForgotPasswordBody> },
+  TContext
+> => {
+  const mutationKey = ["forgotPassword"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgotPassword>>,
+    { data: BodyType<ForgotPasswordBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return forgotPassword(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgotPasswordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgotPassword>>
+>;
+export type ForgotPasswordMutationBody = BodyType<ForgotPasswordBody>;
+export type ForgotPasswordMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Solicitar recuperação de senha por e-mail
+ */
+export const useForgotPassword = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgotPassword>>,
+    TError,
+    { data: BodyType<ForgotPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof forgotPassword>>,
+  TError,
+  { data: BodyType<ForgotPasswordBody> },
+  TContext
+> => {
+  return useMutation(getForgotPasswordMutationOptions(options));
+};
+
+/**
+ * @summary Redefinir senha a partir de token
+ */
+export const getResetPasswordUrl = () => {
+  return `/api/auth/reset-password`;
+};
+
+export const resetPassword = async (
+  resetPasswordBody: ResetPasswordBody,
+  options?: RequestInit,
+): Promise<MessageResponse> => {
+  return customFetch<MessageResponse>(getResetPasswordUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(resetPasswordBody),
+  });
+};
+
+export const getResetPasswordMutationOptions = <
+  TError = ErrorType<PasswordResetErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetPassword>>,
+    TError,
+    { data: BodyType<ResetPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetPassword>>,
+  TError,
+  { data: BodyType<ResetPasswordBody> },
+  TContext
+> => {
+  const mutationKey = ["resetPassword"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetPassword>>,
+    { data: BodyType<ResetPasswordBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return resetPassword(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetPasswordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resetPassword>>
+>;
+export type ResetPasswordMutationBody = BodyType<ResetPasswordBody>;
+export type ResetPasswordMutationError = ErrorType<PasswordResetErrorResponse>;
+
+/**
+ * @summary Redefinir senha a partir de token
+ */
+export const useResetPassword = <
+  TError = ErrorType<PasswordResetErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetPassword>>,
+    TError,
+    { data: BodyType<ResetPasswordBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resetPassword>>,
+  TError,
+  { data: BodyType<ResetPasswordBody> },
+  TContext
+> => {
+  return useMutation(getResetPasswordMutationOptions(options));
+};
+
+/**
  * @summary Listar usuários (ADMIN)
  */
 export const getListUsersUrl = (params?: ListUsersParams) => {
@@ -562,6 +739,184 @@ export function useListUsers<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Listar usuários com paginação e filtro (ADMIN)
+ */
+export const getAdminListUsersUrl = (params?: AdminListUsersParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/users?${stringifiedParams}`
+    : `/api/admin/users`;
+};
+
+export const adminListUsers = async (
+  params?: AdminListUsersParams,
+  options?: RequestInit,
+): Promise<AdminUsersPage> => {
+  return customFetch<AdminUsersPage>(getAdminListUsersUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListUsersQueryKey = (params?: AdminListUsersParams) => {
+  return [`/api/admin/users`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListUsersQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListUsers>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: AdminListUsersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListUsers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminListUsersQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof adminListUsers>>> = ({
+    signal,
+  }) => adminListUsers(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListUsers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListUsersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListUsers>>
+>;
+export type AdminListUsersQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Listar usuários com paginação e filtro (ADMIN)
+ */
+
+export function useAdminListUsers<
+  TData = Awaited<ReturnType<typeof adminListUsers>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: AdminListUsersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListUsers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListUsersQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Disparar reset manual de senha por e-mail (ADMIN)
+ */
+export const getAdminResetUserPasswordUrl = (id: number) => {
+  return `/api/admin/users/${id}/password-reset`;
+};
+
+export const adminResetUserPassword = async (
+  id: number,
+  options?: RequestInit,
+): Promise<MessageResponse> => {
+  return customFetch<MessageResponse>(getAdminResetUserPasswordUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAdminResetUserPasswordMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminResetUserPassword>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminResetUserPassword>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["adminResetUserPassword"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminResetUserPassword>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return adminResetUserPassword(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminResetUserPasswordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminResetUserPassword>>
+>;
+
+export type AdminResetUserPasswordMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Disparar reset manual de senha por e-mail (ADMIN)
+ */
+export const useAdminResetUserPassword = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminResetUserPassword>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminResetUserPassword>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getAdminResetUserPasswordMutationOptions(options));
+};
 
 /**
  * @summary Listar configurações de Gestores (ADMIN/ANALYST)
@@ -1429,7 +1784,7 @@ export const useUpdateTicket = <
 };
 
 /**
- * @summary Atribuir chamado a analista
+ * @summary Atribuir chamado a responsável
  */
 export const getAssignTicketUrl = (id: number) => {
   return `/api/tickets/${id}/assign`;
@@ -1493,7 +1848,7 @@ export type AssignTicketMutationBody = BodyType<AssignTicketBody>;
 export type AssignTicketMutationError = ErrorType<ErrorResponse>;
 
 /**
- * @summary Atribuir chamado a analista
+ * @summary Atribuir chamado a responsável
  */
 export const useAssignTicket = <
   TError = ErrorType<ErrorResponse>,

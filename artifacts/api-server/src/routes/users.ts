@@ -1,8 +1,17 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import multer from "multer";
-import { db, usersTable, userCoordinatorsTable, gestorAllowedUsersTable, gestorCoordinatorsTable, ticketsTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import {
+  db,
+  passwordResetTokensTable,
+  securityAuditLogsTable,
+  usersTable,
+  userCoordinatorsTable,
+  gestorAllowedUsersTable,
+  gestorCoordinatorsTable,
+  ticketsTable,
+} from "@workspace/db";
+import { eq, and, inArray, or, sql } from "drizzle-orm";
 import { UpdateUserBody } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { signToken } from "../middlewares/auth";
@@ -10,6 +19,9 @@ import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { listCoordinatorsForUser } from "../lib/access";
+import { logger } from "../lib/logger";
+import { sendEmail } from "../lib/mailer";
+import { buildPasswordResetEmail, buildPasswordResetLink, generateResetToken, hashResetToken } from "../lib/password-reset";
 
 const router: IRouter = Router();
 
@@ -105,6 +117,105 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
     : await query;
 
   res.json(users);
+});
+
+router.get("/admin/users", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+  const page = Math.max(1, Number(req.query.page || 1));
+  const pageSizeRaw = Number(req.query.pageSize || 20);
+  const pageSize = Math.max(5, Math.min(50, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 20));
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const qLower = q.toLowerCase();
+
+  const where = q
+    ? or(
+      sql`lower(${usersTable.name}) like ${`%${qLower}%`}`,
+      sql`lower(${usersTable.email}) like ${`%${qLower}%`}`,
+    )
+    : sql`true`;
+
+  const [{ total }] = await db.select({ total: sql<number>`count(*)` }).from(usersTable).where(where);
+  const items = await db
+    .select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      role: usersTable.role,
+      status: usersTable.status,
+      createdAt: usersTable.createdAt,
+    })
+    .from(usersTable)
+    .where(where)
+    .orderBy(usersTable.name)
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+
+  res.json({ items, page, pageSize, total: Number(total) });
+});
+
+router.post("/admin/users/:id/password-reset", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+  const actorUserId = req.user!.userId;
+  const targetUserId = Number(req.params.id);
+  if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+    res.status(400).json({ error: "Usuário inválido" });
+    return;
+  }
+
+  const ip = String(req.ip || "");
+  const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "";
+
+  const [admin] = await db.select({ id: usersTable.id, email: usersTable.email, name: usersTable.name }).from(usersTable)
+    .where(eq(usersTable.id, actorUserId));
+  const [target] = await db.select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, status: usersTable.status }).from(usersTable)
+    .where(eq(usersTable.id, targetUserId));
+
+  if (!target) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  const token = generateResetToken();
+  const tokenHash = hashResetToken(token);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+  await db.insert(passwordResetTokensTable).values({
+    userId: target.id,
+    tokenHash,
+    purpose: "admin_reset",
+    requestedByUserId: actorUserId,
+    requestedIp: ip,
+    requestedUserAgent: userAgent,
+    expiresAt,
+  });
+
+  const resetLink = buildPasswordResetLink(token);
+  const mail = buildPasswordResetEmail({ recipientName: target.name, resetLink, expiresAt });
+
+  try {
+    await sendEmail({ to: target.email, subject: mail.subject, text: mail.text, html: mail.html });
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "ADMIN_PASSWORD_RESET_EMAIL_SENT",
+      actorUserId,
+      targetUserId: target.id,
+      targetEmail: target.email,
+      ip,
+      userAgent,
+      detail: admin?.email ? `adminEmail=${admin.email}` : null,
+    });
+    res.json({ message: "Reset de senha enviado ao usuário" });
+  } catch (err) {
+    await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "ADMIN_PASSWORD_RESET_EMAIL_FAILED",
+      actorUserId,
+      targetUserId: target.id,
+      targetEmail: target.email,
+      ip,
+      userAgent,
+      detail: err instanceof Error ? String(err.message).slice(0, 500) : "Erro ao enviar e-mail",
+    });
+    logger.error({ err }, "Falha ao enviar e-mail de reset por administrador");
+    res.status(503).json({ error: "Falha ao enviar e-mail de reset" });
+  }
 });
 
 router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR", "GESTOR"), async (_req, res): Promise<void> => {

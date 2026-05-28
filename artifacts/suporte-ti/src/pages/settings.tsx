@@ -14,6 +14,7 @@ import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -63,6 +64,12 @@ function AdminSettings() {
   const [openMunicipalities, setOpenMunicipalities] = useState<string[]>([]);
   const [openRoleGroupsByMunicipality, setOpenRoleGroupsByMunicipality] = useState<Record<string, string[]>>({});
   const [openCoordinatorGroupsByMunicipality, setOpenCoordinatorGroupsByMunicipality] = useState<Record<string, string[]>>({});
+  const [resetSearch, setResetSearch] = useState("");
+  const [resetPage, setResetPage] = useState(1);
+
+  useEffect(() => {
+    setResetPage(1);
+  }, [resetSearch]);
 
   const { data: pendingUsers, isLoading: isLoadingPending } = useListUsers({ status: UserStatus.PENDING }, {
     query: { queryKey: getListUsersQueryKey({ status: UserStatus.PENDING }) }
@@ -113,6 +120,36 @@ function AdminSettings() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+      });
+    },
+  });
+
+  const resetPageSize = 10;
+  const adminUsersQuery = useQuery({
+    queryKey: ["admin-users-password-reset", resetPage, resetPageSize, resetSearch],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("page", String(resetPage));
+      params.set("pageSize", String(resetPageSize));
+      if (resetSearch.trim()) params.set("q", resetSearch.trim());
+      return customFetch<{ items: Array<{ id: number; name: string; email: string; role: UserRole; status: UserStatus }>; page: number; pageSize: number; total: number }>(
+        `/api/admin/users?${params.toString()}`,
+      );
+    },
+  });
+
+  const adminResetMutation = useMutation({
+    mutationFn: async (userId: number) => {
+      return customFetch(`/api/admin/users/${userId}/password-reset`, { method: "POST" });
+    },
+    onSuccess: () => {
+      toast({ title: "Reset de senha enviado", description: "O usuário receberá um e-mail com link válido por 1 hora." });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Erro ao enviar reset",
+        description: err?.data?.error || "Tente novamente.",
+        variant: "destructive",
       });
     },
   });
@@ -559,6 +596,91 @@ function AdminSettings() {
 
   return (
     <div className="space-y-8">
+      <Card className="border-primary/20 shadow-md">
+        <CardHeader>
+          <CardTitle>Reset de senha (Administrador)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="max-w-md w-full">
+              <Input
+                value={resetSearch}
+                onChange={(e) => setResetSearch(e.target.value)}
+                placeholder="Filtrar por nome ou e-mail"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setResetPage((p) => Math.max(1, p - 1))}
+                disabled={resetPage <= 1 || adminUsersQuery.isLoading}
+              >
+                Anterior
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setResetPage((p) => p + 1)}
+                disabled={adminUsersQuery.isLoading || (adminUsersQuery.data?.items?.length ?? 0) < resetPageSize}
+              >
+                Próxima
+              </Button>
+            </div>
+          </div>
+
+          {adminUsersQuery.isLoading ? (
+            <div className="text-center py-4">Carregando...</div>
+          ) : (
+            <div className="w-full overflow-x-auto">
+              <div className="max-h-[420px] overflow-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>E-mail</TableHead>
+                      <TableHead>Perfil</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Ação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(adminUsersQuery.data?.items ?? []).map((u) => (
+                      <TableRow key={u.id}>
+                        <TableCell className="font-medium">{u.name}</TableCell>
+                        <TableCell>{u.email}</TableCell>
+                        <TableCell>{getRoleLabel(u.role)}</TableCell>
+                        <TableCell>
+                          <Badge variant={u.status === UserStatus.ACTIVE ? "default" : "secondary"}>
+                            {u.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            onClick={() => adminResetMutation.mutate(u.id)}
+                            disabled={adminResetMutation.isPending}
+                          >
+                            Resetar senha
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(adminUsersQuery.data?.items?.length ?? 0) === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                          Nenhum usuário encontrado.
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="border-primary/20 shadow-md">
         <CardHeader>
           <CardTitle>Aprovações Pendentes</CardTitle>

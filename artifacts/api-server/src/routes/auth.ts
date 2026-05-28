@@ -1,12 +1,15 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, passwordResetTokensTable, securityAuditLogsTable, usersTable } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
 import { RegisterBody, LoginBody } from "@workspace/api-zod";
 import { signToken, requireAuth } from "../middlewares/auth";
 import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
 import { validateMunicipalityForUf } from "../lib/ibge";
+import { logger } from "../lib/logger";
+import { sendEmail } from "../lib/mailer";
+import { buildPasswordResetEmail, buildPasswordResetLink, generateResetToken, hashResetToken } from "../lib/password-reset";
 
 const router: IRouter = Router();
 
@@ -262,6 +265,166 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     .where(eq(usersTable.id, userId));
 
   res.json({ message: "Senha atualizada com sucesso" });
+});
+
+router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  const body = req.body as { email?: unknown } | undefined;
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!email || !email.includes("@")) {
+    res.status(400).json({ error: "Informe um e-mail válido" });
+    return;
+  }
+
+  const ip = String(req.ip || "");
+  const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "";
+
+  const [user] = await db.select({
+    id: usersTable.id,
+    name: usersTable.name,
+    email: usersTable.email,
+    status: usersTable.status,
+  }).from(usersTable).where(eq(usersTable.email, email));
+
+  if (!user) {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_REQUESTED_UNKNOWN_EMAIL",
+      targetEmail: email,
+      ip,
+      userAgent,
+    });
+    res.status(404).json({ error: "E-mail não encontrado" });
+    return;
+  }
+
+  if (user.status !== "ACTIVE") {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_REQUESTED_INACTIVE",
+      targetUserId: user.id,
+      targetEmail: user.email,
+      ip,
+      userAgent,
+    });
+    res.status(403).json({ error: "Conta não está ativa" });
+    return;
+  }
+
+  const token = generateResetToken();
+  const tokenHash = hashResetToken(token);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+  await db.insert(passwordResetTokensTable).values({
+    userId: user.id,
+    tokenHash,
+    purpose: "forgot_password",
+    requestedIp: ip,
+    requestedUserAgent: userAgent,
+    expiresAt,
+  });
+
+  const resetLink = buildPasswordResetLink(token);
+  const mail = buildPasswordResetEmail({ recipientName: user.name, resetLink, expiresAt });
+
+  try {
+    await sendEmail({ to: user.email, subject: mail.subject, text: mail.text, html: mail.html });
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_EMAIL_SENT",
+      targetUserId: user.id,
+      targetEmail: user.email,
+      ip,
+      userAgent,
+    });
+    res.json({ message: "E-mail de recuperação enviado" });
+  } catch (err) {
+    await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_EMAIL_FAILED",
+      targetUserId: user.id,
+      targetEmail: user.email,
+      ip,
+      userAgent,
+      detail: err instanceof Error ? String(err.message).slice(0, 500) : "Erro ao enviar e-mail",
+    });
+    logger.error({ err }, "Falha ao enviar e-mail de recuperação");
+    res.status(503).json({ error: "Falha ao enviar e-mail de recuperação" });
+  }
+});
+
+router.post("/auth/reset-password", async (req, res): Promise<void> => {
+  const body = req.body as { token?: unknown; newPassword?: unknown } | undefined;
+  const token = typeof body?.token === "string" ? body.token.trim() : "";
+  const newPassword = typeof body?.newPassword === "string" ? body.newPassword : "";
+
+  if (!token) {
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+  if (newPassword.length < 8) {
+    res.status(400).json({ error: "A nova senha deve possuir no mínimo 8 caracteres" });
+    return;
+  }
+
+  const tokenHash = hashResetToken(token);
+  const ip = String(req.ip || "");
+  const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "";
+
+  const [row] = await db.select({
+    id: passwordResetTokensTable.id,
+    userId: passwordResetTokensTable.userId,
+    purpose: passwordResetTokensTable.purpose,
+    expiresAt: passwordResetTokensTable.expiresAt,
+    usedAt: passwordResetTokensTable.usedAt,
+  }).from(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+
+  if (!row) {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_TOKEN_INVALID",
+      ip,
+      userAgent,
+    });
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+
+  if (row.usedAt) {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_TOKEN_USED",
+      targetUserId: row.userId,
+      ip,
+      userAgent,
+    });
+    res.status(400).json({ error: "Token inválido", code: "TOKEN_INVALID" });
+    return;
+  }
+
+  const now = new Date();
+  if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "PASSWORD_RESET_TOKEN_EXPIRED",
+      targetUserId: row.userId,
+      ip,
+      userAgent,
+    });
+    res.status(400).json({ error: "Token expirado", code: "TOKEN_EXPIRED" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await db.update(usersTable).set({ passwordHash, mustChangePassword: false }).where(eq(usersTable.id, row.userId));
+  await db.update(passwordResetTokensTable).set({
+    usedAt: now,
+    usedIp: ip,
+    usedUserAgent: userAgent,
+  }).where(and(eq(passwordResetTokensTable.id, row.id), sql`${passwordResetTokensTable.usedAt} is null`));
+
+  await db.insert(securityAuditLogsTable).values({
+    eventType: "PASSWORD_RESET_COMPLETED",
+    targetUserId: row.userId,
+    ip,
+    userAgent,
+    detail: row.purpose ? `purpose=${row.purpose}` : null,
+  });
+
+  res.json({ message: "Senha redefinida com sucesso" });
 });
 
 export default router;

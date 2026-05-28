@@ -1856,8 +1856,8 @@ export default function TicketDetail() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="SOFTWARE">Software</SelectItem>
-                      <SelectItem value="HARDWARE">Hardware</SelectItem>
+                      <SelectItem value="SOFTWARE">Sistema</SelectItem>
+                      <SelectItem value="HARDWARE">Equipamentos</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

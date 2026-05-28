@@ -552,10 +552,10 @@ export default function Tickets() {
         >
           <TabsList className="h-11 p-1">
             <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-4">
-              Software
+              Sistema
             </TabsTrigger>
             <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-4">
-              Hardware
+              Equipamentos
             </TabsTrigger>
             <TabsTrigger value="RESOLVED" className="h-9 px-4">
               Resolvidos
@@ -566,8 +566,8 @@ export default function Tickets() {
           {typeTab === "RESOLVED"
             ? "Exibindo chamados resolvidos"
             : typeTab === TicketType.SOFTWARE
-              ? "Exibindo chamados de Software"
-              : "Exibindo chamados de Hardware"}
+              ? "Exibindo chamados de Sistema"
+              : "Exibindo chamados de Equipamentos"}
         </div>
       </div>
 

@@ -12,5 +12,7 @@ export * from "./user-coordinators";
 export * from "./gestor-coordinators";
 export * from "./gestor-allowed-users";
 export * from "./municipalities";
+export * from "./password-reset-tokens";
+export * from "./security-audit-logs";
 export * from "./relations";
 export { ticketAttachmentsTable } from "./tickets";

@@ -21,7 +21,7 @@ import { Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
 import { useEffect, useMemo, useState } from "react";
-import { formatBrazilPhone, formatCpf, isValidBrazilMobile, isValidCpf, onlyDigits } from "@/lib/validators";
+import { formatBrazilPhone, formatCpf, isValidBrazilMobile, isValidCpf, maskEmail, onlyDigits } from "@/lib/validators";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { getRoleLabel } from "@/lib/role-labels";
 import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
@@ -242,7 +242,7 @@ export default function Profile() {
               )}
             </div>
             <h2 className="font-semibold text-lg">{user.name}</h2>
-            <p className="text-sm text-muted-foreground">{user.email}</p>
+            <p className="text-sm text-muted-foreground">{maskEmail(user.email) || "E-mail indisponível"}</p>
             <div className="mt-4 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold">
               {getRoleLabel(user.role)}
             </div>

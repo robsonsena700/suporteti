@@ -128,6 +128,11 @@ export default function Login() {
               >
                 {loginMutation.isPending ? "Entrando..." : "Entrar"}
               </Button>
+              <div className="text-right">
+                <Link href="/esqueci-senha" className="text-sm text-primary font-medium hover:underline">
+                  Esqueci minha senha
+                </Link>
+              </div>
             </form>
           </Form>
           <div className="mt-6 text-center text-sm">

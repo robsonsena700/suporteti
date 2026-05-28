@@ -6,6 +6,7 @@
     "codegen": "orval --config ./orval.config.ts && node -e \"const fs=require('fs');fs.writeFileSync('../api-zod/src/index.ts','export * from \\\"./generated/api\\\";\\nexport * from \\\"./create-rating\\\";\\n');\" && pnpm -w run typecheck:libs"
   },
   "devDependencies": {
-    "orval": "^8.5.2"
+    "orval": "^8.5.2",
+    "yaml": "^2.8.1"
   }
 }

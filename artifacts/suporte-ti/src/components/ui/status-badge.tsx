@@ -17,8 +17,8 @@ const priorityConfig: Record<string, { label: string; className: string }> = {
 };
 
 const typeConfig: Record<string, { label: string }> = {
-  [TicketType.SOFTWARE]: { label: "Software" },
-  [TicketType.HARDWARE]: { label: "Hardware" },
+  [TicketType.SOFTWARE]: { label: "Sistema" },
+  [TicketType.HARDWARE]: { label: "Equipamentos" },
 };
 
 export function StatusBadge({ status }: { status: string }) {
