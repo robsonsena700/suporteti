@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v1.0.30 (2026-06-14)
+- retorno (0d5e9ad)
+- chore(release): v1.0.29 (bea739f)
+
 ## v1.0.28 (2026-05-28)
 - Reset Senha - Tela de alteração oriunda do link gerado (edd8a7a)
 - Reset senha via e-mail (7dadd4a)
@@ -119,6 +123,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
