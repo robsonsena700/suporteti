@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v1.0.32 (2026-06-15)
+- novas credenciais do .env (376f2eb)
+- fix(users): permitir usuario padrao sem coordenador (a4cc964)
+- chore(release): v1.0.31 (c705a7f)
+
 ## v1.0.30 (2026-06-14)
 - retorno (0d5e9ad)
 - chore(release): v1.0.29 (bea739f)
@@ -123,6 +128,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
