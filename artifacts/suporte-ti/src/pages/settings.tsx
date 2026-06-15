@@ -356,11 +356,11 @@ function AdminSettings() {
     const role = selectedRoles[userId] || UserRole.USER;
     const coordinatorId = approvalCoordinatorByUser[userId];
     const payload: { role: UserRole; coordinatorId?: number } = { role };
-    if ((role === UserRole.USER || role === UserRole.GESTOR) && !coordinatorId) {
-      toast({ title: "Selecione um coordenador para aprovar este perfil.", variant: "destructive" });
+    if (role === UserRole.GESTOR && !coordinatorId) {
+      toast({ title: "Selecione um coordenador para aprovar este Gestor.", variant: "destructive" });
       return;
     }
-    if ((role === UserRole.USER || role === UserRole.GESTOR) && coordinatorId) {
+    if ((role === UserRole.USER || role === UserRole.GESTOR) && coordinatorId && coordinatorId !== "__none__") {
       payload.coordinatorId = Number(coordinatorId);
     }
 
@@ -904,7 +904,7 @@ function AdminSettings() {
                     </TableCell>
                     <TableCell>
                       <Select
-                        value={approvalCoordinatorByUser[user.id] || ""}
+                        value={approvalCoordinatorByUser[user.id] || "__none__"}
                         onValueChange={(v) => setApprovalCoordinatorByUser(prev => ({ ...prev, [user.id]: v }))}
                         disabled={!((selectedRoles[user.id] || UserRole.USER) === UserRole.USER || (selectedRoles[user.id] || UserRole.USER) === UserRole.GESTOR)}
                       >
@@ -912,6 +912,7 @@ function AdminSettings() {
                           <SelectValue placeholder="Selecione" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="__none__">Sem coordenador</SelectItem>
                           {activeCoordinators.map(coordinator => (
                             <SelectItem key={coordinator.id} value={String(coordinator.id)}>
                               {coordinator.name}

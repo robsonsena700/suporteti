@@ -80,6 +80,25 @@ async function approveUser(adminToken, userId, role, coordinatorId) {
   assert(status === 200, `Falha ao aprovar usuário ${userId}: ${status} - ${JSON.stringify(data)}`);
 }
 
+async function setRole(adminToken, userId, role, coordinatorId) {
+  const body = coordinatorId != null ? { role, coordinatorId } : { role };
+  const { status, data } = await api(`/users/${userId}/role`, {
+    method: "POST",
+    token: adminToken,
+    json: body,
+  });
+  assert(status === 200, `Falha ao alterar role do usuário ${userId}: ${status} - ${JSON.stringify(data)}`);
+}
+
+async function setStatus(adminToken, userId, statusValue) {
+  const { status, data } = await api(`/users/${userId}/status`, {
+    method: "POST",
+    token: adminToken,
+    json: { status: statusValue },
+  });
+  assert(status === 200, `Falha ao alterar status do usuário ${userId}: ${status} - ${JSON.stringify(data)}`);
+}
+
 async function createTicket(userToken, title) {
   const { status, data } = await api("/tickets", {
     method: "POST",
@@ -117,6 +136,11 @@ async function main() {
   await approveUser(adminToken, analyst.id, "ANALYST");
   await approveUser(adminToken, coordinator.id, "COORDINATOR");
   await approveUser(adminToken, userNoCoord.id, "USER");
+
+  await setStatus(adminToken, userNoCoord.id, "INACTIVE");
+  await setStatus(adminToken, userNoCoord.id, "ACTIVE");
+  await setRole(adminToken, userNoCoord.id, "ANALYST");
+  await setRole(adminToken, userNoCoord.id, "USER");
 
   const analystToken = await login(analyst.email, password);
   const coordinatorToken = await login(coordinator.email, password);

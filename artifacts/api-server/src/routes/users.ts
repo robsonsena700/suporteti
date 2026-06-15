@@ -897,13 +897,6 @@ router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN
     return;
   }
 
-  if (status === "ACTIVE" && existing.role === "USER") {
-    const [link] = await db.select().from(userCoordinatorsTable).where(eq(userCoordinatorsTable.userId, id));
-    if (!link) {
-      res.status(400).json({ error: "Usuário ativo deve possuir ao menos um coordenador" });
-      return;
-    }
-  }
   if (status === "ACTIVE" && existing.role === "GESTOR") {
     const [link] = await db.select().from(gestorCoordinatorsTable).where(eq(gestorCoordinatorsTable.gestorId, id));
     if (!link) {
@@ -956,10 +949,6 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
   const coordinatorId = coordinatorValue == null ? null : parseSingleCoordinatorId(coordinatorValue);
   if (coordinatorValue != null && !coordinatorId) {
     res.status(400).json({ error: "Coordenador inválido" });
-    return;
-  }
-  if (role === "USER" && coordinatorId == null) {
-    res.status(400).json({ error: "Usuário padrão deve possuir um coordenador" });
     return;
   }
   if (role === "GESTOR" && coordinatorId == null) {
@@ -1061,7 +1050,7 @@ router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN")
     ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
   const coordinatorId = coordinatorValue != null ? parseSingleCoordinatorId(coordinatorValue) : null;
 
-  if ((role === "USER" || role === "GESTOR") && coordinatorId == null) {
+  if (role === "GESTOR" && coordinatorId == null) {
     res.status(400).json({ error: "Informe um coordenador válido" });
     return;
   }
