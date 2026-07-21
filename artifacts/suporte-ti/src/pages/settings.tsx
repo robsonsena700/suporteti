@@ -11,7 +11,7 @@ import {
   UserRole
 } from "@workspace/api-client-react";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1099,6 +1099,96 @@ function AdminSettings() {
   );
 }
 
+function CoordinatorApprovalSettings() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const {
+    data: pendingUsers,
+    isLoading,
+    error,
+  } = useListUsers(
+    { status: UserStatus.PENDING },
+    { query: { queryKey: [...getListUsersQueryKey({ status: UserStatus.PENDING }), "coordinator-scope"] } },
+  );
+  const approveMutation = useApproveUser();
+  const visiblePendingUsers = pendingUsers ?? [];
+
+  const handleApprove = (userId: number) => {
+    approveMutation.mutate(
+      { id: userId, data: { role: UserRole.USER } },
+      {
+        onSuccess: () => {
+          toast({ title: "Usuário aprovado com sucesso" });
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({ status: UserStatus.PENDING }) });
+        },
+        onError: (err: any) => {
+          toast({
+            title: "Não foi possível aprovar o cadastro",
+            description: err?.data?.error || "Tente novamente.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  const errorMessage =
+    (error as any)?.data?.error
+    || (error as Error | null)?.message
+    || "Não foi possível carregar as solicitações de aprovação.";
+
+  return (
+    <Card className="border-primary/20 shadow-md">
+      <CardHeader>
+        <CardTitle>Aprovações Pendentes do Meu Município</CardTitle>
+        <CardDescription>
+          Como coordenador, você só pode visualizar e aprovar cadastros do seu próprio município.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-center py-4">Carregando...</div>
+        ) : error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : visiblePendingUsers.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            Não há cadastros pendentes no seu município.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead>E-mail</TableHead>
+                <TableHead>Localidade</TableHead>
+                <TableHead>Perfil de Aprovação</TableHead>
+                <TableHead className="text-right">Ação</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visiblePendingUsers.map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell className="font-medium">{user.name}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>{user.municipality} - {user.uf}</TableCell>
+                  <TableCell>Usuário Padrão</TableCell>
+                  <TableCell className="text-right">
+                    <Button size="sm" onClick={() => handleApprove(user.id)} disabled={approveMutation.isPending}>
+                      Aprovar Acesso
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { user } = useAuth();
 
@@ -1107,7 +1197,7 @@ export default function Settings() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
         <p className="text-muted-foreground mt-1">
-          Ajustes da sua conta e, para administradores, gerenciamento de usuários.
+          Ajustes da sua conta e, para administradores ou coordenadores autorizados, gerenciamento de aprovações.
         </p>
       </div>
 
@@ -1126,6 +1216,7 @@ export default function Settings() {
       </Card>
 
       {user?.role === "ADMIN" ? <AdminSettings /> : null}
+      {user?.role === "COORDINATOR" ? <CoordinatorApprovalSettings /> : null}
     </div>
   );
 }

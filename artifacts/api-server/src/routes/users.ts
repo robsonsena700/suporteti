@@ -19,6 +19,10 @@ import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { listCoordinatorsForUser } from "../lib/access";
+import {
+  buildCoordinatorApprovalAuditDetail,
+  hasMatchingMunicipalityScope,
+} from "../lib/user-approval-policy";
 import { requireHttpsInProduction, requireSameOriginInProduction } from "../middlewares/security";
 import { logger } from "../lib/logger";
 import { sendEmail } from "../lib/mailer";
@@ -68,7 +72,29 @@ function parseSingleCoordinatorId(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
+async function getApprovalActorScope(userId: number) {
+  const [actor] = await db
+    .select({
+      id: usersTable.id,
+      role: usersTable.role,
+      status: usersTable.status,
+      uf: usersTable.uf,
+      municipality: usersTable.municipality,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+  return actor ?? null;
+}
+
+function getRequestMeta(req: any) {
+  return {
+    ip: String(req.ip || ""),
+    userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+  };
+}
+
+router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (req, res): Promise<void> => {
+  const currentUser = req.user!;
   const { status, role, includeCoordinator } = req.query as { status?: string; role?: string; includeCoordinator?: string };
 
   const wantsCoordinator = includeCoordinator === "true" || includeCoordinator === "1";
@@ -116,9 +142,30 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
   if (status) conditions.push(eq(usersTable.status, status as any));
   if (role) conditions.push(eq(usersTable.role, role as any));
 
-  const users = conditions.length > 0
+  if (currentUser.role === "COORDINATOR") {
+    if (status !== "PENDING") {
+      res.status(403).json({ error: "Coordenadores só podem visualizar cadastros pendentes do próprio município" });
+      return;
+    }
+
+    const actorScope = await getApprovalActorScope(currentUser.userId);
+    if (!actorScope?.uf || !actorScope?.municipality) {
+      res.status(403).json({ error: "Coordenador sem município vinculado não pode acessar fila de aprovações" });
+      return;
+    }
+
+  }
+
+  const rawUsers = conditions.length > 0
     ? await query.where(and(...conditions))
     : await query;
+
+  const users = currentUser.role === "COORDINATOR"
+    ? rawUsers.filter((user) => hasMatchingMunicipalityScope(
+      { uf: req.user?.uf, municipality: req.user?.municipality },
+      { uf: user.uf, municipality: user.municipality },
+    ))
+    : rawUsers;
 
   res.json(users);
 });
@@ -929,7 +976,9 @@ router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN
   res.json(user);
 });
 
-router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMIN"), async (req, res): Promise<void> => {
+router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMIN", "COORDINATOR"), async (req, res): Promise<void> => {
+  const currentUser = req.user!;
+  const { ip, userAgent } = getRequestMeta(req);
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);
 
@@ -944,6 +993,24 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
     return;
   }
 
+  if (currentUser.role === "COORDINATOR" && role !== "USER") {
+    await db.insert(securityAuditLogsTable).values({
+      eventType: "COORDINATOR_APPROVAL_DENIED_INVALID_ROLE",
+      actorUserId: currentUser.userId,
+      targetUserId: id,
+      ip,
+      userAgent,
+      detail: buildCoordinatorApprovalAuditDetail({
+        actorUf: currentUser.uf,
+        actorMunicipality: currentUser.municipality,
+        requestedRole: role,
+        reason: "coordinator_can_only_approve_user_role",
+      }),
+    });
+    res.status(403).json({ error: "Coordenadores só podem aprovar cadastros como Usuário Padrão" });
+    return;
+  }
+
   const coordinatorValue = (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorId
     ?? (req.body as { coordinatorId?: unknown; coordinatorIds?: unknown } | undefined)?.coordinatorIds;
   const coordinatorId = coordinatorValue == null ? null : parseSingleCoordinatorId(coordinatorValue);
@@ -954,6 +1021,91 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
   if (role === "GESTOR" && coordinatorId == null) {
     res.status(400).json({ error: "Gestor deve possuir um coordenador principal" });
     return;
+  }
+
+  const [targetUser] = await db
+    .select({
+      id: usersTable.id,
+      email: usersTable.email,
+      status: usersTable.status,
+      uf: usersTable.uf,
+      municipality: usersTable.municipality,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, id));
+
+  if (!targetUser) {
+    res.status(404).json({ error: "Usuário não encontrado" });
+    return;
+  }
+
+  if (targetUser.status !== "PENDING") {
+    if (currentUser.role === "COORDINATOR") {
+      await db.insert(securityAuditLogsTable).values({
+        eventType: "COORDINATOR_APPROVAL_DENIED_NOT_PENDING",
+        actorUserId: currentUser.userId,
+        targetUserId: targetUser.id,
+        targetEmail: targetUser.email,
+        ip,
+        userAgent,
+        detail: buildCoordinatorApprovalAuditDetail({
+          actorUf: currentUser.uf,
+          actorMunicipality: currentUser.municipality,
+          candidateUf: targetUser.uf,
+          candidateMunicipality: targetUser.municipality,
+          requestedRole: role,
+          reason: "target_user_not_pending",
+        }),
+      });
+    }
+    res.status(400).json({ error: "Apenas usuários pendentes podem ser aprovados" });
+    return;
+  }
+
+  let actorScope = null as Awaited<ReturnType<typeof getApprovalActorScope>> | null;
+  if (currentUser.role === "COORDINATOR") {
+    actorScope = await getApprovalActorScope(currentUser.userId);
+    if (!actorScope?.uf || !actorScope?.municipality) {
+      await db.insert(securityAuditLogsTable).values({
+        eventType: "COORDINATOR_APPROVAL_DENIED_NO_SCOPE",
+        actorUserId: currentUser.userId,
+        targetUserId: targetUser.id,
+        targetEmail: targetUser.email,
+        ip,
+        userAgent,
+        detail: buildCoordinatorApprovalAuditDetail({
+          actorUf: actorScope?.uf ?? currentUser.uf,
+          actorMunicipality: actorScope?.municipality ?? currentUser.municipality,
+          candidateUf: targetUser.uf,
+          candidateMunicipality: targetUser.municipality,
+          requestedRole: role,
+          reason: "coordinator_without_municipality_scope",
+        }),
+      });
+      res.status(403).json({ error: "Coordenador sem município vinculado não pode aprovar cadastros" });
+      return;
+    }
+
+    if (!hasMatchingMunicipalityScope(actorScope, targetUser)) {
+      await db.insert(securityAuditLogsTable).values({
+        eventType: "COORDINATOR_APPROVAL_DENIED_MUNICIPALITY_MISMATCH",
+        actorUserId: currentUser.userId,
+        targetUserId: targetUser.id,
+        targetEmail: targetUser.email,
+        ip,
+        userAgent,
+        detail: buildCoordinatorApprovalAuditDetail({
+          actorUf: actorScope.uf,
+          actorMunicipality: actorScope.municipality,
+          candidateUf: targetUser.uf,
+          candidateMunicipality: targetUser.municipality,
+          requestedRole: role,
+          reason: "candidate_outside_coordinator_scope",
+        }),
+      });
+      res.status(403).json({ error: "Coordenadores só podem aprovar cadastros do próprio município" });
+      return;
+    }
   }
 
   if (coordinatorId) {
@@ -1007,6 +1159,25 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
     }
     if (role === "GESTOR" && coordinatorId) {
       await tx.insert(gestorCoordinatorsTable).values({ gestorId: id, coordinatorId });
+    }
+
+    if (currentUser.role === "COORDINATOR") {
+      await tx.insert(securityAuditLogsTable).values({
+        eventType: "COORDINATOR_APPROVAL_GRANTED",
+        actorUserId: currentUser.userId,
+        targetUserId: targetUser.id,
+        targetEmail: targetUser.email,
+        ip,
+        userAgent,
+        detail: buildCoordinatorApprovalAuditDetail({
+          actorUf: actorScope?.uf ?? currentUser.uf,
+          actorMunicipality: actorScope?.municipality ?? currentUser.municipality,
+          candidateUf: targetUser.uf,
+          candidateMunicipality: targetUser.municipality,
+          requestedRole: role,
+          reason: "approved_within_municipality_scope",
+        }),
+      });
     }
 
     return approvedUser;
