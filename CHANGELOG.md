@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v1.0.34 (2026-07-21)
+- Permissão - Adicionado permissão ao coordenador adicionar usuario (f1a9add)
+- chore(release): v1.0.33 (168ca3e)
+
 ## v1.0.32 (2026-06-15)
 - novas credenciais do .env (376f2eb)
 - fix(users): permitir usuario padrao sem coordenador (a4cc964)
@@ -128,6 +132,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
