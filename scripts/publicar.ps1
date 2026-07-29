@@ -205,20 +205,18 @@ if (-not $SkipPr) {
 }
 
 if (-not $SkipDeploy) {
-  $args = @(
-    "-ExecutionPolicy", "Bypass",
-    "-File", ".\scripts\deploy_prod.ps1",
+  $deployArgs = @(
     "-HostName", $HostName,
     "-Port", "$Port",
     "-User", $User,
     "-RemoteBaseDir", $RemoteBaseDir,
     "-SkipBuild"
   )
-  if (-not [string]::IsNullOrWhiteSpace($KeyPath)) { $args += @("-KeyPath", $KeyPath) }
+  if (-not [string]::IsNullOrWhiteSpace($KeyPath)) { $deployArgs += @("-KeyPath", $KeyPath) }
 
   Write-Host ">> deploy_prod.ps1"
-  & powershell @args
-  if ($LASTEXITCODE -ne 0) { throw "Falha no deploy_prod.ps1" }
+  $deployScriptPath = Join-Path $RepoRoot "scripts\deploy_prod.ps1"
+  & $deployScriptPath @deployArgs
   Write-Host "OK: publicado (v$newVersion)." -ForegroundColor Green
 }
 

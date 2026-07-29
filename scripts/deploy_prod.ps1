@@ -71,6 +71,28 @@ function ResolveKeyPath {
   throw "Chave SSH não encontrada. Informe -KeyPath com o caminho da chave privada."
 }
 
+function InvokeNativeWithRetry {
+  param(
+    [Parameter(Mandatory)][string]$Executable,
+    [Parameter(Mandatory)][string[]]$Arguments,
+    [Parameter(Mandatory)][string]$FailureMessage,
+    [int]$MaxAttempts = 2
+  )
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    & $Executable @Arguments
+    if ($LASTEXITCODE -eq 0) {
+      return
+    }
+
+    if ($attempt -lt $MaxAttempts) {
+      Write-Host "Aviso: tentativa $attempt/$MaxAttempts falhou para $Executable. Repetindo..." -ForegroundColor Yellow
+    }
+  }
+
+  throw $FailureMessage
+}
+
 function Ssh {
   param([Parameter(Mandatory)][string]$RemoteCommand)
   $sshArgs = @(
@@ -85,11 +107,8 @@ function Ssh {
     $sshArgs += @("-i", $KeyPath, "-o", "IdentitiesOnly=yes")
   }
   $sshArgs += @("$User@$HostName", $RemoteCommand)
-  & ssh.exe @sshArgs
-  if ($LASTEXITCODE -ne 0) {
-    $keyInfo = if ([string]::IsNullOrWhiteSpace($KeyPath)) { "(nenhuma chave explicitada)" } else { $KeyPath }
-    throw "Falha no ssh (${User}@${HostName}:$Port, key=$keyInfo): $RemoteCommand"
-  }
+  $keyInfo = if ([string]::IsNullOrWhiteSpace($KeyPath)) { "(nenhuma chave explicitada)" } else { $KeyPath }
+  InvokeNativeWithRetry -Executable "ssh.exe" -Arguments $sshArgs -FailureMessage "Falha no ssh (${User}@${HostName}:$Port, key=$keyInfo): $RemoteCommand"
 }
 
 function ScpToRemote {
@@ -109,10 +128,7 @@ function ScpToRemote {
     $scpArgs += @("-i", $KeyPath, "-o", "IdentitiesOnly=yes")
   }
   $scpArgs += @("$LocalPath", "${User}@${HostName}:$RemotePath")
-  & scp.exe @scpArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "Falha no scp para $RemotePath"
-  }
+  InvokeNativeWithRetry -Executable "scp.exe" -Arguments $scpArgs -FailureMessage "Falha no scp para $RemotePath"
 }
 
 Write-Host "Deploy producao - alvo: ${User}@${HostName}:$Port"
