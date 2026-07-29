@@ -5,7 +5,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { ChatNotificationProvider } from "@/lib/chat-notifications";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 // Pages
 const Login = lazy(() => import("@/pages/login"));
@@ -27,9 +28,23 @@ const NotFound = lazy(() => import("@/pages/not-found"));
 
 const queryClient = new QueryClient();
 
+function dbg(event: Record<string, unknown>) {
+  const reporter = (window as any).__ti_dbg as undefined | ((payload: Record<string, unknown>) => Promise<void> | void);
+  if (typeof reporter !== "function") return;
+  try {
+    void reporter(event);
+  } catch {}
+}
+
 function Redirect({ to }: { to: string }) {
   const [, setLocation] = useLocation();
   useEffect(() => {
+    dbg({
+      level: "info",
+      source: "router.redirect",
+      from: window.location.pathname,
+      to,
+    });
     setLocation(to);
   }, [setLocation, to]);
   return null;
@@ -38,7 +53,14 @@ function Redirect({ to }: { to: string }) {
 function ProtectedRoute({ component: Component, ...rest }: any) {
   const { user, isLoading } = useAuth();
   
-  if (isLoading) return null; // handled by AppLayout
+  if (isLoading) {
+    dbg({
+      level: "info",
+      source: "router.protected_loading",
+      path: window.location.pathname,
+    });
+    return null;
+  }
 
   return (
     <Route
@@ -101,7 +123,75 @@ function Router() {
   );
 }
 
+function DebugOverlay() {
+  const enabled = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("dbgview") === "1";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const id = window.setInterval(() => {
+      try {
+        const dump = (window as any).__ti_dbg_dump as undefined | (() => Array<Record<string, unknown>>);
+        const next = typeof dump === "function" ? dump() : [];
+        setEvents(next);
+      } catch {}
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [enabled]);
+
+  if (!enabled) return null;
+
+  const text = JSON.stringify(events.slice(-80), null, 2);
+
+  return (
+    <div className="fixed bottom-3 right-3 z-[9999] w-[92vw] max-w-[520px] rounded-md border bg-background shadow-lg">
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold truncate">Diagnóstico (dbgview=1)</p>
+          <p className="text-[11px] text-muted-foreground truncate">mobile-white-screen</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => setCollapsed((v) => !v)}>
+            {collapsed ? "Expandir" : "Recolher"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(text);
+              } catch {}
+            }}
+          >
+            Copiar logs
+          </Button>
+        </div>
+      </div>
+      {collapsed ? null : (
+        <pre className="max-h-[45vh] overflow-auto p-3 text-[10px] leading-relaxed">
+          {text}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function App() {
+  useEffect(() => {
+    dbg({
+      level: "info",
+      source: "app.mount",
+      baseUrl: import.meta.env.BASE_URL,
+    });
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -112,6 +202,7 @@ function App() {
             </ChatNotificationProvider>
           </AuthProvider>
         </WouterRouter>
+        <DebugOverlay />
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>
