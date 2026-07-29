@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v1.0.37 (2026-07-29)
+- Ajuste em tela (c9093a4)
+- chore(release): v1.0.36 (75e59e7)
+- chore(release): v1.0.35 (3944303)
+
 ## v1.0.34 (2026-07-21)
 - Permissão - Adicionado permissão ao coordenador adicionar usuario (f1a9add)
 - chore(release): v1.0.33 (168ca3e)
@@ -132,6 +137,7 @@ warning: refname 'v1.0.0' is ambiguous.
 - Fix login issue by ensuring authentication token is immediately available (78fcf1c)
 - Implement comprehensive user authentication and ticket management system (8f04f83)
 - Initial commit (8337c4b)
+
 
 
 
