@@ -395,6 +395,41 @@ export default function NewTicket() {
   const filePickerProbesScheduledRef = useRef<number>(0);
   const lastProcessedSelectionRef = useRef<{ key: string; at: number } | null>(null);
 
+  // ── Debug console mobile (auto-diagnóstico) ──────────────────────────────
+  // Ative acessando a página com ?debug=1 no final da URL, ex.:
+  // https://SEU-DOMINIO/chamados/novo?debug=1
+  // Isso carrega um console visual (eruda) direto na tela do celular,
+  // sem precisar de cabo USB nem de configurar nada no aparelho.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let params: URLSearchParams;
+    try {
+      params = new URLSearchParams(window.location.search);
+    } catch {
+      return;
+    }
+    if (params.get("debug") !== "1") return;
+
+    const w = window as unknown as { eruda?: { init: () => void; show: () => void } };
+    if (w.eruda) {
+      w.eruda.show();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/eruda@3/eruda.min.js";
+    script.async = true;
+    script.onload = () => {
+      try {
+        w.eruda?.init();
+        w.eruda?.show();
+      } catch {
+        // ignore falha ao iniciar console de debug
+      }
+    };
+    document.body.appendChild(script);
+  }, []);
+
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
     mode: "onChange",
@@ -431,6 +466,34 @@ export default function NewTicket() {
 
   useEffect(() => {
     reportAttachmentEvent("info", "attachment.page.mounted", {});
+  }, [reportAttachmentEvent]);
+
+  // Captura qualquer erro de JS não tratado (e Promise rejeitada) enquanto o
+  // usuário estiver nesta página, e manda pro log do servidor. Isso ajuda a
+  // pegar travamentos silenciosos no mobile mesmo sem acesso ao DevTools.
+  useEffect(() => {
+    const onWindowError = (e: ErrorEvent) => {
+      reportAttachmentEvent("error", "attachment.page.uncaught_error", {
+        message: e.message,
+        filename: e.filename,
+        lineno: e.lineno,
+        colno: e.colno,
+        stack: e.error instanceof Error ? e.error.stack : null,
+      });
+    };
+    const onUnhandledRejection = (e: PromiseRejectionEvent) => {
+      const reason = e.reason;
+      reportAttachmentEvent("error", "attachment.page.unhandled_rejection", {
+        message: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : null,
+      });
+    };
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
   }, [reportAttachmentEvent]);
 
   useEffect(() => {
@@ -470,12 +533,18 @@ export default function NewTicket() {
     };
   }, [filePreviews]);
 
-  const runAutoSave = useCallback(async (reason?: string) => {
+  const runAutoSave = useCallback(async (reason?: string, filesOverride?: File[]) => {
     if (!user?.id) return;
     if (restoringRef.current) return;
     setAutoSaveStatus("saving");
     if (reason) setAutoSaveDetail(reason);
     const seq = ++saveSeqRef.current;
+    // `filesOverride` permite salvar a lista de anexos mais recente na hora,
+    // sem esperar o debounce de 250ms — usado logo depois de adicionar um
+    // anexo, porque em celulares com pouca memória o Android pode descartar
+    // a aba (perdendo tudo que ainda não foi salvo) assim que o usuário sai
+    // para tirar foto ou escolher um arquivo.
+    const filesToSave = filesOverride ?? files;
     try {
       const actorUserId = user.id;
       const draftId = toDraftId(actorUserId);
@@ -499,7 +568,7 @@ export default function NewTicket() {
         hardwareSubtype: safeType === TicketType.HARDWARE ? values.hardwareSubtype : undefined,
       };
 
-      let metas: TicketDraftFileMeta[] = files.map((f) => ({
+      let metas: TicketDraftFileMeta[] = filesToSave.map((f) => ({
         key: `${draftId}::${makeFileKey(f)}`,
         name: f.name,
         type: f.type,
@@ -511,7 +580,7 @@ export default function NewTicket() {
         const db = await openDraftDb();
         const keepKeys = new Set(metas.map((m) => m.key));
         await Promise.all(
-          files.map(async (f) => {
+          filesToSave.map(async (f) => {
             const metaKey = `${draftId}::${makeFileKey(f)}`;
             const existing = await idbGetDraftFile(db, metaKey);
             if (existing && existing.size === f.size && existing.lastModified === f.lastModified && existing.type === f.type && existing.name === f.name) {
@@ -533,7 +602,7 @@ export default function NewTicket() {
         await idbDeleteDraftFilesNotIn(db, draftId, keepKeys);
       } catch {
         metas = await Promise.all(
-          files.map(async (f) => {
+          filesToSave.map(async (f) => {
             const buffer = await f.arrayBuffer();
             const dataUrl = `data:${f.type};base64,${arrayBufferToBase64(buffer)}`;
             return {
@@ -775,7 +844,14 @@ export default function NewTicket() {
       }
     }
     setFilePreviews(previews);
-  }, [files, filePreviews, reportAttachmentEvent, toast]);
+
+    // Salva o rascunho já com o anexo novo AGORA, sem esperar os 250ms do
+    // debounce normal (scheduleAutoSave). Em celulares com pouca RAM o
+    // Android pode matar a aba assim que o usuário troca de app (câmera,
+    // galeria) — se o anexo só fosse salvo depois do debounce, ele podia
+    // se perder antes de o salvamento rodar.
+    void runAutoSave("Salvando anexo...", newFiles);
+  }, [files, filePreviews, reportAttachmentEvent, toast, runAutoSave]);
 
   const removeFile = (idx: number) => {
     reportAttachmentEvent("info", "attachment.files.removed", {
