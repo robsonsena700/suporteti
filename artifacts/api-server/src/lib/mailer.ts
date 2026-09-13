@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import nodemailer from "nodemailer";
 import { logger } from "./logger";
 
 type MailMode = "smtp" | "console" | "disabled" | "fail";
@@ -42,8 +42,6 @@ export async function sendEmail(args: { to: string; subject: string; text: strin
     throw new Error("Configuração SMTP incompleta (SMTP_HOST/SMTP_FROM).");
   }
 
-  const require = createRequire(import.meta.url);
-  const nodemailer = require("nodemailer") as any;
   const transport = nodemailer.createTransport({
     host,
     port,
