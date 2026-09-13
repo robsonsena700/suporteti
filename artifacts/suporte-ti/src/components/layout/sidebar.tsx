@@ -9,6 +9,7 @@ import {
   LogOut,
   User as UserIcon,
   MessageSquare,
+  FlaskConical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigation = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, badge: 0 },
     { name: "Chamados", href: "/chamados", icon: Ticket, badge: 0 },
+    { name: "AbrirChamados2", href: "/chamados/novo-teste", icon: FlaskConical, badge: 0 },
     ...(user?.role && CHAT_ROLES.includes(user.role)
       ? [{ name: "Chat", href: "/chat", icon: MessageSquare, badge: unreadCount }]
       : []),
@@ -38,6 +40,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const NAV_LABELS: Record<string, string> = {
     Dashboard: "Dashboard",
     Chamados: "Chamados",
+    AbrirChamados2: "Abrir Chamados 2 (teste)",
     Chat: "Chat",
     Relatorios: "Relatórios",
     Configuracoes: "Configurações",
