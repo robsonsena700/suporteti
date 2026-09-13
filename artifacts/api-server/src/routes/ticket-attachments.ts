@@ -8,7 +8,7 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-const MAX_SIZE = 3 * 1024 * 1024; // 3 MB
+const MAX_SIZE = 8 * 1024 * 1024; // 8 MB (fotos de câmera de celular costumam passar de 3 MB)
 const MAX_FILES = 3;
 const ALLOWED_MIME = [
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp",
@@ -67,6 +67,26 @@ function uploadTicketAttachments(req: Request, res: Response, next: NextFunction
             }))
           : [],
       }, "Ticket attachment upload middleware failed");
+
+      // Traduz os erros conhecidos (tamanho, quantidade, tipo não permitido) em uma
+      // resposta clara em vez de deixar cair no handler genérico ("Erro interno do
+      // servidor"), que não ajuda o usuário a entender o que precisa mudar no anexo.
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          res.status(400).json({ error: `Arquivo muito grande. Máximo permitido: ${MAX_SIZE / (1024 * 1024)} MB por arquivo.` });
+          return;
+        }
+        if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+          res.status(400).json({ error: `Máximo de ${MAX_FILES} arquivo(s) por envio.` });
+          return;
+        }
+        res.status(400).json({ error: "Não foi possível enviar o(s) arquivo(s). Tente novamente." });
+        return;
+      }
+      if (err instanceof Error && err.message.startsWith("Tipo de arquivo não permitido")) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
       return;
     }

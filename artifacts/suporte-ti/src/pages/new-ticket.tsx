@@ -72,7 +72,7 @@ type TicketForm = z.infer<typeof ticketSchema>;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3 MB
+const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 MB (fotos de câmera de celular costumam passar de 3 MB)
 const MAX_FILES = 3;
 const TICKET_DRAFT_STATE_KEY = "suporte-ti:tickets:new:draft:v1";
 const TICKET_DRAFT_STATE_BACKUP_KEY = "suporte-ti:tickets:new:draft:v1:bak";
@@ -712,7 +712,7 @@ export default function NewTicket() {
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        errors.push(`"${describeFile(f)}": arquivo muito grande (máx. 3 MB).`);
+        errors.push(`"${describeFile(f)}": arquivo muito grande (máx. 8 MB).`);
         reportAttachmentEvent("warn", "attachment.files.rejected_size", {
           origin,
           file: getAttachmentFileContext(f),
@@ -1140,23 +1140,37 @@ export default function NewTicket() {
                 },
                 body: formData,
               });
+              let serverErrorMessage: string | null = null;
+              if (!uploadResponse.ok) {
+                try {
+                  const body = await uploadResponse.clone().json();
+                  if (body && typeof body.error === "string") serverErrorMessage = body.error;
+                } catch {
+                  // resposta não veio em JSON; segue sem detalhe extra
+                }
+              }
               reportAttachmentEvent(uploadResponse.ok ? "info" : "error", "attachment.upload.response_received", {
                 ticketId: ticket.id,
                 status: uploadResponse.status,
                 ok: uploadResponse.ok,
+                serverErrorMessage,
               });
               if (!uploadResponse.ok) {
-                throw new Error(`attachments_upload_failed_${uploadResponse.status}`);
+                throw new Error(serverErrorMessage || `attachments_upload_failed_${uploadResponse.status}`);
               }
             } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
               reportAttachmentEvent("error", "attachment.upload.exception", {
                 ticketId: ticket.id,
-                message: err instanceof Error ? err.message : String(err),
+                message,
                 stack: err instanceof Error ? err.stack ?? null : null,
               });
+              const isKnownServerMessage = err instanceof Error && !message.startsWith("attachments_upload_failed_");
               toast({
                 title: "Chamado criado, mas erro nos anexos",
-                description: "O chamado foi aberto. Você pode adicionar os anexos depois.",
+                description: isKnownServerMessage
+                  ? `${message} O chamado foi aberto; você pode adicionar os anexos depois.`
+                  : "O chamado foi aberto. Você pode adicionar os anexos depois.",
                 variant: "destructive",
               });
             } finally {
@@ -1447,7 +1461,7 @@ export default function NewTicket() {
                       <span className="hidden sm:inline">Arraste arquivos aqui ou use o botão para selecionar</span>
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      JPG, PNG, GIF, PDF, DOC, XLS, TXT — máx. 3 MB por arquivo
+                      JPG, PNG, GIF, WEBP, HEIC, PDF, DOC, XLS, TXT — máx. 8 MB por arquivo
                     </p>
                     <div className="mt-4 flex justify-center">
                       <div className="w-full max-w-sm text-left">
@@ -1473,6 +1487,25 @@ export default function NewTicket() {
                           type="file"
                           multiple={false}
                           accept={[
+                            // Imagens — sem isso, o seletor nativo do celular (que não
+                            // suporta arrastar-e-soltar como o desktop) não oferece
+                            // fotos/galeria como opção, só os tipos de documento abaixo.
+                            "image/jpeg",
+                            "image/png",
+                            "image/gif",
+                            "image/webp",
+                            "image/bmp",
+                            "image/heic",
+                            "image/heif",
+                            ".jpg",
+                            ".jpeg",
+                            ".png",
+                            ".gif",
+                            ".webp",
+                            ".bmp",
+                            ".heic",
+                            ".heif",
+                            // Documentos
                             "application/pdf",
                             "application/msword",
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
