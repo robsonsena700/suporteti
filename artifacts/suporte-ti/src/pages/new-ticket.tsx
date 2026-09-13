@@ -82,6 +82,7 @@ const TICKET_DRAFT_FILES_STORE = "ticketDraftFiles";
 
 const ALLOWED_MIME = [
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp",
+  "image/heic", "image/heif",
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -89,6 +90,12 @@ const ALLOWED_MIME = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/plain",
 ];
+
+const ALLOWED_EXTENSIONS = [
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt",
+];
+const ATTACHMENT_LOG_ENDPOINT = "/api/attachment-diagnostics/logs";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -98,6 +105,95 @@ function formatBytes(bytes: number) {
 
 function isImage(mime: string) {
   return mime.startsWith("image/");
+}
+
+function getFileExtension(name: string): string {
+  const lastDot = name.lastIndexOf(".");
+  return lastDot >= 0 ? name.slice(lastDot).toLowerCase() : "";
+}
+
+function describeFile(file: File): string {
+  return `${file.name || "sem-nome"} (${file.type || "sem-tipo"}, ${formatBytes(file.size)})`;
+}
+
+function getAttachmentFileContext(file: File) {
+  return {
+    name: file.name || null,
+    size: file.size,
+    type: file.type || null,
+    lastModified: file.lastModified,
+    extension: getFileExtension(file.name),
+    webkitRelativePath: "webkitRelativePath" in file ? (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? null : null,
+  };
+}
+
+function getAttachmentSessionId(): string {
+  try {
+    const key = "suporte-ti:attachment:debug-session";
+    const existing = window.sessionStorage.getItem(key);
+    if (existing) return existing;
+    const next = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    window.sessionStorage.setItem(key, next);
+    return next;
+  } catch {
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function logAttachmentToConsole(level: "info" | "warn" | "error", event: string, context: Record<string, unknown>) {
+  const payload = {
+    source: "attachment-debug",
+    event,
+    timestamp: new Date().toISOString(),
+    ...context,
+  };
+  if (level === "error") {
+    console.error("[attachment-debug]", payload);
+  } else if (level === "warn") {
+    console.warn("[attachment-debug]", payload);
+  } else {
+    console.log("[attachment-debug]", payload);
+  }
+}
+
+function sendAttachmentLog(level: "info" | "warn" | "error", event: string, context: Record<string, unknown>) {
+  try {
+    const token = window.localStorage.getItem("ti_support_token");
+    if (!token) return;
+    void fetch(ATTACHMENT_LOG_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        level,
+        event,
+        sessionId: getAttachmentSessionId(),
+        context,
+      }),
+      keepalive: true,
+    }).catch((err) => {
+      console.error("[attachment-debug] failed-to-send-backend-log", {
+        event,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
+  } catch (err) {
+    console.error("[attachment-debug] unexpected-log-dispatch-error", {
+      event,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function isAllowedFile(file: File): boolean {
+  if (file.type.startsWith("image/")) return true;
+  if (ALLOWED_MIME.includes(file.type)) return true;
+  if (!file.type || file.type === "application/octet-stream") {
+    return ALLOWED_EXTENSIONS.includes(getFileExtension(file.name));
+  }
+  return ALLOWED_EXTENSIONS.includes(getFileExtension(file.name));
 }
 
 type TicketDraftFileMeta = {
@@ -271,6 +367,11 @@ export default function NewTicket() {
   const { user } = useAuth();
   const { toast } = useToast();
   const createMutation = useCreateTicket();
+  const [isMobile] = useState(() => {
+    if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+    return window.matchMedia("(max-width: 767px)").matches
+      || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  });
 
   const [files, setFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<string[]>([]);
@@ -278,12 +379,20 @@ export default function NewTicket() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const nativeFileListenerAttachedRef = useRef(false);
+  const nativeCameraListenerAttachedRef = useRef(false);
+  const selectedFilesRef = useRef<File[]>([]);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [autoSaveDetail, setAutoSaveDetail] = useState<string>("");
   const saveTimerRef = useRef<number | null>(null);
   const saveSeqRef = useRef<number>(0);
   const lastSavedAtRef = useRef<number | null>(null);
   const restoringRef = useRef<boolean>(false);
+  const filePickerActiveRef = useRef<boolean>(false);
+  const filePickerResetTimerRef = useRef<number | null>(null);
+  const filePickerProbeTimerRef = useRef<number | null>(null);
+  const filePickerProbesScheduledRef = useRef<number>(0);
 
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
@@ -300,6 +409,34 @@ export default function NewTicket() {
 
   const selectedType = form.watch("type");
   const selectedPriority = form.watch("priority");
+
+  const reportAttachmentEvent = useCallback((
+    level: "info" | "warn" | "error",
+    event: string,
+    context: Record<string, unknown> = {},
+  ) => {
+    const payload = {
+      route: "/chamados/novo",
+      userId: user?.id ?? null,
+      userRole: user?.role ?? null,
+      isMobile,
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+      href: typeof window !== "undefined" ? window.location.href : null,
+      ...context,
+    };
+    logAttachmentToConsole(level, event, payload);
+    sendAttachmentLog(level, event, payload);
+  }, [isMobile, user?.id, user?.role]);
+
+  useEffect(() => {
+    reportAttachmentEvent("info", "attachment.page.mounted", {});
+  }, [reportAttachmentEvent]);
+
+  useEffect(() => {
+    reportAttachmentEvent("info", "attachment.platform_detection", {
+      isMobile,
+    });
+  }, [isMobile, reportAttachmentEvent]);
 
   useEffect(() => {
     if (user?.establishment) {
@@ -515,12 +652,15 @@ export default function NewTicket() {
   useEffect(() => {
     if (!user?.id) return;
     const onVisibilityChange = () => {
+      if (filePickerActiveRef.current) {
+        reportAttachmentEvent("info", "attachment.autosave.skipped_file_picker_active", {
+          visibilityState: document.visibilityState,
+        });
+        return;
+      }
       if (document.visibilityState === "hidden") {
         void runAutoSave("Salvando...");
         return;
-      }
-      if (document.visibilityState === "visible") {
-        void restoreDraft();
       }
     };
     const onBeforeUnload = () => { void runAutoSave("Salvando..."); };
@@ -543,30 +683,64 @@ export default function NewTicket() {
 
   // ── File handling ─────────────────────────────────────────────────────────
 
-  const addFiles = useCallback((incoming: File[]) => {
+  const addFiles = useCallback((incoming: File[], origin: string) => {
+    reportAttachmentEvent("info", "attachment.files.received", {
+      origin,
+      incomingCount: incoming.length,
+      incomingFiles: incoming.map(getAttachmentFileContext),
+      currentStateCount: files.length,
+    });
     const errors: string[] = [];
     const accepted: File[] = [];
 
     for (const f of incoming) {
       if (files.length + accepted.length >= MAX_FILES) {
         errors.push(`Máximo de ${MAX_FILES} arquivos permitidos.`);
+        reportAttachmentEvent("warn", "attachment.files.limit_reached", {
+          origin,
+          currentStateCount: files.length,
+          attemptedFile: getAttachmentFileContext(f),
+        });
         break;
       }
-      if (!ALLOWED_MIME.includes(f.type)) {
-        errors.push(`"${f.name}": tipo de arquivo não permitido.`);
+      if (!isAllowedFile(f)) {
+        errors.push(`"${describeFile(f)}": tipo de arquivo não permitido.`);
+        reportAttachmentEvent("warn", "attachment.files.rejected_type", {
+          origin,
+          file: getAttachmentFileContext(f),
+        });
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        errors.push(`"${f.name}": arquivo muito grande (máx. 3 MB).`);
+        errors.push(`"${describeFile(f)}": arquivo muito grande (máx. 3 MB).`);
+        reportAttachmentEvent("warn", "attachment.files.rejected_size", {
+          origin,
+          file: getAttachmentFileContext(f),
+          maxFileSize: MAX_FILE_SIZE,
+        });
         continue;
       }
       accepted.push(f);
     }
 
     setFileErrors(errors);
+    if (errors.length > 0) {
+      toast({
+        title: "Alguns arquivos não puderam ser adicionados",
+        description: errors[0],
+        variant: "destructive",
+      });
+    }
     if (!accepted.length) return;
 
     const newFiles = [...files, ...accepted].slice(0, MAX_FILES);
+    reportAttachmentEvent("info", "attachment.files.accepted", {
+      origin,
+      acceptedCount: accepted.length,
+      acceptedFiles: accepted.map(getAttachmentFileContext),
+      finalCount: newFiles.length,
+    });
+    selectedFilesRef.current = newFiles;
     setFiles(newFiles);
 
     // Generate previews
@@ -579,26 +753,284 @@ export default function NewTicket() {
       }
     }
     setFilePreviews(previews);
-  }, [files, filePreviews]);
+  }, [files, filePreviews, reportAttachmentEvent, toast]);
 
   const removeFile = (idx: number) => {
+    reportAttachmentEvent("info", "attachment.files.removed", {
+      index: idx,
+      removedFile: files[idx] ? getAttachmentFileContext(files[idx]) : null,
+    });
     if (filePreviews[idx]) URL.revokeObjectURL(filePreviews[idx]);
-    setFiles((p) => p.filter((_, i) => i !== idx));
+    setFiles((p) => {
+      const next = p.filter((_, i) => i !== idx);
+      selectedFilesRef.current = next;
+      return next;
+    });
     setFilePreviews((p) => p.filter((_, i) => i !== idx));
     setFileErrors([]);
   };
 
+  const handleSelectedFiles = (selected: File[]) => {
+    if (filePickerResetTimerRef.current) {
+      window.clearTimeout(filePickerResetTimerRef.current);
+      filePickerResetTimerRef.current = null;
+    }
+    filePickerActiveRef.current = false;
+    selectedFilesRef.current = selected;
+    reportAttachmentEvent("info", "attachment.input.selection_detected", {
+      selectedCount: selected.length,
+      selectedFiles: selected.map(getAttachmentFileContext),
+      inputValuePresent: Boolean(fileInputRef.current?.value),
+    });
+    if (selected.length === 0) {
+      setFileErrors(["Nenhum arquivo foi retornado pelo seletor do dispositivo."]);
+      toast({
+        title: "Nenhum arquivo selecionado",
+        description: "O dispositivo não retornou um arquivo válido para anexar.",
+        variant: "destructive",
+      });
+      reportAttachmentEvent("error", "attachment.input.empty_selection", {
+        inputValue: fileInputRef.current?.value ?? null,
+      });
+      return;
+    }
+    addFiles(selected, "input-selection");
+  };
+
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      addFiles(Array.from(e.target.files));
+    reportAttachmentEvent("info", "attachment.input.change_event", {
+      inputValue: e.target.value || null,
+      hasFiles: Boolean(e.target.files && e.target.files.length > 0),
+      fileCount: e.target.files?.length ?? 0,
+    });
+    handleSelectedFiles(e.target.files ? Array.from(e.target.files) : []);
+    if (!isMobile) {
       e.target.value = "";
     }
+  };
+
+  const onCameraInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    reportAttachmentEvent("info", "attachment.camera.change_event", {
+      inputValue: e.target.value || null,
+      hasFiles: Boolean(e.target.files && e.target.files.length > 0),
+      fileCount: e.target.files?.length ?? 0,
+    });
+    handleSelectedFiles(e.target.files ? Array.from(e.target.files) : []);
+  };
+
+  useEffect(() => {
+    if (nativeFileListenerAttachedRef.current) return;
+    let timer: number | null = null;
+    let input: HTMLInputElement | null = null;
+    let attempts = 0;
+
+    const onNativeFileEvent = (eventType: "change" | "input") => {
+      if (!input) return;
+      const list = input.files ? Array.from(input.files) : [];
+      reportAttachmentEvent("info", `attachment.input.native_${eventType}_event`, {
+        fileCount: list.length,
+        inputValue: input.value || null,
+        files: list.map(getAttachmentFileContext),
+      });
+      if (list.length > 0) {
+        handleSelectedFiles(list);
+      }
+    };
+
+    const onNativeChange = () => onNativeFileEvent("change");
+    const onNativeInput = () => onNativeFileEvent("input");
+
+    const tryAttach = () => {
+      attempts += 1;
+      input = fileInputRef.current;
+      reportAttachmentEvent("info", "attachment.input.native_listener_attempt", {
+        attempt: attempts,
+        inputPresent: Boolean(input),
+      });
+      if (!input) {
+        if (attempts < 8) {
+          timer = window.setTimeout(tryAttach, 200);
+        }
+        return;
+      }
+
+      input.addEventListener("change", onNativeChange, true);
+      input.addEventListener("input", onNativeInput, true);
+      nativeFileListenerAttachedRef.current = true;
+      reportAttachmentEvent("info", "attachment.input.native_listener_attached", {
+        inputMultiple: input.multiple,
+        inputAccept: input.accept,
+      });
+    };
+
+    tryAttach();
+
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      if (input) {
+        input.removeEventListener("change", onNativeChange, true);
+        input.removeEventListener("input", onNativeInput, true);
+      }
+      nativeFileListenerAttachedRef.current = false;
+    };
+  }, [handleSelectedFiles, reportAttachmentEvent]);
+
+  useEffect(() => {
+    if (nativeCameraListenerAttachedRef.current) return;
+    let timer: number | null = null;
+    let input: HTMLInputElement | null = null;
+    let attempts = 0;
+
+    const onNativeCameraEvent = (eventType: "change" | "input") => {
+      if (!input) return;
+      const list = input.files ? Array.from(input.files) : [];
+      reportAttachmentEvent("info", `attachment.camera.native_${eventType}_event`, {
+        fileCount: list.length,
+        inputValue: input.value || null,
+        files: list.map(getAttachmentFileContext),
+      });
+      if (list.length > 0) {
+        handleSelectedFiles(list);
+      }
+    };
+
+    const onNativeChange = () => onNativeCameraEvent("change");
+    const onNativeInput = () => onNativeCameraEvent("input");
+
+    const tryAttach = () => {
+      attempts += 1;
+      input = cameraInputRef.current;
+      reportAttachmentEvent("info", "attachment.camera.native_listener_attempt", {
+        attempt: attempts,
+        inputPresent: Boolean(input),
+      });
+      if (!input) {
+        if (attempts < 8) {
+          timer = window.setTimeout(tryAttach, 200);
+        }
+        return;
+      }
+
+      input.addEventListener("change", onNativeChange, true);
+      input.addEventListener("input", onNativeInput, true);
+      nativeCameraListenerAttachedRef.current = true;
+      reportAttachmentEvent("info", "attachment.camera.native_listener_attached", {
+        inputMultiple: input.multiple,
+        inputAccept: input.accept,
+      });
+    };
+
+    tryAttach();
+
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      if (input) {
+        input.removeEventListener("change", onNativeChange, true);
+        input.removeEventListener("input", onNativeInput, true);
+      }
+      nativeCameraListenerAttachedRef.current = false;
+    };
+  }, [handleSelectedFiles, reportAttachmentEvent]);
+
+  const scheduleFileInputProbe = useCallback((origin: string) => {
+    if (!filePickerActiveRef.current) return;
+    if (filePickerProbeTimerRef.current) {
+      window.clearTimeout(filePickerProbeTimerRef.current);
+      filePickerProbeTimerRef.current = null;
+    }
+
+    filePickerProbesScheduledRef.current = 0;
+
+    const runProbe = (delayMs: number) => {
+      filePickerProbeTimerRef.current = window.setTimeout(() => {
+        if (!filePickerActiveRef.current) return;
+        filePickerProbesScheduledRef.current += 1;
+        const input = fileInputRef.current;
+        const probedFiles = input?.files ? Array.from(input.files) : [];
+        reportAttachmentEvent("info", "attachment.input.probe", {
+          origin,
+          attempt: filePickerProbesScheduledRef.current,
+          delayMs,
+          inputPresent: Boolean(input),
+          inputValuePresent: Boolean(input?.value),
+          probedCount: probedFiles.length,
+          probedFiles: probedFiles.map(getAttachmentFileContext),
+        });
+        if (probedFiles.length > 0) {
+          handleSelectedFiles(probedFiles);
+          return;
+        }
+        if (filePickerProbesScheduledRef.current < 3) {
+          runProbe(filePickerProbesScheduledRef.current === 1 ? 250 : 900);
+          return;
+        }
+        reportAttachmentEvent("warn", "attachment.input.probe_exhausted", {
+          origin,
+          attempts: filePickerProbesScheduledRef.current,
+        });
+      }, delayMs);
+    };
+
+    runProbe(0);
+  }, [handleSelectedFiles, reportAttachmentEvent]);
+
+  useEffect(() => {
+    const onWindowFocus = () => {
+      if (!filePickerActiveRef.current) return;
+      scheduleFileInputProbe("window-focus");
+    };
+    window.addEventListener("focus", onWindowFocus);
+    return () => window.removeEventListener("focus", onWindowFocus);
+  }, [scheduleFileInputProbe]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (!filePickerActiveRef.current) return;
+      if (document.visibilityState !== "visible") return;
+      scheduleFileInputProbe("visibility-visible");
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [scheduleFileInputProbe]);
+
+  const beginFilePickerSession = () => {
+    const input = fileInputRef.current;
+    reportAttachmentEvent("info", "attachment.picker.open_requested", {
+      activeElement: typeof document !== "undefined" ? document.activeElement?.tagName ?? null : null,
+      inputAccept: input?.accept ?? null,
+      inputMultiple: input?.multiple ?? null,
+    });
+    filePickerActiveRef.current = true;
+    if (filePickerResetTimerRef.current) {
+      window.clearTimeout(filePickerResetTimerRef.current);
+    }
+    filePickerResetTimerRef.current = window.setTimeout(() => {
+      filePickerActiveRef.current = false;
+      filePickerResetTimerRef.current = null;
+    }, 12000);
+  };
+
+  const openFilePicker = () => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    beginFilePickerSession();
+    try {
+      if (typeof (input as HTMLInputElement & { showPicker?: () => void }).showPicker === "function") {
+        reportAttachmentEvent("info", "attachment.picker.show_picker", { strategy: "showPicker" });
+        (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+        return;
+      }
+    } catch {
+      reportAttachmentEvent("error", "attachment.picker.show_picker_failed", {});
+    }
+    reportAttachmentEvent("info", "attachment.picker.dom_click", { strategy: "input.click" });
+    input.click();
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    addFiles(Array.from(e.dataTransfer.files));
+    addFiles(Array.from(e.dataTransfer.files), "drop");
   };
 
   const clearDraftAndForm = async () => {
@@ -606,6 +1038,10 @@ export default function NewTicket() {
     if (!ok) return;
     for (const url of filePreviews) {
       if (url) URL.revokeObjectURL(url);
+    }
+    selectedFilesRef.current = [];
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
     setFiles([]);
     setFilePreviews([]);
@@ -634,8 +1070,33 @@ export default function NewTicket() {
   // ── Submit ────────────────────────────────────────────────────────────────
 
   const onSubmit = async (data: TicketForm) => {
-    if (files.length === 0) {
+    const inputFiles = fileInputRef.current?.files ? Array.from(fileInputRef.current.files) : [];
+    const effectiveFiles = files.length > 0 ? files : selectedFilesRef.current.length > 0 ? selectedFilesRef.current : inputFiles;
+
+    reportAttachmentEvent("info", "attachment.submit.started", {
+      stateFilesCount: files.length,
+      selectedFilesRefCount: selectedFilesRef.current.length,
+      inputFilesCount: inputFiles.length,
+      effectiveFilesCount: effectiveFiles.length,
+      effectiveFiles: effectiveFiles.map(getAttachmentFileContext),
+    });
+
+    if (files.length === 0 && effectiveFiles.length > 0) {
+      selectedFilesRef.current = effectiveFiles;
+      setFiles(effectiveFiles);
+      setFilePreviews(effectiveFiles.map((f) => (isImage(f.type) ? URL.createObjectURL(f) : "")));
+      reportAttachmentEvent("info", "attachment.submit.state_rehydrated_from_input", {
+        effectiveFilesCount: effectiveFiles.length,
+      });
+    }
+
+    if (effectiveFiles.length === 0) {
       setFileErrors(["Envie ao menos 1 anexo obrigatório antes de abrir o chamado."]);
+      reportAttachmentEvent("error", "attachment.submit.missing_attachment", {
+        stateFilesCount: files.length,
+        selectedFilesRefCount: selectedFilesRef.current.length,
+        inputFilesCount: inputFiles.length,
+      });
       toast({
         title: "Anexo obrigatório",
         description: "Adicione pelo menos 1 arquivo anexo para prosseguir.",
@@ -658,20 +1119,41 @@ export default function NewTicket() {
       { data: payload },
       {
         onSuccess: async (ticket) => {
+          reportAttachmentEvent("info", "attachment.ticket_create.success", {
+            ticketId: ticket.id,
+            effectiveFilesCount: effectiveFiles.length,
+          });
           // Upload attachments if any
-          if (files.length > 0) {
+          if (effectiveFiles.length > 0) {
             setUploading(true);
             try {
               const formData = new FormData();
-              files.forEach((f) => formData.append("files", f));
-              await fetch(`/api/tickets/${ticket.id}/attachments`, {
+              effectiveFiles.forEach((f) => formData.append("files", f));
+              reportAttachmentEvent("info", "attachment.upload.request_started", {
+                ticketId: ticket.id,
+                files: effectiveFiles.map(getAttachmentFileContext),
+              });
+              const uploadResponse = await fetch(`/api/tickets/${ticket.id}/attachments`, {
                 method: "POST",
                 headers: {
                   Authorization: `Bearer ${localStorage.getItem("ti_support_token")}`,
                 },
                 body: formData,
               });
-            } catch {
+              reportAttachmentEvent(uploadResponse.ok ? "info" : "error", "attachment.upload.response_received", {
+                ticketId: ticket.id,
+                status: uploadResponse.status,
+                ok: uploadResponse.ok,
+              });
+              if (!uploadResponse.ok) {
+                throw new Error(`attachments_upload_failed_${uploadResponse.status}`);
+              }
+            } catch (err) {
+              reportAttachmentEvent("error", "attachment.upload.exception", {
+                ticketId: ticket.id,
+                message: err instanceof Error ? err.message : String(err),
+                stack: err instanceof Error ? err.stack ?? null : null,
+              });
               toast({
                 title: "Chamado criado, mas erro nos anexos",
                 description: "O chamado foi aberto. Você pode adicionar os anexos depois.",
@@ -695,16 +1177,24 @@ export default function NewTicket() {
             }
           } catch {
           }
+          const ticketUrl = `/chamados/${ticket.id}`;
           const receiptUrl = `/chamados/${ticket.id}/comprovante?autoprint=1`;
+          if (isMobile) {
+            setLocation(ticketUrl);
+            return;
+          }
           const opened = window.open(receiptUrl, "_blank", "noopener,noreferrer");
           if (!opened) {
             setLocation(receiptUrl);
             return;
           }
 
-          setLocation(`/chamados/${ticket.id}`);
+          setLocation(ticketUrl);
         },
         onError: () => {
+          reportAttachmentEvent("error", "attachment.ticket_create.error", {
+            payload,
+          });
           toast({
             title: "Erro ao criar chamado",
             description: "Tente novamente em instantes.",
@@ -944,27 +1434,93 @@ export default function NewTicket() {
                     onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                     onDragLeave={() => setDragOver(false)}
                     onDrop={onDrop}
-                    onClick={() => fileInputRef.current?.click()}
                     className={cn(
-                      "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors select-none",
+                      "border-2 border-dashed rounded-lg p-6 text-center cursor-default sm:cursor-pointer transition-colors select-none",
                       dragOver
                         ? "border-primary bg-primary/5"
-                        : "border-muted-foreground/25 hover:border-primary/40 hover:bg-muted/30"
+                        : "border-muted-foreground/25 hover:border-primary/40 hover:bg-muted/30",
                     )}
                   >
                     <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm font-medium">Clique para selecionar ou arraste arquivos aqui</p>
+                    <p className="text-sm font-medium">
+                      <span className="sm:hidden">Selecione os arquivos no campo abaixo</span>
+                      <span className="hidden sm:inline">Arraste arquivos aqui ou use o botão para selecionar</span>
+                    </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       JPG, PNG, GIF, PDF, DOC, XLS, TXT — máx. 3 MB por arquivo
                     </p>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept={ALLOWED_MIME.join(",")}
-                      className="hidden"
-                      onChange={onFileInput}
-                    />
+                    <div className="mt-4 flex justify-center">
+                      <div className="w-full max-w-sm text-left">
+                        <label htmlFor="ticket-attachments-input" className="mb-2 block text-sm font-medium sm:hidden">
+                          Selecionar arquivo
+                        </label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-11 px-5 hidden sm:inline-flex"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openFilePicker();
+                          }}
+                        >
+                          <Paperclip className="h-4 w-4" />
+                          Selecionar arquivos
+                        </Button>
+                        <input
+                          id="ticket-attachments-input"
+                          ref={fileInputRef}
+                          type="file"
+                          multiple={false}
+                          accept={[
+                            "application/pdf",
+                            "application/msword",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "text/plain",
+                            ".pdf",
+                            ".doc",
+                            ".docx",
+                            ".xls",
+                            ".xlsx",
+                            ".txt",
+                          ].join(",")}
+                          className={cn(
+                            "rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-primary-foreground",
+                            "mt-2 block w-full sm:sr-only"
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            beginFilePickerSession();
+                          }}
+                          onChange={onFileInput}
+                        />
+                        {isMobile ? (
+                          <div className="mt-4">
+                            <label htmlFor="ticket-camera-input" className="mb-2 block text-sm font-medium">
+                              Tirar foto (câmera)
+                            </label>
+                            <input
+                              id="ticket-camera-input"
+                              ref={cameraInputRef}
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-primary-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                reportAttachmentEvent("info", "attachment.camera.open_requested", {});
+                              }}
+                              onChange={onCameraInput}
+                            />
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Se a galeria não retornar arquivo no Android, use a câmera para gerar a imagem como arquivo real.
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 )}
 
