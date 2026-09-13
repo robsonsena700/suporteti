@@ -393,6 +393,7 @@ export default function NewTicket() {
   const filePickerResetTimerRef = useRef<number | null>(null);
   const filePickerProbeTimerRef = useRef<number | null>(null);
   const filePickerProbesScheduledRef = useRef<number>(0);
+  const lastProcessedSelectionRef = useRef<{ key: string; at: number } | null>(null);
 
   const form = useForm<TicketForm>({
     resolver: zodResolver(ticketSchema),
@@ -628,6 +629,20 @@ export default function NewTicket() {
         }
       }
 
+      // Restaurar o rascunho é assíncrono (lê o IndexedDB). Se, enquanto isso
+      // rodava, o usuário já selecionou um arquivo (ex.: no Android, ao
+      // voltar da câmera com a página recarregada por falta de memória, o
+      // navegador reenvia a seleção da câmera para o input assim que a
+      // página termina de montar — quase sempre mais rápido que essa leitura
+      // do IndexedDB), não sobrescreva a seleção atual com o rascunho antigo.
+      if (selectedFilesRef.current.length > 0) {
+        reportAttachmentEvent("warn", "attachment.draft.restore_skipped_due_to_pending_selection", {
+          pendingCount: selectedFilesRef.current.length,
+        });
+        restoringRef.current = false;
+        return;
+      }
+
       for (const url of filePreviews) {
         if (url) URL.revokeObjectURL(url);
       }
@@ -647,7 +662,14 @@ export default function NewTicket() {
   useEffect(() => {
     if (!user?.id) return;
     void restoreDraft();
-  }, [user?.id, restoreDraft]);
+    // Sem `restoreDraft` nas deps de propósito: essa função muda de
+    // identidade toda vez que `filePreviews` muda (precisa do valor atual
+    // para revogar URLs antigas), então se ficasse na lista de deps este
+    // efeito re-executaria a cada anexo adicionado/removido, tentando
+    // restaurar o rascunho de novo no meio da sessão. Só deve rodar quando
+    // o usuário muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -794,6 +816,24 @@ export default function NewTicket() {
       });
       return;
     }
+
+    // No mobile o mesmo <input type="file"> costuma disparar até 3 eventos
+    // para UMA única seleção do usuário (evento "input" nativo, "change"
+    // nativo e o onChange do React — todos ficam anexados de propósito como
+    // fallback, porque nem todo navegador dispara os três de forma
+    // confiável). Sem essa checagem, a mesma foto entrava 2-3x na lista e
+    // sozinha consumia o limite de MAX_FILES.
+    const selectionKey = selected.map((f) => `${f.name}|${f.size}|${f.lastModified}`).join(",");
+    const lastProcessed = lastProcessedSelectionRef.current;
+    if (lastProcessed && lastProcessed.key === selectionKey && Date.now() - lastProcessed.at < 4000) {
+      reportAttachmentEvent("info", "attachment.input.duplicate_event_ignored", {
+        selectionKey,
+        msSinceLastProcessed: Date.now() - lastProcessed.at,
+      });
+      return;
+    }
+    lastProcessedSelectionRef.current = { key: selectionKey, at: Date.now() };
+
     addFiles(selected, "input-selection");
   };
 
