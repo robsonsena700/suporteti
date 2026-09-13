@@ -10,6 +10,20 @@ SHARED="$BASE_DIR/shared"
 
 mkdir -p "$SHARED"
 
+# Carrega variáveis persistentes de produção (SMTP, APP_PUBLIC_URL, etc.) a partir
+# de $SHARED/.env, se existir. Esse arquivo NÃO é versionado nem enviado pelo deploy
+# (fica só no servidor), então ele sobrevive a cada novo release. Qualquer variável
+# calculada explicitamente mais abaixo (DATABASE_URL, SESSION_SECRET, PORT) sempre
+# tem prioridade sobre o que estiver em $SHARED/.env.
+if [ -f "$SHARED/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$SHARED/.env"
+  set +a
+fi
+
+export NODE_ENV="${NODE_ENV:-production}"
+
 export UPLOADS_DIR="${UPLOADS_DIR:-$SHARED/uploads}"
 mkdir -p "$UPLOADS_DIR"
 chmod 750 "$UPLOADS_DIR" || true
