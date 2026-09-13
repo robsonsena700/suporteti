@@ -205,14 +205,20 @@ if (-not $SkipPr) {
 }
 
 if (-not $SkipDeploy) {
-  $deployArgs = @(
-    "-HostName", $HostName,
-    "-Port", "$Port",
-    "-User", $User,
-    "-RemoteBaseDir", $RemoteBaseDir,
-    "-SkipBuild"
-  )
-  if (-not [string]::IsNullOrWhiteSpace($KeyPath)) { $deployArgs += @("-KeyPath", $KeyPath) }
+  # Usamos splatting de hashtable (em vez de array) para evitar ambiguidade na
+  # ligação de parâmetros nomeados do PowerShell - um array splatado pode, em
+  # certas versões/condições, deslocar valores para o parâmetro errado (por
+  # exemplo, o IP do -HostName acabando bindado em -Port, que é [int] e
+  # quebra a conversão). Hashtable splatting liga sempre pelo nome, sem essa
+  # ambiguidade.
+  $deployArgs = @{
+    HostName      = $HostName
+    Port          = $Port
+    User          = $User
+    RemoteBaseDir = $RemoteBaseDir
+    SkipBuild     = $true
+  }
+  if (-not [string]::IsNullOrWhiteSpace($KeyPath)) { $deployArgs["KeyPath"] = $KeyPath }
 
   Write-Host ">> deploy_prod.ps1"
   $deployScriptPath = Join-Path $RepoRoot "scripts\deploy_prod.ps1"
