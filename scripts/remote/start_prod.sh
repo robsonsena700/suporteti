@@ -38,6 +38,11 @@ if [ ! -f "$SHARED/credenciais.txt" ]; then
   exit 1
 fi
 
+# Garante que o arquivo de credenciais nunca fique legivel por outros usuarios
+# do servidor (defesa em profundidade: reaplicado a cada start, caso a
+# permissao seja resetada por algum processo externo).
+chmod 600 "$SHARED/credenciais.txt" || true
+
 PASSWORD="$(tr -d '\r\n' < "$SHARED/credenciais.txt")"
 ENC_PW="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read().strip(), safe=""))' <<<"$PASSWORD")"
 
