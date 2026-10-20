@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import pinoHttp from "pino-http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,32 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
+
+// Cabecalhos de seguranca HTTP (CSP, HSTS, X-Content-Type-Options, remove
+// X-Powered-By, etc). A CSP abaixo foi calibrada para esta SPA: ela nao usa
+// <script> inline (o build do Vite carrega so modulos externos), mas usa
+// estilos inline via `style={{...}}` do React, por isso 'unsafe-inline' fica
+// liberado apenas em styleSrc, nunca em scriptSrc. cdn.jsdelivr.net e
+// liberado em scriptSrc so porque a ferramenta de depuracao mobile (eruda,
+// ativada manualmente com ?debug=1) carrega de la.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+      },
+    },
+  }),
+);
 
 app.use(
   pinoHttp({
