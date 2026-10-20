@@ -25,7 +25,21 @@ app.set("trust proxy", 1);
 // usuario) - aplicada aqui pra toda a API, logo no inicio da cadeia. Em
 // desenvolvimento (NODE_ENV != production) ela nao faz nada (ver middlewares/
 // security.ts), entao nao atrapalha o dev local sem HTTPS.
-app.use(requireHttpsInProduction);
+//
+// Exceto /api/healthz e /api/meta: esses dois sao batidos via HTTP puro,
+// direto no loopback (http://127.0.0.1:3001/...), por start_prod.sh e pelo
+// proprio deploy_prod.ps1, sem passar pelo reverse proxy (que e quem fala
+// HTTPS com o mundo e manda x-forwarded-proto). Sem essa excecao, o
+// healthcheck do deploy sempre recebia 403 (nunca "API_OK"), o script
+// reiniciava a aplicacao repetidamente e o deploy acabava falhando mesmo com
+// a aplicacao de pe e servindo trafego real normalmente.
+app.use((req, res, next) => {
+  if (req.path === "/api/healthz" || req.path === "/api/meta") {
+    next();
+    return;
+  }
+  requireHttpsInProduction(req, res, next);
+});
 
 // Cabecalhos de seguranca HTTP (CSP, HSTS, X-Content-Type-Options, remove
 // X-Powered-By, etc). A CSP abaixo foi calibrada para esta SPA: ela nao usa
