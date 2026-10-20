@@ -51,3 +51,8 @@ Thumbs.db
 # Secrets / SSH keys (never commit)
 lib/ssh/
 **/credenciais.txt
+
+# Variaveis de ambiente locais (nunca comitar - contem credenciais)
+.env
+.env.local
+.env.*.local

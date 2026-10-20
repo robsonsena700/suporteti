@@ -2,7 +2,17 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { logger } from "../lib/logger";
 
-const JWT_SECRET = process.env.SESSION_SECRET ?? "suporte-ti-secret";
+// Antes havia um fallback fixo ("suporte-ti-secret") caso SESSION_SECRET não
+// estivesse definido — removido de propósito: um segredo previsível e
+// presente no código-fonte permitiria forjar um token válido (inclusive de
+// ADMIN) sem senha nenhuma. Agora a aplicação recusa subir sem o segredo
+// configurado, do mesmo jeito que lib/db já faz para DATABASE_URL.
+const JWT_SECRET = process.env.SESSION_SECRET;
+if (!JWT_SECRET) {
+  throw new Error(
+    "SESSION_SECRET deve estar definido no ambiente. A aplicação não deve subir sem um segredo de assinatura de token configurado."
+  );
+}
 
 export interface JwtPayload {
   userId: number;
