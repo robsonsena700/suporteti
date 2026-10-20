@@ -41,12 +41,19 @@ declare global {
   }
 }
 
+// Fixa o algoritmo de assinatura/verificação explicitamente. Sem isso, um
+// token malicioso poderia tentar forçar outro algoritmo (ex.: um ataque de
+// confusão de algoritmo, incluindo "none") caso a biblioteca ou alguma
+// configuração futura permitisse; travando em HS256 nos dois lados, qualquer
+// token assinado ou apresentado com outro algoritmo é rejeitado.
+const JWT_ALGORITHM = "HS256" as const;
+
 export function signToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d", algorithm: JWT_ALGORITHM });
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] }) as JwtPayload;
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {

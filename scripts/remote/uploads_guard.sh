@@ -116,41 +116,69 @@ verify() {
   fi
   rm -f "$probe" >/dev/null 2>&1 || true
 
-  local missing=0 checked=0
+  local missing=0 checked=0 corrupted=0 backfilled=0
   local dbUrl=""
   if command -v psql >/dev/null 2>&1; then
     dbUrl="$(build_db_url || true)"
   fi
+
+  local haveSha256sum=0
+  command -v sha256sum >/dev/null 2>&1 && haveSha256sum=1
 
   if [ -n "$dbUrl" ] && command -v psql >/dev/null 2>&1; then
     local max="${UPLOADS_VERIFY_MAX:-2000}"
     local full="${UPLOADS_VERIFY_FULL:-false}"
     local query=""
     if [ "$full" = "true" ]; then
-      query="select storage_path from public.ticket_message_attachments order by id asc"
+      query="select id, storage_path, coalesce(content_sha256,'') from public.ticket_message_attachments order by id asc"
     else
-      query="select storage_path from public.ticket_message_attachments order by created_at desc limit $max"
+      query="select id, storage_path, coalesce(content_sha256,'') from public.ticket_message_attachments order by created_at desc limit $max"
     fi
 
-    while IFS= read -r rel; do
-      [ -z "$rel" ] && continue
+    while IFS=$'\t' read -r id rel storedHash; do
+      [ -z "$id" ] && continue
       checked=$((checked + 1))
+
       if [ ! -f "$UPLOADS_DIR/$rel" ]; then
         missing=$((missing + 1))
         if [ "$missing" -ge 25 ]; then
           break
         fi
+        continue
       fi
-    done < <(psql "$dbUrl" -Atqc "$query" 2>/dev/null || true)
+
+      # Além de existir, confere que o conteúdo do arquivo em disco ainda
+      # corresponde ao hash SHA-256 gravado no momento do upload (uma
+      # substituição silenciosa de anexo, mesmo nome/tamanho, agora é
+      # detectada). Anexos enviados antes desta coluna existir não têm hash
+      # gravado ainda: nesse caso, o hash atual do arquivo é gravado como
+      # base de confiança na primeira verificação (backfill), não como uma
+      # falha de integridade.
+      if [ "$haveSha256sum" = "1" ]; then
+        local actualHash
+        actualHash="$(sha256sum "$UPLOADS_DIR/$rel" 2>/dev/null | awk '{print $1}')"
+        if [ -z "$storedHash" ]; then
+          if [ -n "$actualHash" ]; then
+            psql "$dbUrl" -Atqc "update public.ticket_message_attachments set content_sha256 = '$actualHash' where id = $id and content_sha256 is null;" >/dev/null 2>&1 || true
+            backfilled=$((backfilled + 1))
+          fi
+        elif [ "$actualHash" != "$storedHash" ]; then
+          corrupted=$((corrupted + 1))
+          if [ "$corrupted" -ge 25 ]; then
+            break
+          fi
+        fi
+      fi
+    done < <(psql "$dbUrl" -Atqc "$query" -F $'\t' 2>/dev/null || true)
   fi
 
-  if [ "$missing" -gt 0 ]; then
-    append_audit "{\"ts\":\"$(now_iso)\",\"action\":\"verify\",\"ok\":false,\"checked\":$checked,\"missing\":$missing,$(uploads_stats_json)}"
-    send_alert "Uploads com arquivos ausentes" "Verificação encontrou arquivos ausentes. checked=$checked missing=$missing uploadsDir=$UPLOADS_DIR"
+  if [ "$missing" -gt 0 ] || [ "$corrupted" -gt 0 ]; then
+    append_audit "{\"ts\":\"$(now_iso)\",\"action\":\"verify\",\"ok\":false,\"checked\":$checked,\"missing\":$missing,\"corrupted\":$corrupted,\"backfilled\":$backfilled,$(uploads_stats_json)}"
+    send_alert "Uploads com problemas de integridade" "Verificação encontrou problemas. checked=$checked missing=$missing corrupted=$corrupted uploadsDir=$UPLOADS_DIR"
     exit 2
   fi
 
-  append_audit "{\"ts\":\"$(now_iso)\",\"action\":\"verify\",\"ok\":true,\"checked\":$checked,\"missing\":0,$(uploads_stats_json)}"
+  append_audit "{\"ts\":\"$(now_iso)\",\"action\":\"verify\",\"ok\":true,\"checked\":$checked,\"missing\":0,\"corrupted\":0,\"backfilled\":$backfilled,$(uploads_stats_json)}"
   printf "UPLOADS_OK\n"
 }
 

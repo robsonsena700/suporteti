@@ -220,6 +220,7 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
       const storedName = `${key}${extensionOf(safeName)}`;
       const abs = path.resolve(dir, storedName);
       await fs.writeFile(abs, f.buffer);
+      const contentSha256 = crypto.createHash("sha256").update(f.buffer).digest("hex");
       const rel = path.relative(getUploadsBaseDir(), abs).replaceAll("\\", "/");
       // Tipo verificado pela assinatura binaria real (verifyTicketMessageAttachmentContent
       // acima) - nunca o Content-Type declarado pelo cliente, que e exatamente o que
@@ -232,6 +233,7 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
         mimeType: mimeToStore,
         size: f.size,
         storagePath: rel,
+        contentSha256,
       } as any).returning({
         id: ticketMessageAttachmentsTable.id,
         messageId: ticketMessageAttachmentsTable.messageId,

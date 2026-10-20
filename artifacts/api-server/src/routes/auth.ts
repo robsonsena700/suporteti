@@ -113,7 +113,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, 12);
   const normalizedPhone = normalizePhoneE164Brazil(contactPhone)!;
   const [user] = await db.insert(usersTable).values({
     name,
@@ -307,7 +307,7 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
   await db.transaction(async (tx) => {
     await tx.insert(userPasswordHistoryTable).values({ userId, passwordHash: user.passwordHash });
     await tx.update(usersTable).set({ passwordHash, mustChangePassword: false }).where(eq(usersTable.id, userId));
@@ -578,7 +578,7 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
   await db.transaction(async (tx) => {
     await tx.insert(userPasswordHistoryTable).values({ userId: row.userId, passwordHash: user.passwordHash });
     await tx.update(usersTable).set({ passwordHash, mustChangePassword: false }).where(eq(usersTable.id, row.userId));
