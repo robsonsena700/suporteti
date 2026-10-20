@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { enforceTicketAccess } from "../lib/access";
 import { logger } from "../lib/logger";
+import { isAllowedAttachment, sniffMimeType } from "../lib/file-sniff";
 
 const router: IRouter = Router();
 
@@ -30,6 +31,11 @@ function getFileExtension(filename: string): string {
   return lastDot >= 0 ? filename.slice(lastDot).toLowerCase() : "";
 }
 
+// Checagem barata de primeira linha (so extensao + Content-Type declarado pelo
+// cliente, ambos falsificaveis) - serve pra rejeitar rapido um upload obviamente
+// errado com uma mensagem clara do multer. A validacao que realmente importa
+// (conferir a assinatura binaria do arquivo) acontece no handler da rota, depois
+// que o arquivo ja foi recebido por inteiro - ver uso de isAllowedAttachment lá.
 function isAllowedUpload(file: Express.Multer.File): boolean {
   if (ALLOWED_MIME.includes(file.mimetype)) return true;
   if (!file.mimetype || file.mimetype === "application/octet-stream") {
@@ -160,11 +166,43 @@ router.post(
       return;
     }
 
+    // O multer (fileFilter acima) so checa a extensao e o Content-Type declarado
+    // pelo cliente - ambos trivialmente falsificaveis por quem monta a requisicao
+    // na mao. Aqui validamos o conteudo de verdade, olhando a assinatura binaria
+    // real de cada arquivo (mesma checagem ja usada em chat-attachments.ts) antes
+    // de gravar no banco, e usamos o mimeType verificado (canonicalMimeType) em
+    // vez do declarado pelo cliente - inclusive no download, que usa esse mesmo
+    // campo pra decidir o Content-Type servido de volta.
+    const verified: { file: Express.Multer.File; canonicalMimeType: string }[] = [];
+    for (const f of files) {
+      const sniffed = sniffMimeType(f.buffer);
+      const check = isAllowedAttachment({
+        filename: f.originalname,
+        declaredMimeType: f.mimetype,
+        sniffedMimeType: sniffed,
+      });
+      if (!check.ok) {
+        logger.warn({
+          source: "backend",
+          event: "attachment.upload.content_mismatch",
+          actorUserId: user.userId,
+          ticketId,
+          filename: f.originalname,
+          declaredMimeType: f.mimetype,
+          sniffedMimeType: sniffed,
+          reason: check.error,
+        }, "Ticket attachment rejected: declared type does not match file content");
+        res.status(400).json({ error: `${check.error}: ${f.originalname}` });
+        return;
+      }
+      verified.push({ file: f, canonicalMimeType: check.canonicalMimeType });
+    }
+
     const inserted = await db.insert(ticketAttachmentsTable).values(
-      files.map((f) => ({
+      verified.map(({ file: f, canonicalMimeType }) => ({
         ticketId,
         filename: f.originalname,
-        mimeType: f.mimetype,
+        mimeType: canonicalMimeType,
         size: f.size,
         data: f.buffer.toString("base64"),
       }))
