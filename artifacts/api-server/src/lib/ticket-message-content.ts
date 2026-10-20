@@ -36,10 +36,30 @@ export function validateTicketMessageAttachmentFile(file: { originalname: string
   return { ok: true };
 }
 
+// Escapa o texto da URL antes de monta-lo num atributo/texto HTML. Isso e
+// defesa em profundidade: o regex abaixo ja para de capturar em ", ', < e >
+// (nao so em espaco, como antes), mas montar HTML por concatenacao de string
+// e inserir o resultado ainda sem escapar foi exatamente a causa raiz do
+// achado #4 da varredura de 20/10/2026 (risco de injecao de atributo / mXSS
+// dependendo de como o parser do sanitizador interpreta o resultado) - nao
+// deve depender so da lista de tags/atributos permitidos do sanitizeHtml
+// (achado #1 da mesma varredura) pra ficar seguro.
+function escapeHtmlText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export function sanitizeTicketMessageHtml(input: string): string {
   const withLinks = input.replaceAll(
-    /(^|[\s(>])((https?:\/\/)[^\s<]+)/g,
-    (_m, prefix, url) => `${prefix}<a href="${url}" rel="noopener noreferrer" target="_blank">${url}</a>`,
+    /(^|[\s(>])((https?:\/\/)[^\s<>"']+)/g,
+    (_m, prefix, url) => {
+      const safeUrl = escapeHtmlText(url);
+      return `${prefix}<a href="${safeUrl}" rel="noopener noreferrer" target="_blank">${safeUrl}</a>`;
+    },
   );
   return sanitizeHtml(withLinks, {
     allowedTags: [
