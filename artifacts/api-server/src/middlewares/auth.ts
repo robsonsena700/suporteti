@@ -7,12 +7,22 @@ import { logger } from "../lib/logger";
 // presente no código-fonte permitiria forjar um token válido (inclusive de
 // ADMIN) sem senha nenhuma. Agora a aplicação recusa subir sem o segredo
 // configurado, do mesmo jeito que lib/db já faz para DATABASE_URL.
-const JWT_SECRET = process.env.SESSION_SECRET;
-if (!JWT_SECRET) {
-  throw new Error(
-    "SESSION_SECRET deve estar definido no ambiente. A aplicação não deve subir sem um segredo de assinatura de token configurado."
-  );
+// Lida numa função com retorno tipado "string" (em vez de uma checagem solta no
+// nível do módulo) porque o TypeScript não propaga o estreitamento de tipo de um
+// `if (!x) throw` para dentro de outras funções declaradas depois (signToken/
+// verifyToken abaixo) — sem isso, JWT_SECRET continuaria tipado como
+// `string | undefined` nelas.
+function getJwtSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    throw new Error(
+      "SESSION_SECRET deve estar definido no ambiente. A aplicação não deve subir sem um segredo de assinatura de token configurado."
+    );
+  }
+  return secret;
 }
+
+const JWT_SECRET = getJwtSecret();
 
 export interface JwtPayload {
   userId: number;
