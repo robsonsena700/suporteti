@@ -65,7 +65,28 @@ app.use(
     },
   }),
 );
-app.use(cors());
+// CORS restrito a APP_PUBLIC_URL (mesma origem usada por requireSameOriginInProduction
+// em middlewares/security.ts) em vez de refletir qualquer origem (cors() sem opcoes
+// libera geral). credentials fica false de proposito: a autenticacao usa Bearer token
+// no header Authorization, nao cookies, entao nao ha necessidade de liberar
+// Access-Control-Allow-Credentials. Se APP_PUBLIC_URL nao estiver configurada ou for
+// invalida, o CORS fica fechado (origin: false) em vez de abrir geral por omissao.
+function resolveAllowedOrigin(): string | false {
+  const raw = String(process.env.APP_PUBLIC_URL || "").trim();
+  if (!raw) return false;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return false;
+  }
+}
+
+app.use(
+  cors({
+    origin: resolveAllowedOrigin(),
+    credentials: false,
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

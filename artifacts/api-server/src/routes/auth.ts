@@ -338,6 +338,13 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
   const ip = String(req.ip || "");
   const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "";
 
+  // Resposta identica para "e-mail nao cadastrado", "conta inativa" e "e-mail enviado
+  // com sucesso" de proposito: antes essa rota respondia 404/403/200 diferentes pra
+  // cada caso, o que permite a um atacante descobrir quais e-mails tem cadastro (e ate
+  // quais estao inativos) so tentando "esqueci minha senha" e olhando o status da
+  // resposta. O audit log continua registrando o evento real internamente.
+  const GENERIC_MESSAGE = "Se este e-mail estiver cadastrado, você receberá um link de recuperação em instantes.";
+
   const [user] = await db.select({
     id: usersTable.id,
     name: usersTable.name,
@@ -352,7 +359,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
       ip,
       userAgent,
     });
-    res.status(404).json({ error: "E-mail não encontrado" });
+    res.json({ message: GENERIC_MESSAGE });
     return;
   }
 
@@ -364,7 +371,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
       ip,
       userAgent,
     });
-    res.status(403).json({ error: "Sua conta está desativada. Entre em contato com o suporte.", code: "ACCOUNT_INACTIVE" });
+    res.json({ message: GENERIC_MESSAGE });
     return;
   }
 
@@ -410,7 +417,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
       ip,
       userAgent,
     });
-    res.json({ message: "E-mail de recuperação enviado" });
+    res.json({ message: GENERIC_MESSAGE });
   } catch (err) {
     await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
     await db.insert(securityAuditLogsTable).values({
