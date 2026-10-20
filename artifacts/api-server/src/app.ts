@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { requireHttpsInProduction } from "./middlewares/security";
 
 const app: Express = express();
 
@@ -19,6 +20,12 @@ const app: Express = express();
 // cenario aqui - nunca usar `true` (confia em qualquer proxy, permitindo que
 // o proprio cliente falsifique o IP via X-Forwarded-For).
 app.set("trust proxy", 1);
+
+// Antes essa checagem so existia numa rota especifica (admin trocar e-mail de
+// usuario) - aplicada aqui pra toda a API, logo no inicio da cadeia. Em
+// desenvolvimento (NODE_ENV != production) ela nao faz nada (ver middlewares/
+// security.ts), entao nao atrapalha o dev local sem HTTPS.
+app.use(requireHttpsInProduction);
 
 // Cabecalhos de seguranca HTTP (CSP, HSTS, X-Content-Type-Options, remove
 // X-Powered-By, etc). A CSP abaixo foi calibrada para esta SPA: ela nao usa
@@ -113,15 +120,19 @@ app.use((err: unknown, _req: express.Request, res: express.Response, next: expre
     return;
   }
 
+  // A mensagem que volta pro cliente e sempre generica, mesmo quando o erro e
+  // um problema de esquema do banco desatualizado - isso e um detalhe interno
+  // de infraestrutura (comando de deploy, nome de tabela/coluna) que nao deve
+  // vazar pra quem esta do outro lado da API, autenticado ou nao. O diagnostico
+  // (code 42703/42P01 = coluna/tabela inexistente) continua so no log do
+  // servidor, que e onde isso realmente ajuda.
   const code = (err as any)?.code;
-  let message = "Erro interno do servidor";
-
   if (code === "42703" || code === "42P01") {
-    message = "Banco desatualizado. Rode: pnpm --filter @workspace/db run push";
+    logger.error({ err }, "Unhandled error: banco de dados desatualizado (rode pnpm --filter @workspace/db run push)");
+  } else {
+    logger.error({ err }, "Unhandled error");
   }
-
-  logger.error({ err }, "Unhandled error");
-  res.status(500).json({ error: message });
+  res.status(500).json({ error: "Erro interno do servidor" });
 });
 
 export default app;

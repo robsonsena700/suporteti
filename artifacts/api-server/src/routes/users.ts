@@ -241,8 +241,10 @@ router.post("/admin/users/:id/password-reset", requireAuth, requireActive, requi
   let resetLink = "";
   let mail: { subject: string; text: string; html: string };
   try {
-    const baseUrl = resolvePublicBaseUrlFromRequest(req);
-    resetLink = buildPasswordResetLink(token, baseUrl);
+    // Sem baseUrl explicito: cai no getAppPublicUrl() (so usa APP_PUBLIC_URL,
+    // falha se nao configurada) em vez de confiar nos headers Origin/Referer
+    // da requisicao - ver o mesmo ajuste e o porque em routes/auth.ts.
+    resetLink = buildPasswordResetLink(token);
     mail = buildPasswordResetEmail({ recipientName: target.name, resetLink, expiresAt });
   } catch (err) {
     await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
@@ -519,28 +521,6 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-function resolvePublicBaseUrlFromRequest(req: any): string {
-  const configured = String(process.env.APP_PUBLIC_URL || "").trim().replace(/\/$/, "");
-  if (configured) return configured;
-
-  const origin = typeof req?.headers?.origin === "string" ? String(req.headers.origin).trim().replace(/\/$/, "") : "";
-  if (origin) return origin;
-
-  const referer = typeof req?.headers?.referer === "string" ? String(req.headers.referer).trim() : "";
-  if (referer) {
-    try {
-      return new URL(referer).origin;
-    } catch {
-    }
-  }
-
-  const webPort = String(process.env.WEB_PORT || "").trim();
-  if (webPort) return `http://localhost:${webPort}`;
-
-  const port = String(process.env.PORT || process.env.API_PORT || "3001").trim();
-  return `http://localhost:${port}`;
 }
 
 router.get("/users/gestor-configs", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (_req, res): Promise<void> => {

@@ -391,8 +391,18 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
   let resetLink = "";
   let mail: { subject: string; text: string; html: string };
   try {
-    const baseUrl = resolvePublicBaseUrlFromRequest(req);
-    resetLink = buildPasswordResetLink(token, baseUrl);
+    // Sem passar baseUrl explicito: buildPasswordResetLink cai no
+    // getAppPublicUrl() (lib/password-reset.ts), que usa so APP_PUBLIC_URL e
+    // falha se ela nao estiver configurada. Antes isso dependia de uma funcao
+    // que, na ausencia de APP_PUBLIC_URL, confiava nos headers Origin/Referer
+    // da propria requisicao pra montar o link - um atacante que monta a
+    // requisicao na mao (nao passando por navegador) pode mandar qualquer
+    // valor nesses headers, o que envenenaria o link de redefinicao de senha
+    // enviado por e-mail. Na pratica APP_PUBLIC_URL sempre esta configurada em
+    // producao (outras partes do sistema ja dependem dela), entao essa
+    // fallback nunca era realmente usada ali - mas falhar fechado (em vez de
+    // confiar em header do cliente) e mais seguro caso isso mude no futuro.
+    resetLink = buildPasswordResetLink(token);
     mail = buildPasswordResetEmail({ recipientName: user.name, resetLink, expiresAt });
   } catch (err) {
     await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
@@ -432,28 +442,6 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
     res.status(503).json({ error: "Falha ao enviar e-mail de recuperação" });
   }
 });
-
-function resolvePublicBaseUrlFromRequest(req: any): string {
-  const configured = String(process.env.APP_PUBLIC_URL || "").trim().replace(/\/$/, "");
-  if (configured) return configured;
-
-  const origin = typeof req?.headers?.origin === "string" ? String(req.headers.origin).trim().replace(/\/$/, "") : "";
-  if (origin) return origin;
-
-  const referer = typeof req?.headers?.referer === "string" ? String(req.headers.referer).trim() : "";
-  if (referer) {
-    try {
-      return new URL(referer).origin;
-    } catch {
-    }
-  }
-
-  const webPort = String(process.env.WEB_PORT || "").trim();
-  if (webPort) return `http://localhost:${webPort}`;
-
-  const port = String(process.env.PORT || process.env.API_PORT || "3001").trim();
-  return `http://localhost:${port}`;
-}
 
 router.post("/auth/reset-password/validate", async (req, res): Promise<void> => {
   if (!checkRateLimit(resetPasswordValidateLimiter, req, res)) return;
