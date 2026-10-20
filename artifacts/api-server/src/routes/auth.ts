@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { db, passwordResetTokensTable, securityAuditLogsTable, userPasswordHistoryTable, usersTable } from "@workspace/db";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -11,10 +11,33 @@ import { logger } from "../lib/logger";
 import { sendEmail } from "../lib/mailer";
 import { buildPasswordResetEmail, buildPasswordResetLink, generateResetToken, hashResetToken } from "../lib/password-reset";
 import { isPasswordReused, validatePasswordStrength } from "../lib/password-policy";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
 
+// Limitadores por IP para as rotas publicas (sem autenticacao) mais visadas
+// em ataques de forca bruta, enumeracao de contas e spam de cadastro/e-mail.
+// Dependem de app.set("trust proxy", 1) em app.ts para que req.ip seja o IP
+// real do cliente (atras do reverse proxy), e nao o do proprio proxy.
+const registerLimiter = createInMemoryRateLimiter({ windowMs: 60 * 60_000, max: 5 }); // 5 cadastros/hora/IP
+const loginLimiter = createInMemoryRateLimiter({ windowMs: 15 * 60_000, max: 10 }); // 10 tentativas/15min/IP
+const forgotPasswordLimiter = createInMemoryRateLimiter({ windowMs: 60 * 60_000, max: 5 }); // 5 solicitacoes/hora/IP
+const resetPasswordValidateLimiter = createInMemoryRateLimiter({ windowMs: 15 * 60_000, max: 20 }); // 20 tentativas/15min/IP
+
+function checkRateLimit(limiter: ReturnType<typeof createInMemoryRateLimiter>, req: Request, res: Response): boolean {
+  const ip = String(req.ip || "");
+  const rate = limiter.check(ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+    return false;
+  }
+  return true;
+}
+
 router.post("/auth/register", async (req, res): Promise<void> => {
+  if (!checkRateLimit(registerLimiter, req, res)) return;
+
   const parsed = RegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -144,6 +167,8 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 });
 
 router.post("/auth/login", async (req, res): Promise<void> => {
+  if (!checkRateLimit(loginLimiter, req, res)) return;
+
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -301,6 +326,8 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
 });
 
 router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  if (!checkRateLimit(forgotPasswordLimiter, req, res)) return;
+
   const body = req.body as { email?: unknown } | undefined;
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!email || !email.includes("@")) {
@@ -422,6 +449,8 @@ function resolvePublicBaseUrlFromRequest(req: any): string {
 }
 
 router.post("/auth/reset-password/validate", async (req, res): Promise<void> => {
+  if (!checkRateLimit(resetPasswordValidateLimiter, req, res)) return;
+
   const body = req.body as { token?: unknown } | undefined;
   const token = typeof body?.token === "string" ? body.token.trim() : "";
   if (!token) {

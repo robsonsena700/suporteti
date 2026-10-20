@@ -9,6 +9,17 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// Em producao a aplicacao fica atras de um reverse proxy (que e quem fala
+// HTTPS com o mundo e manda x-forwarded-proto/x-forwarded-for pra ca). Sem
+// "trust proxy", o Express ignora esses cabecalhos e req.ip sempre retorna o
+// IP do proxy (o mesmo para todo mundo) em vez do IP real de quem fez a
+// requisicao - o que quebraria o rate limiting por IP (todo mundo cairia no
+// mesmo "balde") e deixaria os logs de auditoria (security_audit_logs) com o
+// IP errado. "1" confia em exatamente um salto (o proxy imediato), que e o
+// cenario aqui - nunca usar `true` (confia em qualquer proxy, permitindo que
+// o proprio cliente falsifique o IP via X-Forwarded-For).
+app.set("trust proxy", 1);
+
 // Cabecalhos de seguranca HTTP (CSP, HSTS, X-Content-Type-Options, remove
 // X-Powered-By, etc). A CSP abaixo foi calibrada para esta SPA: ela nao usa
 // <script> inline (o build do Vite carrega so modulos externos), mas usa
