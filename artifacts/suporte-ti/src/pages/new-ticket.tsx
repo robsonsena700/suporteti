@@ -670,7 +670,15 @@ export default function NewTicket() {
     }
 
     try {
-      form.reset(state.form, { keepDefaultValues: true });
+      // O tipo de solicitação (campo 1) nunca é restaurado do rascunho de
+      // propósito: é um campo obrigatório e precisa de escolha explícita do
+      // usuário toda vez que a tela de novo chamado é aberta, mesmo quando
+      // o resto do rascunho (título, descrição, anexos etc.) é recuperado
+      // normalmente.
+      form.reset(
+        { ...state.form, type: undefined as unknown as TicketForm["type"], hardwareSubtype: undefined },
+        { keepDefaultValues: true }
+      );
       const restoredFiles: File[] = [];
       const newPreviews: string[] = [];
 
