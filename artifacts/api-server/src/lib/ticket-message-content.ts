@@ -1,5 +1,6 @@
 import path from "node:path";
 import sanitizeHtml from "sanitize-html";
+import { sniffMimeType } from "./file-sniff";
 
 const MAX_ATTACHMENT_SIZE = 3 * 1024 * 1024;
 
@@ -51,6 +52,44 @@ function escapeHtmlText(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+// Mapa fechado extensao -> mimeType "canonico" esperado por assinatura
+// binaria, so para os 3 tipos que esta rota aceita (ver allowedExt/allowedMime
+// em validateTicketMessageAttachmentFile acima). Reusa o sniffMimeType de
+// file-sniff.ts (mesma deteccao ja usada e testada em ticket-attachments.ts),
+// mas com uma lista propria em vez do isAllowedAttachment generico daquele
+// arquivo - que aceita docx/xlsx/audio/etc, tipos que esta rota especifica
+// (anexo em MENSAGEM de chamado) nunca permitiu e nao deveria passar a
+// permitir so por ganhar a verificacao de conteudo.
+const CANONICAL_MIME_BY_EXTENSION: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".pdf": "application/pdf",
+};
+
+// Achado #3 da varredura de 20/10/2026 (docs/auditoria-seguranca-2026-10-20.md):
+// validateTicketMessageAttachmentFile (acima) so confere extensao e o
+// Content-Type DECLARADO pelo cliente - ambos falsificaveis sem esforco
+// (curl/Postman). Essa funcao confere a assinatura binaria real do arquivo,
+// do mesmo jeito que ticket-attachments.ts e chat-attachments.ts ja faziam -
+// o valor retornado aqui (canonicalMimeType) deve ser o que vai pro banco
+// como mimeType, nunca o declarado pelo cliente, porque a rota de download
+// usa esse campo armazenado como o Content-Type servido de volta.
+export function verifyTicketMessageAttachmentContent(
+  file: { originalname: string },
+  buffer: Buffer,
+): { ok: true; canonicalMimeType: string } | { ok: false; error: string } {
+  const ext = extensionOf(file.originalname);
+  const expectedMime = CANONICAL_MIME_BY_EXTENSION[ext];
+  if (!expectedMime) return { ok: false, error: "Extensão de arquivo não permitida" };
+
+  const sniffed = sniffMimeType(buffer);
+  if (!sniffed) return { ok: false, error: "Arquivo inválido ou corrompido" };
+  if (sniffed !== expectedMime) return { ok: false, error: "Assinatura do arquivo não corresponde ao tipo" };
+
+  return { ok: true, canonicalMimeType: expectedMime };
 }
 
 export function sanitizeTicketMessageHtml(input: string): string {

@@ -10,7 +10,7 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
-import { inferAttachmentMimeType, normalizeFilename, sanitizeTicketMessageHtml, validateTicketMessageAttachmentFile } from "../lib/ticket-message-content";
+import { normalizeFilename, sanitizeTicketMessageHtml, validateTicketMessageAttachmentFile, verifyTicketMessageAttachmentContent } from "../lib/ticket-message-content";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -129,12 +129,25 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
     res.status(400).json({ error: `Máximo de ${MAX_ATTACHMENTS_PER_MESSAGE} anexos por mensagem.` });
     return;
   }
+  const verifiedAttachments = new Map<Express.Multer.File, string>();
   for (const f of files) {
     const v = validateTicketMessageAttachmentFile(f);
     if (!v.ok) {
       res.status(400).json({ error: v.error });
       return;
     }
+    const contentCheck = verifyTicketMessageAttachmentContent(f, f.buffer);
+    if (!contentCheck.ok) {
+      logger.warn({
+        ticketId,
+        userId: user.userId,
+        filename: f.originalname,
+        declaredMimeType: f.mimetype,
+      }, "ticket message attachment rejected: content does not match declared type");
+      res.status(400).json({ error: `${contentCheck.error}: ${f.originalname}` });
+      return;
+    }
+    verifiedAttachments.set(f, contentCheck.canonicalMimeType);
   }
 
   const [ticket] = await db.select().from(ticketsTable).where(eq(ticketsTable.id, ticketId));
@@ -196,10 +209,10 @@ router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.ar
       const abs = path.resolve(dir, storedName);
       await fs.writeFile(abs, f.buffer);
       const rel = path.relative(getUploadsBaseDir(), abs).replaceAll("\\", "/");
-      const inferredMime = inferAttachmentMimeType(safeName);
-      const normalizedMime = String(f.mimetype || "").toLowerCase();
-      const isGenericMime = normalizedMime === "" || normalizedMime === "application/octet-stream" || normalizedMime === "binary/octet-stream";
-      const mimeToStore = isGenericMime && inferredMime ? inferredMime : normalizedMime;
+      // Tipo verificado pela assinatura binaria real (verifyTicketMessageAttachmentContent
+      // acima) - nunca o Content-Type declarado pelo cliente, que e exatamente o que
+      // a rota de download usa como Content-Type da resposta.
+      const mimeToStore = verifiedAttachments.get(f)!;
       const [att] = await db.insert(ticketMessageAttachmentsTable).values({
         messageId: msg.id,
         ticketId,
