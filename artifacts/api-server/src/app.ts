@@ -33,9 +33,15 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "blob:"],
-        fontSrc: ["'self'", "data:"],
+        // fonts.googleapis.com serve o CSS @font-face (src/index.css importa a
+        // fonte Poppins de la); fonts.gstatic.com e quem serve o arquivo da
+        // fonte em si, referenciado de dentro desse CSS - por isso precisa
+        // tambem estar liberado em fontSrc, nao soh em styleSrc.
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        // api.qrserver.com gera o QR code exibido/impresso em ticket-receipt.tsx
+        // (comprovante do chamado) - sem isso essa imagem some nessa tela.
+        imgSrc: ["'self'", "data:", "blob:", "https://api.qrserver.com"],
+        fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
