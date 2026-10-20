@@ -56,7 +56,10 @@ const HARDWARE_SUBTYPES = [
 // ── Form schema ───────────────────────────────────────────────────────────────
 
 const ticketSchema = z.object({
-  type: z.nativeEnum(TicketType),
+  type: z.nativeEnum(TicketType, {
+    required_error: "Selecione o tipo de solicitação",
+    invalid_type_error: "Selecione o tipo de solicitação",
+  }),
   title: z.string().min(5, "Título muito curto (mínimo 5 caracteres)"),
   description: z.string().min(10, "Descrição muito curta (mínimo 10 caracteres)"),
   establishment: z
@@ -434,7 +437,7 @@ export default function NewTicket() {
     resolver: zodResolver(ticketSchema),
     mode: "onChange",
     defaultValues: {
-      type: TicketType.SOFTWARE,
+      type: undefined as unknown as TicketForm["type"],
       title: "",
       description: "",
       establishment: user?.establishment ?? "",
@@ -509,8 +512,10 @@ export default function NewTicket() {
   }, [user?.establishment, form]);
 
   useEffect(() => {
-    if (selectedType !== TicketType.SOFTWARE && selectedType !== TicketType.HARDWARE) {
-      form.setValue("type", TicketType.SOFTWARE, { shouldValidate: true, shouldDirty: false });
+    // Antes isso também forçava "type" de volta para Sistema quando vazio —
+    // removido de propósito: o campo 1 agora começa sem opção selecionada e
+    // precisa de uma escolha explícita do usuário.
+    if (selectedType !== TicketType.HARDWARE) {
       form.setValue("hardwareSubtype", undefined, { shouldValidate: false, shouldDirty: false });
     }
   }, [selectedType, form]);
@@ -1163,7 +1168,7 @@ export default function NewTicket() {
     setFilePreviews([]);
     setFileErrors([]);
     form.reset({
-      type: TicketType.SOFTWARE,
+      type: undefined as unknown as TicketForm["type"],
       title: "",
       description: "",
       establishment: user?.establishment ?? "",
@@ -1388,7 +1393,7 @@ export default function NewTicket() {
                       value={
                         field.value === TicketType.SOFTWARE || field.value === TicketType.HARDWARE
                           ? field.value
-                          : TicketType.SOFTWARE
+                          : undefined
                       }
                     >
                       <FormControl>
