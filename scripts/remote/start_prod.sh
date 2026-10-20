@@ -57,7 +57,7 @@ export NVM_DIR="$HOME/.nvm"
 if [ -s "$NVM_DIR/nvm.sh" ]; then
   # shellcheck disable=SC1090
   source "$NVM_DIR/nvm.sh"
-  nvm use 20 >/dev/null 2>&1 || true
+  nvm use 24 >/dev/null 2>&1 || true
 fi
 
 PID_FILE="$SHARED/api.pid"
