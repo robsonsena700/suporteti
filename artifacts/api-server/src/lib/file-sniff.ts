@@ -140,10 +140,20 @@ export function isAllowedAttachment(args: {
 
   if (!matchBySniff) return { ok: false, error: "Assinatura do arquivo não corresponde ao tipo" };
 
+  // So bloqueia aqui quando o Content-Type declarado pelo cliente é um tipo que
+  // reconhecemos (esta na nossa lista de permitidos) mas nao bate com o que o
+  // conteudo realmente e - sinal de algo deliberadamente malformado. Um
+  // declarado desconhecido/nao padronizado e ignorado: e normal, nao suspeito.
+  // Celulares Android sao o caso classico - e comum vir "image/jpg" (em vez do
+  // padrao "image/jpeg") ou ate "application/octet-stream" pra fotos de camera
+  // legitimas, dependendo do fabricante/app. A assinatura binaria real (sniff)
+  // + a extensao ja sao a checagem que importa; o declarado e so um sinal extra.
   const declared = (args.declaredMimeType || "").toLowerCase();
-  if (declared && declared !== matchBySniff.mimeType) {
-    const declaredAllowed = allowedByExt.some(a => a.mimeType === declared) || compatibleMimeTypes.includes(declared);
-    if (!declaredAllowed) return { ok: false, error: "Tipo MIME do arquivo não permitido" };
+  if (declared && declared !== matchBySniff.mimeType && !compatibleMimeTypes.includes(declared)) {
+    const isRecognizedMimeType = allowed.some(a => a.mimeType === declared);
+    if (isRecognizedMimeType) {
+      return { ok: false, error: "Tipo MIME do arquivo não permitido" };
+    }
   }
 
   return { ok: true, kind: matchBySniff.kind, canonicalMimeType: matchBySniff.mimeType };
