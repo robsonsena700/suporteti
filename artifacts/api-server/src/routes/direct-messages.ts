@@ -10,10 +10,12 @@ import {
 } from "../lib/chat-access";
 import { appendEditHistory, getEditWindow } from "../lib/chat-message-rules";
 import { emitDirectMessage, emitDirectMessageEdited } from "../lib/chat-realtime";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
 
 const DM_INBOX_CACHE_TTL_MS = 1000;
+const dmMessageLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 30 });
 const dmInboxCache = new Map<number, { value: any; expiresAt: number }>();
 function invalidateDmInboxCache(userId: number) {
   dmInboxCache.delete(userId);
@@ -162,6 +164,15 @@ router.post("/chat/dm/:userId", requireAuth, requireActive, requireChatAccess, a
   }
   if (other === me) {
     res.status(400).json({ error: "Não é possível enviar mensagem para si mesmo." });
+    return;
+  }
+
+  const ip = String(req.ip || "");
+  const rateKey = `${me}:${ip}`;
+  const rate = dmMessageLimiter.check(rateKey);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
     return;
   }
 

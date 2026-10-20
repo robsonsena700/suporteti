@@ -405,6 +405,9 @@ export default function NewTicket() {
   // sem precisar de cabo USB nem de configurar nada no aparelho.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Disponível apenas em ambiente de desenvolvimento (build local com `vite dev`).
+    // Em produção este bloco nunca executa, mesmo que alguém acesse ?debug=1.
+    if (!import.meta.env.DEV) return;
     let params: URLSearchParams;
     try {
       params = new URLSearchParams(window.location.search);

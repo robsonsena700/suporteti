@@ -5,8 +5,11 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { getCoordinatorIdForGestor, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
+
+const reportExportLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 5 });
 
 function parseDateQuery(value: unknown): Date | null {
   if (typeof value !== "string") return null;
@@ -905,6 +908,16 @@ router.get("/reports/tickets/trends", requireAuth, requireActive, async (req, re
 
 router.get("/reports/export", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+
+  const ip = String(req.ip || "");
+  const rateKey = `${user.userId}:${ip}`;
+  const rate = reportExportLimiter.check(rateKey);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+    return;
+  }
+
   const from = parseDateQuery(req.query.from);
   const to = parseDateQuery(req.query.to);
   if (req.query.from != null && from == null) {
@@ -1374,6 +1387,16 @@ router.get("/reports/export", requireAuth, requireActive, async (req, res): Prom
 
 router.get("/reports/tickets/export", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+
+  const ip = String(req.ip || "");
+  const rateKey = `${user.userId}:${ip}`;
+  const rate = reportExportLimiter.check(rateKey);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+    return;
+  }
+
   const from = parseDateQuery(req.query.from);
   const to = parseDateQuery(req.query.to);
   if (req.query.from != null && from == null) {

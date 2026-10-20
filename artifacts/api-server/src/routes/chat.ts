@@ -11,11 +11,13 @@ import {
 } from "../lib/chat-access";
 import { appendEditHistory, getEditWindow } from "../lib/chat-message-rules";
 import { emitGroupMessage, emitGroupMessageEdited, subscribeToChatStream, emitTyping, emitDmRead } from "../lib/chat-realtime";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
 
 const userNameCache = new Map<number, { name: string; ts: number }>();
 const USER_NAME_TTL_MS = 5 * 60 * 1000;
+const chatMessageLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 30 });
 
 async function getCachedUserName(userId: number): Promise<string | null> {
   const cached = userNameCache.get(userId);
@@ -225,6 +227,16 @@ router.get("/chat/messages", requireAuth, requireActive, requireChatAccess, asyn
 
 router.post("/chat/messages", requireAuth, requireActive, requireChatAccess, async (req, res): Promise<void> => {
   const user = req.user!;
+
+  const ip = String(req.ip || "");
+  const rateKey = `${user.userId}:${ip}`;
+  const rate = chatMessageLimiter.check(rateKey);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+    return;
+  }
+
   const { message, attachmentIds, replyToId } = req.body as { message?: unknown; attachmentIds?: unknown; replyToId?: unknown };
   const ids = Array.isArray(attachmentIds) ? attachmentIds.map((v) => Number(v)).filter((v) => Number.isInteger(v)) : [];
   const replyId = parseOptionalPositiveInt(replyToId);

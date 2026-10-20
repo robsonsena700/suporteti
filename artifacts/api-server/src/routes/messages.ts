@@ -12,11 +12,13 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import { normalizeFilename, sanitizeTicketMessageHtml, validateTicketMessageAttachmentFile, verifyTicketMessageAttachmentContent } from "../lib/ticket-message-content";
 import { logger } from "../lib/logger";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
 
 const MAX_ATTACHMENT_SIZE = 3 * 1024 * 1024; // 3 MB
 const MAX_ATTACHMENTS_PER_MESSAGE = 5;
+const createMessageLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 20 });
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_ATTACHMENT_SIZE, files: MAX_ATTACHMENTS_PER_MESSAGE },
@@ -102,6 +104,16 @@ router.get("/tickets/:ticketId/messages", requireAuth, requireActive, async (req
 
 router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.array("files", MAX_ATTACHMENTS_PER_MESSAGE), async (req, res): Promise<void> => {
   const user = req.user!;
+
+  const ip = String(req.ip || "");
+  const rateKey = `${user.userId}:${ip}`;
+  const rate = createMessageLimiter.check(rateKey);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+    return;
+  }
+
   const raw = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : req.params.ticketId;
   const ticketId = parseInt(raw, 10);
   logger.info({

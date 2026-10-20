@@ -8,8 +8,11 @@ import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen
 import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { logger } from "../lib/logger";
+import { createInMemoryRateLimiter } from "../lib/rate-limit";
 
 const router: IRouter = Router();
+
+const createTicketLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 10 });
 
 const userRefSelect = {
   id: usersTable.id,
@@ -383,6 +386,16 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
 
 router.post("/tickets", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
+
+  const ip = String(req.ip || "");
+  const rateKey = `${user.userId}:${ip}`;
+  const rate = createTicketLimiter.check(rateKey);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+    res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+    return;
+  }
+
   const parsed = CreateTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
