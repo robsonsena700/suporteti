@@ -11,7 +11,8 @@ param(
   [switch]$SkipHealthCheck,
   [switch]$StartAfterDeploy,
   [string]$StartScriptPath = "",
-  [switch]$SkipMigrations
+  [switch]$SkipMigrations,
+  [int]$KeepReleases = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -209,6 +210,13 @@ $resolvedStartScriptPath = if (![string]::IsNullOrWhiteSpace($StartScriptPath)) 
 $startCmd = 'set -e; if [ -x "{0}" ]; then bash "{0}" "{1}"; else echo "start_prod.sh nao encontrado: {0}" >&2; exit 2; fi' -f $resolvedStartScriptPath, $RemoteBaseDir
 $migrateCmd = 'set -e; if [ -d "{0}/lib/db/migrations" ] && [ -f "{0}/scripts/remote/apply_sql_migrations.sh" ]; then sed -i ''s/\r$//'' "{0}/scripts/remote/apply_sql_migrations.sh"; chmod +x "{0}/scripts/remote/apply_sql_migrations.sh"; "{0}/scripts/remote/apply_sql_migrations.sh" "{0}/lib/db/migrations"; fi' -f $releaseDir
 
+# Mantem apenas os $KeepReleases releases mais recentes em releases/ (por data de
+# modificacao do diretorio), preservando sempre o alvo atual de "current" e de
+# "previous" mesmo que, por algum motivo, nao estejam entre os mais recentes.
+# Sem isso, releases/ cresce para sempre: cada publicar.ps1+deploy_prod.ps1 cria
+# um diretorio novo e nada nunca e removido.
+$pruneReleasesCmd = 'set -e; cur="$(readlink -f "{1}" 2>/dev/null || true)"; prev="$(readlink -f "{2}" 2>/dev/null || true)"; cd "{0}" && ls -dt */ 2>/dev/null | tail -n +{3} | while read -r d; do full="{0}/${{d%/}}"; if [ "$full" != "$cur" ] && [ "$full" != "$prev" ]; then rm -rf -- "$full"; fi; done' -f $releasesDir, $currentLink, $previousLink, ($KeepReleases + 1)
+
 if ($shouldStart -and [string]::IsNullOrWhiteSpace($StartScriptPath)) {
   $localStartScript = Join-Path (Get-Location) "scripts\remote\start_prod.sh"
   if (!(Test-Path $localStartScript)) {
@@ -281,6 +289,12 @@ try {
   Ssh "set -e; if [ -x '$remoteSharedDir/uploads_guard.sh' ]; then bash '$remoteSharedDir/uploads_guard.sh' backup '$RemoteBaseDir'; fi"
 } catch {
   Write-Host "Aviso: falha ao executar backup pós-deploy do diretório uploads." -ForegroundColor Yellow
+}
+
+try {
+  Ssh $pruneReleasesCmd
+} catch {
+  Write-Host "Aviso: falha ao podar releases antigos em $releasesDir (nao afeta o release recem publicado)." -ForegroundColor Yellow
 }
 
 Write-Host "OK: deploy finalizado (v$version). Se precisar rollback, aponte o symlink current para previous e reinicie os servicos."
