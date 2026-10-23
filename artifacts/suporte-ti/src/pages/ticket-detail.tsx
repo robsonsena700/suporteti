@@ -63,13 +63,23 @@ import { Link as LinkExtension } from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
+import { usePersistedDraft } from "@/hooks/use-persisted-draft";
 
 const EmojiPicker = lazy(() => import("emoji-picker-react"));
 
-const TICKET_DETAIL_STATE_KEY = "suporte-ti:ticket:detail:state:v1";
+const TICKET_DETAIL_STATE_KEY = "suporte-ti:ticket:detail:state:v2";
 
+// Cobre todos os campos sensiveis a perda ao trocar de janela/app nesta
+// tela: o rascunho da mensagem, a atribuicao de responsavel (painel
+// "Substituir Atribuicao" e dentro da edicao de detalhes) e o formulario de
+// "Detalhes do chamado" (tipo/prioridade/prazo/UF/municipio/estabelecimento/
+// subtipo de hardware), incluindo se a edicao estava aberta - sem isso,
+// restaurar os valores sem reabrir o modo de edicao nao adianta, pois o
+// efeito de exibicao em modo leitura os sobrescreveria de volta com os
+// dados do servidor. actorUserId/savedAt ficam por conta do hook generico
+// (usePersistedDraft em src/hooks/use-persisted-draft.ts), nao fazem parte
+// do formato especifico desta tela.
 type TicketDetailPersistedState = {
-  actorUserId: number;
   ticketId: number;
   scrollY: number | null;
   focusedMessageId: number | null;
@@ -77,31 +87,15 @@ type TicketDetailPersistedState = {
   selectedAssigneeId: string;
   assignReason: string;
   previewAttachmentId: number | null;
-  savedAt: number;
+  isEditingDetails: boolean;
+  detailsType: TicketType;
+  detailsPriority: TicketPriority;
+  detailsDueAt: string;
+  detailsUf: string;
+  detailsMunicipality: string;
+  detailsEstablishment: string;
+  detailsHardwareSubtype: string;
 };
-
-function loadTicketDetailState(actorUserId: number | null | undefined): TicketDetailPersistedState | null {
-  if (typeof window === "undefined") return null;
-  if (!actorUserId) return null;
-  try {
-    const raw = window.localStorage.getItem(TICKET_DETAIL_STATE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as TicketDetailPersistedState;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.actorUserId !== actorUserId) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function saveTicketDetailState(next: TicketDetailPersistedState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(TICKET_DETAIL_STATE_KEY, JSON.stringify(next));
-  } catch {
-  }
-}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -355,6 +349,7 @@ export default function TicketDetail() {
   useEffect(() => {
     ticketRef.current = ticket;
   }, [ticket]);
+  const skipDetailsInitRef = useRef(false);
 
   const { data: messages } = useListMessages(ticketId, {
     query: {
@@ -595,6 +590,13 @@ export default function TicketDetail() {
   // esta editando.
   useEffect(() => {
     if (!isEditingDetails) return;
+    if (skipDetailsInitRef.current) {
+      // Entramos em modo de edicao porque um rascunho persistido foi
+      // restaurado (ver usePersistedDraft abaixo) - os campos ja vieram
+      // certos de la, nao buscar os valores atuais do servidor por cima.
+      skipDetailsInitRef.current = false;
+      return;
+    }
     const t = ticketRef.current;
     if (!t) return;
     setDetailsType(t.type);
@@ -650,39 +652,67 @@ export default function TicketDetail() {
     return () => { cancelled = true; };
   }, [isEditingDetails, detailsUf, detailsMunicipality]);
 
-  const buildPersistedState = useCallback((): TicketDetailPersistedState | null => {
-    if (!user) return null;
-    return {
-      actorUserId: user.id,
-      ticketId,
-      scrollY: typeof window !== "undefined" ? window.scrollY : null,
-      focusedMessageId,
-      draftMessage: draftHtml,
-      selectedAssigneeId,
-      assignReason,
-      previewAttachmentId: previewOpen && previewAtt ? previewAtt.id : null,
-      savedAt: Date.now(),
-    };
-  }, [user, ticketId, focusedMessageId, draftHtml, selectedAssigneeId, assignReason, previewOpen, previewAtt]);
+  const buildPersistedState = useCallback((): TicketDetailPersistedState => ({
+    ticketId,
+    scrollY: typeof window !== "undefined" ? window.scrollY : null,
+    focusedMessageId,
+    draftMessage: draftHtml,
+    selectedAssigneeId,
+    assignReason,
+    previewAttachmentId: previewOpen && previewAtt ? previewAtt.id : null,
+    isEditingDetails,
+    detailsType,
+    detailsPriority,
+    detailsDueAt,
+    detailsUf,
+    detailsMunicipality,
+    detailsEstablishment,
+    detailsHardwareSubtype,
+  }), [
+    ticketId, focusedMessageId, draftHtml, selectedAssigneeId, assignReason, previewOpen, previewAtt,
+    isEditingDetails, detailsType, detailsPriority, detailsDueAt, detailsUf, detailsMunicipality,
+    detailsEstablishment, detailsHardwareSubtype,
+  ]);
 
-  const saveNow = useCallback(() => {
-    const next = buildPersistedState();
-    if (!next) return;
-    saveTicketDetailState(next);
-  }, [buildPersistedState]);
-
-  const applyPersisted = useCallback((next: TicketDetailPersistedState | null) => {
-    if (!next) return;
+  const applyPersisted = useCallback((next: TicketDetailPersistedState) => {
     if (next.ticketId !== ticketId) return;
     setDraftHtml(next.draftMessage || "");
     setSelectedAssigneeId(next.selectedAssigneeId || "");
     setAssignReason(next.assignReason || "");
     setFocusedMessageId(next.focusedMessageId ?? null);
+    if (next.isEditingDetails) {
+      skipDetailsInitRef.current = true;
+      setDetailsType(next.detailsType);
+      setDetailsPriority(next.detailsPriority);
+      setDetailsDueAt(next.detailsDueAt || "");
+      setDetailsUf(next.detailsUf || "");
+      setDetailsMunicipality(next.detailsMunicipality || "");
+      setDetailsEstablishment(next.detailsEstablishment || "");
+      setDetailsHardwareSubtype(next.detailsHardwareSubtype || "");
+    }
+    setIsEditingDetails(Boolean(next.isEditingDetails));
     pendingRestoreRef.current = next;
     pendingPreviewAttachmentIdRef.current = next.previewAttachmentId ?? null;
     restoreInFlightRef.current = true;
     restoreLoopStartedRef.current = false;
   }, [ticketId]);
+
+  // Camada unica de persistencia temporaria (src/hooks/use-persisted-draft.ts)
+  // para todos os campos acima - substitui o antigo mecanismo ad hoc
+  // (localStorage + visibilitychange + beforeunload escritos a mao aqui) por
+  // um hook generico e reaproveitavel por qualquer tela. Cobre "trocar de
+  // janela/app e voltar" (save no hidden, restore no visible), fechar/
+  // recarregar a aba (beforeunload) e tambem navegar para outro chamado sem
+  // a tela desmontar (restoreKey: ticketId).
+  const { save: saveNow, clear: clearTicketDetailDraft } = usePersistedDraft<TicketDetailPersistedState>({
+    key: TICKET_DETAIL_STATE_KEY,
+    actorUserId: user?.id,
+    get: buildPersistedState,
+    apply: applyPersisted,
+    matches: (data) => data.ticketId === ticketId,
+    restoreKey: ticketId,
+    shouldConfirmUnload: () => Boolean(editor?.getText().trim()) || messageFilesRef.current.length > 0,
+  });
 
   useEffect(() => {
     if (!editor) return;
@@ -739,13 +769,6 @@ export default function TicketDetail() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
-    const state = loadTicketDetailState(user.id);
-    if (!state) return;
-    applyPersisted(state);
-  }, [user, applyPersisted]);
-
-  useEffect(() => {
     if (!restoreInFlightRef.current) return;
     if (!ticket) return;
     attemptRestoreUi();
@@ -764,38 +787,13 @@ export default function TicketDetail() {
 
   useEffect(() => {
     if (!user) return;
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        saveNow();
-        return;
-      }
-      if (document.visibilityState !== "visible") return;
-      const state = loadTicketDetailState(user.id);
-      if (!state) return;
-      applyPersisted(state);
-    };
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      const hasDraftText = Boolean(editor?.getText().trim());
-      const hasDraftFiles = messageFilesRef.current.length > 0;
-      if (hasDraftText || hasDraftFiles) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-      saveNow();
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [user, saveNow, applyPersisted, editor, messageFilesRef]);
-
-  useEffect(() => {
-    if (!user) return;
     const id = setTimeout(() => saveNow(), 200);
     return () => clearTimeout(id);
-  }, [user, ticketId, draftHtml, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt, saveNow]);
+  }, [
+    user, ticketId, draftHtml, selectedAssigneeId, assignReason, focusedMessageId, previewOpen, previewAtt,
+    isEditingDetails, detailsType, detailsPriority, detailsDueAt, detailsUf, detailsMunicipality,
+    detailsEstablishment, detailsHardwareSubtype, saveNow,
+  ]);
 
   const handleUpdateStatus = (status: TicketStatus) => {
     const requiresAssignee =
@@ -983,6 +981,7 @@ export default function TicketDetail() {
       setShowEmojiPicker(false);
       editor?.commands.clearContent(true);
       setDraftHtml("");
+      clearTicketDetailDraft();
     } catch (e: any) {
       debugTicketMessages("send_exception", { message: e?.message, stack: e?.stack });
       toast({
@@ -1388,6 +1387,7 @@ export default function TicketDetail() {
       }
       toast({ title: "Detalhes atualizados com sucesso" });
       setIsEditingDetails(false);
+      clearTicketDetailDraft();
     } catch (e: any) {
       toast({
         title: "Falha ao atualizar detalhes",
@@ -1851,7 +1851,16 @@ export default function TicketDetail() {
                     </Button>
                   ) : (
                     <>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setIsEditingDetails(false)} disabled={savingDetails}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setIsEditingDetails(false);
+                          clearTicketDetailDraft();
+                        }}
+                        disabled={savingDetails}
+                      >
                         <X className="mr-2 size-4" />
                         Cancelar
                       </Button>
