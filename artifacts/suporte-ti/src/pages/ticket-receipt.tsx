@@ -48,11 +48,25 @@ export default function TicketReceipt() {
   });
 
   const protocol = ticket ? `#${ticket.id}` : "#—";
-  const qrUrl = useMemo(() => {
-    const text = ticket ? String(ticket.id) : "";
-    const size = 180;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(text)}`;
+  // O QR Code aponta para a propria tela do chamado (a mesma rota protegida
+  // usada pelo link "Voltar ao chamado" acima) usando a origem atual do
+  // navegador - em producao isso resolve para
+  // https://suporteti.sotechsaude.com.br/chamados/<id>, e continua correto
+  // automaticamente em outros ambientes (staging, localhost) sem precisar
+  // de configuracao adicional. Quem ler o QR Code sem estar autenticado ou
+  // sem permissao sobre esse chamado especifico cai no mesmo controle de
+  // acesso de sempre (login/403), ja que a rota e a API por tras dela nao
+  // mudam.
+  const ticketUrl = useMemo(() => {
+    if (!ticket) return "";
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/chamados/${ticket.id}`;
   }, [ticket]);
+  const qrUrl = useMemo(() => {
+    if (!ticketUrl) return "";
+    const size = 180;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(ticketUrl)}`;
+  }, [ticketUrl]);
 
   useEffect(() => {
     if (!autoPrint) return;
@@ -256,10 +270,10 @@ export default function TicketReceipt() {
                 </div>
                 <div>
                   <p className="text-[11px] text-slate-600 leading-snug">
-                    Use o QR Code para localizar rapidamente o protocolo <span className="font-bold">{protocol}</span>.
+                    Use o QR Code para acessar diretamente o chamado <span className="font-bold">{protocol}</span> no sistema.
                   </p>
-                  <p className="text-[10px] text-slate-500 mt-2">
-                    Código: <span className="font-mono font-bold">{ticket.id}</span>
+                  <p className="text-[10px] text-slate-500 mt-2 break-all">
+                    {ticketUrl}
                   </p>
                 </div>
               </div>
@@ -270,8 +284,8 @@ export default function TicketReceipt() {
                 Contato do Suporte
               </h3>
               <div className="text-sm text-slate-700 space-y-1">
-                <p>Email: suporte@suporteti.local</p>
-                <p>Telefone: (00) 0000-0000</p>
+                <p>Email: suporte@sotechsaude.com.br</p>
+                <p>Telefone: +55 (11) 91204-6448</p>
                 <p>Horário: Seg–Sex, 08:00–18:00</p>
               </div>
             </section>
