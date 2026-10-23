@@ -256,7 +256,13 @@ if (!$SkipMigrations) {
   try {
     Ssh $migrateCmd
   } catch {
-    Write-Host "Aviso: falha ao aplicar migrations SQL automaticamente." -ForegroundColor Yellow
+    # Antes isso so emitia um aviso amarelo e o deploy seguia (trocando o
+    # release atual) mesmo com o banco desatualizado em relacao ao codigo
+    # novo - foi exatamente isso que causou o 500 em GET /tickets/:id/messages
+    # apos a Etapa 12 adicionar a coluna content_sha256 sem a migracao ter
+    # sido aplicada. Agora aborta ANTES de trocar o symlink "current", para
+    # nunca publicar codigo que espera um schema que o banco ainda nao tem.
+    throw "Falha ao aplicar migrations SQL em '$releaseDir' - deploy abortado antes de trocar o release atual (o banco ficaria desatualizado em relacao ao codigo novo). Erro original: $($_.Exception.Message)"
   }
 }
 

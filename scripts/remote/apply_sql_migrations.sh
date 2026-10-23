@@ -43,7 +43,21 @@ fi
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5446}"
 DB_NAME="${DB_NAME:-suporteti}"
-DB_USER="${DB_USER:-suporte_app}"
+DB_USER="${DB_USER:-postgres}"
+
+# Em producao as credenciais do Postgres nao ficam no $SHARED/.env (que so tem
+# SMTP_*/APP_PUBLIC_URL/MAIL_MODE) - usuario "postgres" e senha vem do mesmo
+# $SHARED/credenciais.txt que o start_prod.sh le para montar o DATABASE_URL.
+# Sem isso o script sempre falhava com "missing DB_PASSWORD" e o deploy so
+# mostrava um aviso e seguia, deixando o schema do banco desatualizado em
+# relacao ao codigo novo (foi o que causou o 500 em GET /tickets/:id/messages
+# apos a Etapa 12 adicionar a coluna content_sha256).
+if [ -z "${DB_PASSWORD:-}" ]; then
+  CREDENCIAIS_FILE="${CREDENCIAIS_FILE:-$(dirname "$ENV_FILE")/credenciais.txt}"
+  if [ -f "$CREDENCIAIS_FILE" ]; then
+    DB_PASSWORD="$(tr -d '\r\n' < "$CREDENCIAIS_FILE")"
+  fi
+fi
 
 : "${DB_PASSWORD:?missing DB_PASSWORD}"
 
