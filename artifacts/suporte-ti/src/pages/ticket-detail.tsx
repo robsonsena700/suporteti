@@ -351,6 +351,11 @@ export default function TicketDetail() {
     }
   });
 
+  const ticketRef = useRef(ticket);
+  useEffect(() => {
+    ticketRef.current = ticket;
+  }, [ticket]);
+
   const { data: messages } = useListMessages(ticketId, {
     query: {
       enabled: !!ticketId,
@@ -576,19 +581,33 @@ export default function TicketDetail() {
     setDetailsHardwareSubtype(ticket.hardwareSubtype ?? "");
   }, [ticket, isEditingDetails, toDatetimeLocalValue]);
 
+  // So inicializa os campos de edicao QUANDO o modo de edicao comeca - nao a
+  // cada vez que "ticket" muda. Antes esse efeito tinha "ticket" nas deps e
+  // rodava de novo toda vez que a query de GET /tickets/:id revalidava em
+  // background (ex: refetchOnWindowFocus do react-query, disparado ao voltar
+  // o foco pra aba depois de alternar de janela/app) - isso sobrescrevia
+  // silenciosamente tudo que o usuario tinha acabado de digitar/selecionar
+  // no formulario de "Detalhes do chamado" (tipo, prioridade, prazo, UF,
+  // municipio, estabelecimento, subtipo de hardware) e tambem o responsavel/
+  // motivo de atribuicao, voltando pros valores antigos do servidor. Usamos
+  // um ref com o ticket mais recente pra ainda pegar os dados atuais no
+  // instante em que a edicao comeca, sem re-sincronizar enquanto o usuario
+  // esta editando.
   useEffect(() => {
-    if (!ticket) return;
     if (!isEditingDetails) return;
-    setDetailsType(ticket.type);
-    setDetailsPriority(ticket.priority);
-    setDetailsDueAt(toDatetimeLocalValue(ticket.dueAt ?? null));
-    setDetailsUf(ticket.uf);
-    setDetailsMunicipality(ticket.municipality);
-    setDetailsEstablishment(ticket.establishment ?? "");
-    setDetailsHardwareSubtype(ticket.hardwareSubtype ?? "");
-    setSelectedAssigneeId(ticket.assignedToId ? String(ticket.assignedToId) : "");
+    const t = ticketRef.current;
+    if (!t) return;
+    setDetailsType(t.type);
+    setDetailsPriority(t.priority);
+    setDetailsDueAt(toDatetimeLocalValue(t.dueAt ?? null));
+    setDetailsUf(t.uf);
+    setDetailsMunicipality(t.municipality);
+    setDetailsEstablishment(t.establishment ?? "");
+    setDetailsHardwareSubtype(t.hardwareSubtype ?? "");
+    setSelectedAssigneeId(t.assignedToId ? String(t.assignedToId) : "");
     setAssignReason("");
-  }, [isEditingDetails, ticket, toDatetimeLocalValue]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditingDetails, toDatetimeLocalValue]);
 
   useEffect(() => {
     if (!isEditingDetails) return;
