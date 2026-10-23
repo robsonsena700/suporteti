@@ -143,17 +143,15 @@ router.get("/users", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"
   if (role) conditions.push(eq(usersTable.role, role as any));
 
   if (currentUser.role === "COORDINATOR") {
-    if (status !== "PENDING") {
-      res.status(403).json({ error: "Coordenadores só podem visualizar cadastros pendentes do próprio município" });
-      return;
-    }
-
+    // Coordenador pode listar usuarios em qualquer status (nao so PENDING -
+    // precisa disso para editar localidade (UF/Municipio) de cadastros ja
+    // ativos do seu municipio), mas segue exigindo um municipio vinculado,
+    // e o resultado e sempre filtrado ao proprio municipio logo abaixo.
     const actorScope = await getApprovalActorScope(currentUser.userId);
     if (!actorScope?.uf || !actorScope?.municipality) {
-      res.status(403).json({ error: "Coordenador sem município vinculado não pode acessar fila de aprovações" });
+      res.status(403).json({ error: "Coordenador sem município vinculado não pode acessar a lista de usuários" });
       return;
     }
-
   }
 
   const rawUsers = conditions.length > 0
@@ -769,10 +767,7 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
   }
 
   const currentUser = req.user!;
-  if (currentUser.userId !== id && currentUser.role !== "ADMIN") {
-    res.status(403).json({ error: "Acesso negado" });
-    return;
-  }
+  const isSelfUpdate = currentUser.userId === id;
 
   const parsed = UpdateUserBody.safeParse(req.body);
   if (!parsed.success) {
@@ -786,7 +781,45 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
     return;
   }
 
-  const isSelfUpdate = currentUser.userId === id;
+  if (!isSelfUpdate) {
+    // Edicao do perfil de outro usuario (ex: UF/Municipio, a partir da tela
+    // "Todos os Usuarios") - permitida para ADMIN e ANALYST sem restricao de
+    // escopo, e para COORDINATOR apenas dentro do proprio municipio (mesma
+    // regra de escopo usada na aprovacao de cadastros). Role e status
+    // continuam restritos aos endpoints dedicados /role e /status, nunca
+    // alteraveis por aqui - e nao existe endpoint de exclusao de usuario,
+    // so desativacao via /status.
+    const canManageAnyProfile = currentUser.role === "ADMIN" || currentUser.role === "ANALYST";
+    const isCoordinatorWithinScope = currentUser.role === "COORDINATOR"
+      && hasMatchingMunicipalityScope(
+        { uf: currentUser.uf, municipality: currentUser.municipality },
+        { uf: existing.uf, municipality: existing.municipality },
+      );
+
+    if (!canManageAnyProfile && !isCoordinatorWithinScope) {
+      if (currentUser.role === "COORDINATOR") {
+        const { ip, userAgent } = getRequestMeta(req);
+        await db.insert(securityAuditLogsTable).values({
+          eventType: "COORDINATOR_PROFILE_EDIT_DENIED_MUNICIPALITY_MISMATCH",
+          actorUserId: currentUser.userId,
+          targetUserId: existing.id,
+          targetEmail: existing.email,
+          ip,
+          userAgent,
+          detail: buildCoordinatorApprovalAuditDetail({
+            actorUf: currentUser.uf,
+            actorMunicipality: currentUser.municipality,
+            candidateUf: existing.uf,
+            candidateMunicipality: existing.municipality,
+            reason: "coordinator_profile_edit_outside_scope",
+          }),
+        });
+      }
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+  }
+
   const nextCpf = parsed.data.cpf ?? existing.cpf ?? "";
   const nextEstablishment = parsed.data.establishment ?? existing.establishment ?? "";
   const nextContactPhone = parsed.data.contactPhone ?? existing.contactPhone ?? "";
@@ -904,6 +937,11 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
   res.json(user);
 });
 
+// Nao existe endpoint de exclusao (DELETE) de usuario neste arquivo, de
+// proposito: contas nunca sao apagadas do banco, mesmo com chamados abertos
+// vinculados (como criador ou responsavel) - a unica transicao suportada e
+// a desativacao abaixo (status ACTIVE/INACTIVE), que preserva o historico e
+// os chamados do usuario intactos.
 router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST"), async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);

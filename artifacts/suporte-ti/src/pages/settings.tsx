@@ -6,11 +6,14 @@ import {
   useGetGestorConfigs,
   getGetGestorConfigsQueryKey,
   useUpdateGestorConfig,
+  useUpdateUser,
   getListUsersQueryKey,
   UserStatus,
   UserRole
 } from "@workspace/api-client-react";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
+import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
+import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -56,6 +59,299 @@ const ROLE_GROUPS: Array<{ key: RoleGroupKey; label: string }> = [
   { key: "ADMIN" as UserRole, label: "Administradores" },
 ];
 
+type LocationEditTarget = { id: number; name: string; uf: string; municipality: string };
+
+/**
+ * Dialogo compartilhado para editar UF/Municipio de um usuario cadastrado.
+ * Usado tanto na tela "Todos os Usuarios" (ADMIN) quanto no diretorio de
+ * usuarios disponivel para COORDINATOR (escopo do proprio municipio) e
+ * ANALYST (sem restricao de escopo) - a autorizacao real e sempre aplicada
+ * no backend (PATCH /users/:id), esse dialogo so monta a requisicao.
+ */
+function EditUserLocationDialog({
+  open,
+  onOpenChange,
+  targetUser,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  targetUser: LocationEditTarget | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const updateMutation = useUpdateUser();
+  const [uf, setUf] = useState("");
+  const [municipality, setMunicipality] = useState("");
+  const [municipalities, setMunicipalities] = useState<string[]>([]);
+  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
+
+  useEffect(() => {
+    if (open && targetUser) {
+      setUf(targetUser.uf || "");
+      setMunicipality(targetUser.municipality || "");
+    }
+  }, [open, targetUser]);
+
+  useEffect(() => {
+    if (!uf) {
+      setMunicipalities([]);
+      return;
+    }
+
+    const cached = getCachedMunicipalities(uf);
+    if (cached.length > 0) {
+      setMunicipalities(cached);
+    }
+
+    let cancelled = false;
+    setIsLoadingMunicipalities(true);
+    fetchMunicipalitiesByUf(uf)
+      .then((data) => {
+        if (cancelled) return;
+        setMunicipalities(data);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMunicipalities([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingMunicipalities(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uf]);
+
+  const handleUfChange = (next: string) => {
+    setUf(next);
+    setMunicipality("");
+  };
+
+  const handleSave = () => {
+    if (!targetUser) return;
+    if (!uf || !municipality) {
+      toast({ title: "Selecione UF e município", variant: "destructive" });
+      return;
+    }
+    updateMutation.mutate(
+      { id: targetUser.id, data: { uf, municipality } },
+      {
+        onSuccess: () => {
+          toast({ title: "Localidade atualizada com sucesso" });
+          onOpenChange(false);
+          onSaved();
+        },
+        onError: (err: any) => {
+          toast({
+            title: "Não foi possível atualizar a localidade",
+            description: err?.data?.error || "Tente novamente.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Editar localidade</DialogTitle>
+          <DialogDescription>
+            {targetUser ? `Atualize a UF e o município de ${targetUser.name}.` : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">UF</label>
+            <Select value={uf} onValueChange={handleUfChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {UFS.map((option) => (
+                  <SelectItem key={option} value={option}>{option}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Município</label>
+            <MunicipalityCombobox
+              uf={uf}
+              value={municipality}
+              options={municipalities}
+              loading={isLoadingMunicipalities}
+              disabled={!uf}
+              onChange={setMunicipality}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={handleSave} disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? "Salvando..." : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Diretorio de usuarios para perfis que podem editar localidade (UF/
+ * Municipio) mas nao devem ter acesso as demais ferramentas administrativas
+ * (troca de perfil/role, configuracao de gestor, reset de senha, troca de
+ * e-mail) - hoje COORDINATOR (escopado ao proprio municipio pelo backend) e
+ * ANALYST (sem escopo). A ativacao/desativacao de usuarios continua restrita
+ * a quem ja tinha essa permissao (ADMIN/ANALYST) e nao existe exclusao de
+ * usuario em lugar nenhum do sistema, so desativacao.
+ */
+function UserDirectorySettings({ scopeDescription }: { scopeDescription: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
+  const [search, setSearch] = useState("");
+  const [editTarget, setEditTarget] = useState<LocationEditTarget | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const usersQueryKey = [...getListUsersQueryKey({}), "directory"];
+  const { data: users, isLoading } = useQuery({
+    queryKey: usersQueryKey,
+    queryFn: async () => {
+      return customFetch<UserWithCoordinator[]>("/api/users");
+    },
+  });
+
+  const canToggleStatus = currentUser?.role === "ADMIN" || currentUser?.role === "ANALYST";
+  const statusMutation = useMutation({
+    mutationFn: async ({ userId, status }: { userId: number; status: UserStatus }) => {
+      return customFetch(`/api/users/${userId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Status atualizado com sucesso" });
+      queryClient.invalidateQueries({ queryKey: usersQueryKey });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Não foi possível atualizar o status",
+        description: err?.data?.error || "Tente novamente.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const rows = (users ?? []).filter((u) => u.status !== UserStatus.PENDING);
+    const matched = term
+      ? rows.filter((u) => u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term))
+      : rows;
+    return [...matched].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [users, search]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Todos os Usuários</CardTitle>
+        <CardDescription>{scopeDescription}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Input
+          placeholder="Buscar por nome ou e-mail"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-sm"
+        />
+        {isLoading ? (
+          <div className="text-center py-4">Carregando...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">Nenhum usuário encontrado.</div>
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <div className="max-h-[480px] overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome</TableHead>
+                    <TableHead>E-mail</TableHead>
+                    <TableHead>Perfil</TableHead>
+                    <TableHead>Localidade</TableHead>
+                    <TableHead>Status</TableHead>
+                    {canToggleStatus ? <TableHead>Ações</TableHead> : null}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((u) => (
+                    <TableRow key={u.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-3">
+                          <UserAvatar userId={u.id} name={u.name} className="h-8 w-8" />
+                          <span>{u.name}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>{u.email}</TableCell>
+                      <TableCell>{getRoleLabel(u.role)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span>{u.municipality} - {u.uf}</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditTarget({ id: u.id, name: u.name, uf: u.uf, municipality: u.municipality });
+                              setEditOpen(true);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={u.status === UserStatus.ACTIVE ? "default" : "destructive"}>
+                          {u.status}
+                        </Badge>
+                      </TableCell>
+                      {canToggleStatus ? (
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant={u.status === UserStatus.ACTIVE ? "destructive" : "default"}
+                            onClick={() => statusMutation.mutate({
+                              userId: u.id,
+                              status: u.status === UserStatus.ACTIVE ? UserStatus.INACTIVE : UserStatus.ACTIVE,
+                            })}
+                            disabled={statusMutation.isPending}
+                          >
+                            {u.status === UserStatus.ACTIVE ? "Desativar" : "Ativar"}
+                          </Button>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+      </CardContent>
+      <EditUserLocationDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        targetUser={editTarget}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: usersQueryKey })}
+      />
+    </Card>
+  );
+}
+
 function AdminSettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -70,6 +366,8 @@ function AdminSettings() {
   const [resetPage, setResetPage] = useState(1);
   const [editEmailOpen, setEditEmailOpen] = useState(false);
   const [editEmailUser, setEditEmailUser] = useState<{ id: number; name: string; email: string } | null>(null);
+  const [editLocationOpen, setEditLocationOpen] = useState(false);
+  const [editLocationTarget, setEditLocationTarget] = useState<LocationEditTarget | null>(null);
   const [editNewEmail, setEditNewEmail] = useState("");
   const [editConfirmNewEmail, setEditConfirmNewEmail] = useState("");
   const [editAdminPassword, setEditAdminPassword] = useState("");
@@ -423,6 +721,7 @@ function AdminSettings() {
               <TableHead>Nome</TableHead>
               <TableHead>E-mail</TableHead>
               <TableHead>Perfil</TableHead>
+              <TableHead>Localidade</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Coordenador</TableHead>
               <TableHead>Ações</TableHead>
@@ -501,6 +800,21 @@ function AdminSettings() {
                         <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
                       </SelectContent>
                     </Select>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <span>{user.municipality} - {user.uf}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditLocationTarget({ id: user.id, name: user.name, uf: user.uf, municipality: user.municipality });
+                          setEditLocationOpen(true);
+                        }}
+                      >
+                        Editar
+                      </Button>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={user.status === UserStatus.ACTIVE ? "default" : user.status === UserStatus.PENDING ? "secondary" : "destructive"}>
@@ -759,6 +1073,13 @@ function AdminSettings() {
           )}
         </CardContent>
       </Card>
+
+      <EditUserLocationDialog
+        open={editLocationOpen}
+        onOpenChange={setEditLocationOpen}
+        targetUser={editLocationTarget}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: [...getListUsersQueryKey({}), "includeCoordinator"] })}
+      />
 
       <Dialog open={editEmailOpen} onOpenChange={(v) => {
         if (!v) {
@@ -1216,7 +1537,15 @@ export default function Settings() {
       </Card>
 
       {user?.role === "ADMIN" ? <AdminSettings /> : null}
-      {user?.role === "COORDINATOR" ? <CoordinatorApprovalSettings /> : null}
+      {user?.role === "COORDINATOR" ? (
+        <>
+          <CoordinatorApprovalSettings />
+          <UserDirectorySettings scopeDescription="Como coordenador, você pode visualizar e editar a localidade (UF/Município) dos usuários do seu próprio município." />
+        </>
+      ) : null}
+      {user?.role === "ANALYST" ? (
+        <UserDirectorySettings scopeDescription="Como analista, você pode visualizar todos os usuários e editar a localidade (UF/Município) de qualquer cadastro." />
+      ) : null}
     </div>
   );
 }
