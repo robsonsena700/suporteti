@@ -215,6 +215,7 @@ export const TicketStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -362,6 +363,7 @@ export const UpdateTicketBodyStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -464,6 +466,7 @@ export const ReportTicketRowStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -586,6 +589,7 @@ export const ListTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
 } as const;
 
 export type ListTicketsType =
@@ -727,6 +731,7 @@ export const GetReportsTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -763,6 +768,7 @@ export const GetReportsTicketsTrendsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -810,6 +816,7 @@ export const ExportReportsTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;
@@ -858,6 +865,7 @@ export const ExportReportsOverviewStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;

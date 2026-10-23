@@ -569,7 +569,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER]
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT]
         - name: type
           in: query
           schema:
@@ -1253,7 +1253,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         - name: type
           in: query
           schema:
@@ -1303,7 +1303,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         - name: type
           in: query
           schema:
@@ -1347,7 +1347,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         - name: type
           in: query
           schema:
@@ -1402,7 +1402,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+            enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         - name: type
           in: query
           schema:
@@ -1758,7 +1758,7 @@ components:
           type: ["string", "null"]
         status:
           type: string
-          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]
@@ -1901,7 +1901,7 @@ components:
           type: string
         status:
           type: string
-          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]
@@ -2138,7 +2138,7 @@ components:
           enum: [SOFTWARE, HARDWARE]
         status:
           type: string
-          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, RESOLVED, CLOSED]
+          enum: [OPEN, IN_PROGRESS, AWAITING_CUSTOMER, IN_DEVELOPMENT, RESOLVED, CLOSED]
         priority:
           type: string
           enum: [LOW, MEDIUM, HIGH]

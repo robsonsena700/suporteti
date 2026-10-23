@@ -453,7 +453,7 @@ router.get("/users/assignable", requireAuth, requireActive, requireRoles("ADMIN"
     ),
   );
 
-  const openStatuses = ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER"] as const;
+  const openStatuses = ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "IN_DEVELOPMENT"] as const;
   const withLoad = await Promise.all(assignable.map(async (u) => {
     const assigned = await db.select({ id: ticketsTable.id }).from(ticketsTable).where(
       and(eq(ticketsTable.assignedToId, u.id), inArray(ticketsTable.status, [...openStatuses])),

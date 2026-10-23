@@ -6,6 +6,7 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   [TicketStatus.OPEN]: { label: "Aberto", variant: "default" },
   [TicketStatus.IN_PROGRESS]: { label: "Em Andamento", variant: "secondary" },
   [TicketStatus.AWAITING_CUSTOMER]: { label: "Aguardando Cliente", variant: "outline" },
+  [TicketStatus.IN_DEVELOPMENT]: { label: "Em Desenvolvimento", variant: "secondary" },
   [TicketStatus.RESOLVED]: { label: "Resolvido", variant: "success" },
   [TicketStatus.CLOSED]: { label: "Cancelado", variant: "outline" },
 };

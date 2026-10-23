@@ -39,7 +39,7 @@ const REPORTS_DATE_RANGE_KEY = "suporte-ti:reports:date-range:v1";
 const REPORTS_CARDS_STATE_KEY = "suporte-ti:reports:cards-state:v1";
 
 type PersistedDateRange = { from: string | null; to: string | null };
-type ReportsTicketStatus = "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "RESOLVED" | "CLOSED";
+type ReportsTicketStatus = "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "IN_DEVELOPMENT" | "RESOLVED" | "CLOSED";
 type ReportsTicketType = "SOFTWARE" | "HARDWARE";
 type ReportsTicketPriority = "LOW" | "MEDIUM" | "HIGH";
 type ProfessionalProfile = "analistas" | "coordenadores";
@@ -135,7 +135,7 @@ export default function Reports() {
         if (parsedCards?.professionalProfile === "analistas" || parsedCards?.professionalProfile === "coordenadores") {
           setProfessionalProfile(parsedCards.professionalProfile);
         }
-        if (parsedCards?.tableStatus === "OPEN" || parsedCards?.tableStatus === "IN_PROGRESS" || parsedCards?.tableStatus === "AWAITING_CUSTOMER" || parsedCards?.tableStatus === "RESOLVED" || parsedCards?.tableStatus === "CLOSED" || parsedCards?.tableStatus === null) {
+        if (parsedCards?.tableStatus === "OPEN" || parsedCards?.tableStatus === "IN_PROGRESS" || parsedCards?.tableStatus === "AWAITING_CUSTOMER" || parsedCards?.tableStatus === "IN_DEVELOPMENT" || parsedCards?.tableStatus === "RESOLVED" || parsedCards?.tableStatus === "CLOSED" || parsedCards?.tableStatus === null) {
           setTableStatus(parsedCards.tableStatus);
         }
         if (parsedCards?.tableType === "SOFTWARE" || parsedCards?.tableType === "HARDWARE" || parsedCards?.tableType === null) {
@@ -263,6 +263,7 @@ export default function Reports() {
     if (value === "OPEN") return "Aberto";
     if (value === "IN_PROGRESS") return "Em andamento";
     if (value === "AWAITING_CUSTOMER") return "Aguardando cliente";
+    if (value === "IN_DEVELOPMENT") return "Em desenvolvimento";
     if (value === "RESOLVED") return "Resolvido";
     if (value === "CLOSED") return "Cancelado";
     return String(value ?? "—");
@@ -1477,6 +1478,7 @@ export default function Reports() {
                   <SelectItem value="OPEN">Aberto</SelectItem>
                   <SelectItem value="IN_PROGRESS">Em andamento</SelectItem>
                   <SelectItem value="AWAITING_CUSTOMER">Aguardando cliente</SelectItem>
+                  <SelectItem value="IN_DEVELOPMENT">Em desenvolvimento</SelectItem>
                   <SelectItem value="RESOLVED">Resolvido</SelectItem>
                   <SelectItem value="CLOSED">Cancelado</SelectItem>
                 </SelectContent>

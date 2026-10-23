@@ -13,6 +13,7 @@ export const ExportReportsTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
   RESOLVED: "RESOLVED",
   CLOSED: "CLOSED",
 } as const;

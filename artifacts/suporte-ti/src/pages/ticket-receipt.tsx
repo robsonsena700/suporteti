@@ -12,6 +12,7 @@ export function labelStatus(status: TicketStatus): string {
   if (status === TicketStatus.OPEN) return "Aberto";
   if (status === TicketStatus.IN_PROGRESS) return "Em Andamento";
   if (status === TicketStatus.AWAITING_CUSTOMER) return "Aguardando Cliente";
+  if (status === TicketStatus.IN_DEVELOPMENT) return "Em Desenvolvimento";
   if (status === TicketStatus.RESOLVED) return "Resolvido";
   return "Cancelado";
 }

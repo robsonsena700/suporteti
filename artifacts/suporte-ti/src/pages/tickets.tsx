@@ -251,7 +251,7 @@ export default function Tickets() {
       }
       setFilters((f) => ({ ...f, type: undefined }));
     }
-    if (typeTab === "RESOLVED" && (filters.status === TicketStatus.OPEN || filters.status === TicketStatus.IN_PROGRESS || filters.status === TicketStatus.AWAITING_CUSTOMER)) {
+    if (typeTab === "RESOLVED" && (filters.status === TicketStatus.OPEN || filters.status === TicketStatus.IN_PROGRESS || filters.status === TicketStatus.AWAITING_CUSTOMER || filters.status === TicketStatus.IN_DEVELOPMENT)) {
       setFilters((f) => ({ ...f, status: undefined }));
     }
   }, [typeTab, filters.status]);
@@ -317,6 +317,7 @@ export default function Tickets() {
       filters.status === TicketStatus.OPEN
         || filters.status === TicketStatus.IN_PROGRESS
         || filters.status === TicketStatus.AWAITING_CUSTOMER
+        || filters.status === TicketStatus.IN_DEVELOPMENT
         ? filters.status
         : undefined,
     type: typeTab === "RESOLVED" ? undefined : (filters.type as any),
@@ -391,7 +392,7 @@ export default function Tickets() {
 
     for (const t of visibleTickets) {
       if (t.status === TicketStatus.OPEN) openCount += 1;
-      if (t.status === TicketStatus.IN_PROGRESS || t.status === TicketStatus.AWAITING_CUSTOMER) inProgressCount += 1;
+      if (t.status === TicketStatus.IN_PROGRESS || t.status === TicketStatus.AWAITING_CUSTOMER || t.status === TicketStatus.IN_DEVELOPMENT) inProgressCount += 1;
       if (t.status === TicketStatus.RESOLVED) resolvedCount += 1;
       if (t.status === TicketStatus.CLOSED) closedCount += 1;
       if (t.ownerHasCoordinator === false) noCoordinatorCount += 1;
@@ -644,7 +645,7 @@ export default function Tickets() {
                             setFilters((f) => ({ ...f, type: undefined, status: nextStatus }));
                             return;
                           }
-                          if ((nextStatus === TicketStatus.OPEN || nextStatus === TicketStatus.IN_PROGRESS || nextStatus === TicketStatus.AWAITING_CUSTOMER) && typeTab === "RESOLVED") {
+                          if ((nextStatus === TicketStatus.OPEN || nextStatus === TicketStatus.IN_PROGRESS || nextStatus === TicketStatus.AWAITING_CUSTOMER || nextStatus === TicketStatus.IN_DEVELOPMENT) && typeTab === "RESOLVED") {
                             setFilters((f) => ({ ...f, status: undefined }));
                             return;
                           }
@@ -663,6 +664,7 @@ export default function Tickets() {
                               <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>
                               <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
                               <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem>
+                              <SelectItem value={TicketStatus.IN_DEVELOPMENT}>Em Desenvolvimento</SelectItem>
                               <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
                               <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
                             </>

@@ -349,7 +349,9 @@ export const ApproveUserResponse = zod.object({
  * @summary Listar chamados
  */
 export const ListTicketsQueryParams = zod.object({
-  status: zod.enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER"]).optional(),
+  status: zod
+    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "IN_DEVELOPMENT"])
+    .optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
   uf: zod.coerce.string().optional(),
@@ -368,6 +370,7 @@ export const ListTicketsResponseItem = zod.object({
     "OPEN",
     "IN_PROGRESS",
     "AWAITING_CUSTOMER",
+    "IN_DEVELOPMENT",
     "RESOLVED",
     "CLOSED",
   ]),
@@ -439,6 +442,7 @@ export const ListResolvedTicketsResponseItem = zod.object({
     "OPEN",
     "IN_PROGRESS",
     "AWAITING_CUSTOMER",
+    "IN_DEVELOPMENT",
     "RESOLVED",
     "CLOSED",
   ]),
@@ -495,6 +499,7 @@ export const GetTicketResponse = zod
       "OPEN",
       "IN_PROGRESS",
       "AWAITING_CUSTOMER",
+      "IN_DEVELOPMENT",
       "RESOLVED",
       "CLOSED",
     ]),
@@ -621,7 +626,14 @@ export const UpdateTicketBody = zod.object({
   title: zod.string().optional(),
   description: zod.string().optional(),
   status: zod
-    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .enum([
+      "OPEN",
+      "IN_PROGRESS",
+      "AWAITING_CUSTOMER",
+      "IN_DEVELOPMENT",
+      "RESOLVED",
+      "CLOSED",
+    ])
     .optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
 });
@@ -636,6 +648,7 @@ export const UpdateTicketResponse = zod.object({
     "OPEN",
     "IN_PROGRESS",
     "AWAITING_CUSTOMER",
+    "IN_DEVELOPMENT",
     "RESOLVED",
     "CLOSED",
   ]),
@@ -697,6 +710,7 @@ export const AssignTicketResponse = zod.object({
     "OPEN",
     "IN_PROGRESS",
     "AWAITING_CUSTOMER",
+    "IN_DEVELOPMENT",
     "RESOLVED",
     "CLOSED",
   ]),
@@ -1046,7 +1060,14 @@ export const GetReportsTicketsQueryParams = zod.object({
   from: zod.date().optional(),
   to: zod.date().optional(),
   status: zod
-    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .enum([
+      "OPEN",
+      "IN_PROGRESS",
+      "AWAITING_CUSTOMER",
+      "IN_DEVELOPMENT",
+      "RESOLVED",
+      "CLOSED",
+    ])
     .optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
@@ -1071,6 +1092,7 @@ export const GetReportsTicketsResponse = zod.object({
         "OPEN",
         "IN_PROGRESS",
         "AWAITING_CUSTOMER",
+        "IN_DEVELOPMENT",
         "RESOLVED",
         "CLOSED",
       ]),
@@ -1124,7 +1146,14 @@ export const GetReportsTicketsTrendsQueryParams = zod.object({
   from: zod.date().optional(),
   to: zod.date().optional(),
   status: zod
-    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .enum([
+      "OPEN",
+      "IN_PROGRESS",
+      "AWAITING_CUSTOMER",
+      "IN_DEVELOPMENT",
+      "RESOLVED",
+      "CLOSED",
+    ])
     .optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
@@ -1153,7 +1182,14 @@ export const ExportReportsTicketsQueryParams = zod.object({
   from: zod.date().optional(),
   to: zod.date().optional(),
   status: zod
-    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .enum([
+      "OPEN",
+      "IN_PROGRESS",
+      "AWAITING_CUSTOMER",
+      "IN_DEVELOPMENT",
+      "RESOLVED",
+      "CLOSED",
+    ])
     .optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
@@ -1167,7 +1203,14 @@ export const ExportReportsOverviewQueryParams = zod.object({
   from: zod.date().optional(),
   to: zod.date().optional(),
   status: zod
-    .enum(["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "RESOLVED", "CLOSED"])
+    .enum([
+      "OPEN",
+      "IN_PROGRESS",
+      "AWAITING_CUSTOMER",
+      "IN_DEVELOPMENT",
+      "RESOLVED",
+      "CLOSED",
+    ])
     .optional(),
   type: zod.enum(["SOFTWARE", "HARDWARE"]).optional(),
   priority: zod.enum(["LOW", "MEDIUM", "HIGH"]).optional(),

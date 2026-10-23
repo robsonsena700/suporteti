@@ -13,4 +13,5 @@ export const ListTicketsStatus = {
   OPEN: "OPEN",
   IN_PROGRESS: "IN_PROGRESS",
   AWAITING_CUSTOMER: "AWAITING_CUSTOMER",
+  IN_DEVELOPMENT: "IN_DEVELOPMENT",
 } as const;

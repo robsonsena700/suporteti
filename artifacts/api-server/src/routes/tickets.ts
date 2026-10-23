@@ -32,8 +32,8 @@ function parseTicketType(value: unknown): "SOFTWARE" | "HARDWARE" | null {
   return null;
 }
 
-function parseTicketStatus(value: unknown): "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "RESOLVED" | "CLOSED" | null {
-  if (value === "OPEN" || value === "IN_PROGRESS" || value === "AWAITING_CUSTOMER" || value === "RESOLVED" || value === "CLOSED") return value;
+function parseTicketStatus(value: unknown): "OPEN" | "IN_PROGRESS" | "AWAITING_CUSTOMER" | "IN_DEVELOPMENT" | "RESOLVED" | "CLOSED" | null {
+  if (value === "OPEN" || value === "IN_PROGRESS" || value === "AWAITING_CUSTOMER" || value === "IN_DEVELOPMENT" || value === "RESOLVED" || value === "CLOSED") return value;
   return null;
 }
 
@@ -160,7 +160,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
       ),
     );
   }
-  dbWhereClauses.push(inArray(ticketsTable.status, parsedStatus ? [parsedStatus] : ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER"]));
+  dbWhereClauses.push(inArray(ticketsTable.status, parsedStatus ? [parsedStatus] : ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER", "IN_DEVELOPMENT"]));
   if (parsedType) dbWhereClauses.push(eq(ticketsTable.type, parsedType));
   if (parsedPriority) dbWhereClauses.push(eq(ticketsTable.priority, parsedPriority));
   if (parsedUf) dbWhereClauses.push(eq(ticketsTable.uf, parsedUf));

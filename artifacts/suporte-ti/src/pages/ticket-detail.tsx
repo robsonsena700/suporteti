@@ -799,6 +799,7 @@ export default function TicketDetail() {
     const requiresAssignee =
       status === TicketStatus.IN_PROGRESS
       || status === TicketStatus.AWAITING_CUSTOMER
+      || status === TicketStatus.IN_DEVELOPMENT
       || status === TicketStatus.RESOLVED
       || status === TicketStatus.CLOSED;
     if (requiresAssignee && !hasValidAssignee) {
@@ -1481,6 +1482,7 @@ export default function TicketDetail() {
                   {canReopenClosed ? <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem> : null}
+                  {canReopenClosed ? <SelectItem value={TicketStatus.IN_DEVELOPMENT}>Em Desenvolvimento</SelectItem> : null}
                   {canReopenClosed ? <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem> : null}
                   <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
                 </SelectContent>

@@ -59,7 +59,7 @@ function parsePositiveIntQuery(value: unknown): number | null {
 
 function parseOptionalTicketStatus(value: unknown): string | null {
   if (value == null) return null;
-  if (value === "OPEN" || value === "IN_PROGRESS" || value === "AWAITING_CUSTOMER" || value === "RESOLVED" || value === "CLOSED") {
+  if (value === "OPEN" || value === "IN_PROGRESS" || value === "AWAITING_CUSTOMER" || value === "IN_DEVELOPMENT" || value === "RESOLVED" || value === "CLOSED") {
     return value;
   }
   return null;
@@ -238,7 +238,7 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
   const [ticketCounts] = await db.select({
     total: count(),
     open: sql<number>`count(*) filter (where status = 'OPEN')`,
-    inProgress: sql<number>`count(*) filter (where status IN ('IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
+    inProgress: sql<number>`count(*) filter (where status IN ('IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
     resolved: sql<number>`count(*) filter (where status = 'RESOLVED')`,
     closed: sql<number>`count(*) filter (where status = 'CLOSED')`,
   }).from(ticketsTable).where(scopedTicketsWhere);
@@ -411,6 +411,7 @@ router.get("/reports/recent-activity", requireAuth, requireActive, async (req, r
     action: t.status === "OPEN" ? "Chamado aberto" :
             t.status === "IN_PROGRESS" ? "Chamado em andamento" :
             t.status === "AWAITING_CUSTOMER" ? "Aguardando cliente" :
+            t.status === "IN_DEVELOPMENT" ? "Chamado em desenvolvimento" :
             t.status === "RESOLVED" ? "Chamado resolvido" : "Chamado cancelado",
     ticketId: t.id,
     ticketTitle: t.title,
@@ -449,12 +450,12 @@ router.get("/reports/users/stats", requireAuth, requireActive, async (req, res):
       userRole: usersTable.role,
       totalTickets: count(),
       openTickets: sql<number>`count(*) filter (where ${ticketsTable.status} = 'OPEN')`,
-      inProgressTickets: sql<number>`count(*) filter (where ${ticketsTable.status} IN ('IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
+      inProgressTickets: sql<number>`count(*) filter (where ${ticketsTable.status} IN ('IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
       resolvedTickets: sql<number>`count(*) filter (where ${ticketsTable.status} = 'RESOLVED')`,
       closedTickets: sql<number>`count(*) filter (where ${ticketsTable.status} = 'CLOSED')`,
-      highPriorityOpen: sql<number>`count(*) filter (where ${ticketsTable.priority} = 'HIGH' and ${ticketsTable.status} IN ('OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
-      mediumPriorityOpen: sql<number>`count(*) filter (where ${ticketsTable.priority} = 'MEDIUM' and ${ticketsTable.status} IN ('OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
-      lowPriorityOpen: sql<number>`count(*) filter (where ${ticketsTable.priority} = 'LOW' and ${ticketsTable.status} IN ('OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
+      highPriorityOpen: sql<number>`count(*) filter (where ${ticketsTable.priority} = 'HIGH' and ${ticketsTable.status} IN ('OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
+      mediumPriorityOpen: sql<number>`count(*) filter (where ${ticketsTable.priority} = 'MEDIUM' and ${ticketsTable.status} IN ('OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
+      lowPriorityOpen: sql<number>`count(*) filter (where ${ticketsTable.priority} = 'LOW' and ${ticketsTable.status} IN ('OPEN', 'IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
       avgResolutionHours: sql<number | null>`avg(extract(epoch from (${ticketsTable.updatedAt} - ${ticketsTable.createdAt})) / 3600) filter (where ${ticketsTable.status} IN ('RESOLVED', 'CLOSED'))`,
       avgRating: avg(ticketRatingsTable.rating),
     })
@@ -957,7 +958,7 @@ router.get("/reports/export", requireAuth, requireActive, async (req, res): Prom
   const [summaryCounts] = await db.select({
     total: count(),
     open: sql<number>`count(*) filter (where status = 'OPEN')`,
-    inProgress: sql<number>`count(*) filter (where status IN ('IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
+    inProgress: sql<number>`count(*) filter (where status IN ('IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
     resolved: sql<number>`count(*) filter (where status = 'RESOLVED')`,
     closed: sql<number>`count(*) filter (where status = 'CLOSED')`,
   }).from(ticketsTable).where(ticketsBaseWhere);
@@ -995,7 +996,7 @@ router.get("/reports/export", requireAuth, requireActive, async (req, res): Prom
       userRole: usersTable.role,
       totalTickets: count(),
       openTickets: sql<number>`count(*) filter (where ${ticketsTable.status} = 'OPEN')`,
-      inProgressTickets: sql<number>`count(*) filter (where ${ticketsTable.status} IN ('IN_PROGRESS', 'AWAITING_CUSTOMER'))`,
+      inProgressTickets: sql<number>`count(*) filter (where ${ticketsTable.status} IN ('IN_PROGRESS', 'AWAITING_CUSTOMER', 'IN_DEVELOPMENT'))`,
       resolvedTickets: sql<number>`count(*) filter (where ${ticketsTable.status} = 'RESOLVED')`,
       closedTickets: sql<number>`count(*) filter (where ${ticketsTable.status} = 'CLOSED')`,
       avgResolutionHours: sql<number | null>`avg(extract(epoch from (${ticketsTable.updatedAt} - ${ticketsTable.createdAt})) / 3600) filter (where ${ticketsTable.status} IN ('RESOLVED', 'CLOSED'))`,
