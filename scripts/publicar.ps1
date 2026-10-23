@@ -165,11 +165,17 @@ try {
   throw
 }
 
-if (-not $SkipBuild) {
-  Exec "pnpm run typecheck" | Out-Null
-  Exec "pnpm run build" | Out-Null
-}
-
+# O bump de versao precisa acontecer ANTES do build: o Vite le
+# artifacts/suporte-ti/package.json em tempo de build para definir
+# __APP_VERSION__ (exibido como "Versao X.Y.Z" na tela de login e no
+# rodape). Antes, o build rodava primeiro e o bump so depois - o pacote
+# publicado sempre ficava com a versao ANTERIOR embutida, entao o numero
+# mostrado em producao nunca refletia a versao de fato publicada/commitada
+# e nao dava pra confirmar visualmente se um deploy realmente surtiu
+# efeito. O commit do bump continua so depois de um build bem-sucedido
+# (ErrorActionPreference Stop aborta o script antes do commit se o build
+# falhar), pra nunca commitar um "chore(release)" de uma versao que nao
+# foi de fato construida.
 $appPkgPath = Join-Path (Get-Location) "artifacts\suporte-ti\package.json"
 $appPkg = Get-Content -Raw -Path $appPkgPath | ConvertFrom-Json
 $currentVersion = [string]$appPkg.version
@@ -183,12 +189,19 @@ if (-not $SkipBump) {
   $json = ($json -replace "\r?\n", "`n") + "`n"
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($appPkgPath, $json, $utf8NoBom)
+} else {
+  Write-Host "Aviso: SkipBump ativo - mantendo versão atual: v$newVersion" -ForegroundColor Yellow
+}
 
+if (-not $SkipBuild) {
+  Exec "pnpm run typecheck" | Out-Null
+  Exec "pnpm run build" | Out-Null
+}
+
+if (-not $SkipBump) {
   ExecGit @("add", "artifacts/suporte-ti/package.json") | Out-Null
   ExecGit @("commit", "-m", "chore(release): v$newVersion") | Out-Null
   ExecGit @("push", $Remote, $HeadBranch) | Out-Null
-} else {
-  Write-Host "Aviso: SkipBump ativo - mantendo versão atual: v$newVersion" -ForegroundColor Yellow
 }
 
 if (-not $SkipPr) {

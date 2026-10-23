@@ -166,6 +166,31 @@ if (!(Test-Path $distDir)) {
   throw "Build do frontend não encontrado: $distDir"
 }
 
+# Verificacao de sanidade: confere que o build que esta prestes a ser
+# publicado realmente tem a versao de artifacts/suporte-ti/package.json
+# (lida acima em $version) embutida nos assets JS (__APP_VERSION__,
+# exibido como "Versao X.Y.Z" na tela de login e no rodape). Sem isso, um
+# build feito com o package.json desatualizado (por exemplo rodado antes
+# de um bump de versao, ou um dist antigo reaproveitado com -SkipBuild)
+# seria publicado silenciosamente com o numero de versao errado, sem
+# nenhum jeito de confirmar visualmente em producao se o deploy realmente
+# levou o codigo novo.
+$distAssetsDir = Join-Path $distDir "public\assets"
+$versionFound = $false
+if (Test-Path $distAssetsDir) {
+  $jsFiles = Get-ChildItem -Path $distAssetsDir -Filter "*.js" -File -ErrorAction SilentlyContinue
+  foreach ($f in $jsFiles) {
+    if (Select-String -Path $f.FullName -Pattern ([regex]::Escape($version)) -Quiet) {
+      $versionFound = $true
+      break
+    }
+  }
+}
+if (!$versionFound) {
+  throw "O build em '$distDir' nao contem a versao esperada ($version) embutida (__APP_VERSION__). Isso normalmente significa que o build foi feito com artifacts/suporte-ti/package.json desatualizado (por exemplo com -SkipBuild reaproveitando um dist antigo, ou um build manual rodado antes do bump de versao). Rode 'pnpm --filter @workspace/suporte-ti run build' de novo (sem -SkipBuild) depois de confirmar que o package.json ja esta na versao $version, e so entao publique - assim a tela de login sempre mostra a versao que de fato foi commitada e publicada."
+}
+Write-Host "OK: build contem a versão esperada ($version) embutida." -ForegroundColor Green
+
 $apiDistDir = Join-Path (Get-Location) "artifacts\api-server\dist"
 if (!(Test-Path $apiDistDir)) {
   throw "Build da API não encontrado: $apiDistDir"
