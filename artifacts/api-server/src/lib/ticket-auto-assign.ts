@@ -22,15 +22,11 @@ export async function autoAssignTicketOnMessageInteraction(args: {
     currentStatus: ticket.status,
   });
 
-  await db.insert(ticketAuditLogsTable).values({
-    ticketId,
-    actorUserId: actor.userId,
-    type: "MESSAGE_SENT",
-    messageId,
-    fromAssignedToId: ticket.assignedToId ?? null,
-    toAssignedToId: ticket.assignedToId ?? null,
-    detail: messagePreview,
-  });
+  // Nao grava aqui um segundo registro de auditoria "MESSAGE_SENT": a rota que
+  // chama esta funcao (routes/messages.ts) ja grava um logo apos inserir a
+  // mensagem, com o mesmo messageId e o mesmo preview. Gravar de novo aqui
+  // duplicava toda entrada "Mensagem enviada" no historico de auditoria do
+  // chamado (sem afetar a tabela de mensagens em si, que so recebe 1 insert).
 
   if (!decision.shouldAssign || decision.nextAssignedToId == null) {
     return { reassigned: false, fromAssignedToId: ticket.assignedToId ?? null, toAssignedToId: ticket.assignedToId ?? null };
