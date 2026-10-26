@@ -1,0 +1,15 @@
+* @robsonsena700
+
+# Backend / API
+/artifacts/api-server/ @robsonsena700
+/lib/db/ @robsonsena700
+/lib/api-spec/ @robsonsena700
+/lib/api-zod/ @robsonsena700
+/lib/api-client-react/ @robsonsena700
+
+# Frontend
+/artifacts/suporte-ti/ @robsonsena700
+
+# Infra / automação
+/scripts/ @robsonsena700
+/.github/ @robsonsena700

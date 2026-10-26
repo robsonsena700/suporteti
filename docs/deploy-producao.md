@@ -18,7 +18,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\prepare_deploy.ps1 -Bump patc
 O script:
 
 - Solicita o hash do commit a publicar (interativo)
-- Sincroniza `develop` com `main` via merge/rebase
+- Sincroniza `Development` com `main` via merge/rebase
 - Roda `pnpm run typecheck` e `pnpm run build`
 - Incrementa versão semântica em `artifacts/suporte-ti/package.json`
 - Gera `CHANGELOG.md`
@@ -29,7 +29,7 @@ O script:
 Se tiver GitHub CLI (`gh`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\create_pr.ps1 -Base main -Head develop
+powershell -ExecutionPolicy Bypass -File .\scripts\create_pr.ps1 -Base main -Head Development
 ```
 
 ### 3) Deploy em produção

@@ -260,13 +260,29 @@ EnsureCleanWorkingTree
 ExecGit @("fetch", $Remote, "--prune") | Out-Null
 
 if ([string]::IsNullOrWhiteSpace($DevelopBranch)) {
-  $DevelopBranch = (ExecGit @("branch", "--show-current")).Trim()
+  foreach ($preferred in @("Development", "develop")) {
+    & git show-ref --verify --quiet "refs/heads/$preferred"
+    if ($LASTEXITCODE -eq 0) {
+      $DevelopBranch = $preferred
+      break
+    }
+
+    & git show-ref --verify --quiet "refs/remotes/$Remote/$preferred"
+    if ($LASTEXITCODE -eq 0) {
+      $DevelopBranch = $preferred
+      break
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($DevelopBranch)) {
+    $DevelopBranch = (ExecGit @("branch", "--show-current")).Trim()
+  }
 }
 if ($DevelopBranch -eq $MainBranch) {
   $localBranchesRaw = ExecGit @("branch", "--format=%(refname:short)")
   $candidates = $localBranchesRaw.Split("`n", [System.StringSplitOptions]::RemoveEmptyEntries) | Where-Object { $_ -and $_.Trim() -ne $MainBranch }
   $suggested = ($candidates | Select-Object -First 1)
-  $prompt = if ($suggested) { "Informe a branch de desenvolvimento (ex: $suggested)" } else { "Informe a branch de desenvolvimento (ex: develop ou V1.0.0)" }
+  $prompt = if ($suggested) { "Informe a branch de desenvolvimento (ex: $suggested)" } else { "Informe a branch de desenvolvimento (ex: Development ou V3.0.4)" }
   $picked = Read-Host $prompt
   if (![string]::IsNullOrWhiteSpace($picked)) {
     $DevelopBranch = $picked.Trim()

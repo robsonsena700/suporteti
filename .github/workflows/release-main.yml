@@ -1,0 +1,102 @@
+name: Release Main
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Executar deploy em producao apos validar a main"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  validate-main:
+    name: validate-main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.ref_name == 'main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build
+        run: pnpm run build
+
+  deploy-production:
+    name: deploy-production
+    needs: validate-main
+    if: github.ref_name == 'main' && inputs.run_deploy
+    runs-on: windows-latest
+    timeout-minutes: 45
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Materialize SSH key
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ".github/tmp" | Out-Null
+          $keyPath = ".github/tmp/prod_key"
+          [System.IO.File]::WriteAllText($keyPath, "${{ secrets.PROD_SSH_KEY }}")
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
+
+      - name: Deploy to production
+        shell: pwsh
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_REMOTE_BASE_DIR: ${{ secrets.PROD_REMOTE_BASE_DIR }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PROD_HOST)) { throw "Secret PROD_HOST nao configurado." }
+          if ([string]::IsNullOrWhiteSpace($env:PROD_PORT)) { throw "Secret PROD_PORT nao configurado." }
+          if ([string]::IsNullOrWhiteSpace($env:PROD_USER)) { throw "Secret PROD_USER nao configurado." }
+          if ([string]::IsNullOrWhiteSpace($env:PROD_REMOTE_BASE_DIR)) { throw "Secret PROD_REMOTE_BASE_DIR nao configurado." }
+          powershell -ExecutionPolicy Bypass -File ".\\scripts\\deploy_prod.ps1" `
+            -HostName $env:PROD_HOST `
+            -Port ([int]$env:PROD_PORT) `
+            -User $env:PROD_USER `
+            -RemoteBaseDir $env:PROD_REMOTE_BASE_DIR `
+            -KeyPath ".github/tmp/prod_key"
