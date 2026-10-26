@@ -73,6 +73,36 @@ app.use(
   }),
 );
 
+// O Permissions-Policy nao e coberto pelo Helmet 8 (o middleware foi removido
+// da biblioteca), por isso o cabecalho e setado aqui na mao. A aplicacao nao
+// usa camera, microfone, geolocalizacao, MIDI, USB, pagamento, sensores de
+// movimento nem captura de tela, entao essas diretivas sao negadas. Duas
+// excecoes deliberadas:
+// - clipboard-write=(self) e obrigatorio: o botao "copiar" (App.tsx) usa
+//   navigator.clipboard.writeText e pararia de funcionar se fosse negado.
+// - autoplay e fullscreen ficam de fora da lista para herdar o padrao do
+//   navegador, evitando bloquear comportamentos legitimos do proprio site.
+app.use((_req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    [
+      "accelerometer=()",
+      "camera=()",
+      "display-capture=()",
+      "geolocation=()",
+      "gyroscope=()",
+      "magnetometer=()",
+      "microphone=()",
+      "midi=()",
+      "payment=()",
+      "usb=()",
+      "xr-spatial-tracking=()",
+      "clipboard-write=(self)",
+    ].join(", "),
+  );
+  next();
+});
+
 app.use(
   pinoHttp({
     logger,

@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, usersTable, ticketsTable, ticketRatingsTable, userCoordinatorsTable } from "@workspace/db";
 import { eq, count, avg, sql, desc, inArray, and, asc } from "drizzle-orm";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { getCoordinatorIdForGestor, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
 import { createInMemoryRateLimiter } from "../lib/rate-limit";
@@ -202,14 +202,28 @@ async function buildTicketsPdfBuffer(args: {
   return doc.save();
 }
 
-function buildXlsxBuffer(sheets: Array<{ name: string; rows: any[] }>): Buffer {
-  const wb = XLSX.utils.book_new();
+// Geracao da planilha com exceljs. A lib anterior (xlsx/SheetJS) nao recebe
+// mais correcoes de seguranca no npm: as duas vulnerabilidades conhecidas
+// (prototype pollution e ReDoS) ficam no caminho de LEITURA de arquivos e aqui
+// so escrevemos, mas a troca elimina a divida. O exceljs gera o arquivo de
+// forma assincrona, por isso a funcao passou a ser async.
+async function buildXlsxBuffer(sheets: Array<{ name: string; rows: any[] }>): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
   for (const s of sheets) {
-    const ws = XLSX.utils.json_to_sheet(s.rows);
-    XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31));
+    // O Excel limita o nome da aba a 31 caracteres.
+    const ws = wb.addWorksheet(s.name.slice(0, 31));
+    // Mesma semantica do json_to_sheet: os cabecalhos sao a uniao das chaves
+    // de todas as linhas e cada objeto vira uma linha da planilha.
+    const headerSet = s.rows.reduce<Set<string>>((acc, row) => {
+      for (const key of Object.keys(row ?? {})) acc.add(key);
+      return acc;
+    }, new Set<string>());
+    const headers = Array.from(headerSet);
+    if (headers.length === 0) continue;
+    ws.columns = headers.map((h) => ({ header: h, key: h }));
+    for (const row of s.rows) ws.addRow(row);
   }
-  const out = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-  return out;
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
 router.get("/reports/summary", requireAuth, requireActive, async (req, res): Promise<void> => {
@@ -1267,7 +1281,7 @@ router.get("/reports/export", requireAuth, requireActive, async (req, res): Prom
   }
 
   if (format === "xlsx") {
-    const xlsx = buildXlsxBuffer([
+    const xlsx = await buildXlsxBuffer([
       {
         name: "Resumo",
         rows: [
@@ -1561,7 +1575,7 @@ router.get("/reports/tickets/export", requireAuth, requireActive, async (req, re
   }
 
   if (format === "xlsx") {
-    const xlsx = buildXlsxBuffer([
+    const xlsx = await buildXlsxBuffer([
       {
         name: "Chamados",
         rows: rows.map((t) => ({

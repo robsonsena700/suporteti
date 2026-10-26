@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { db, passwordResetTokensTable, securityAuditLogsTable, userPasswordHistoryTable, usersTable } from "@workspace/db";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { RegisterBody, LoginBody } from "@workspace/api-zod";
-import { signToken, requireAuth } from "../middlewares/auth";
+import { signToken, requireAuth, revokeToken } from "../middlewares/auth";
 import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
 import { validateMunicipalityForUf } from "../lib/ibge";
@@ -226,7 +226,15 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/logout", (_req, res): void => {
+// Nao passa por requireAuth de proposito: o logout precisa funcionar mesmo com
+// token expirado ou ja invalido, senao o cliente ficaria preso. Se houver um
+// token no header, ele e revogado (middlewares/auth.ts) para nao continuar
+// valido ate a expiracao natural; a resposta e sempre a mesma, de sucesso.
+router.post("/auth/logout", (req, res): void => {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ")) {
+    revokeToken(authHeader.slice(7));
+  }
   res.json({ message: "Sessão encerrada" });
 });
 

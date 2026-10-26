@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 import { logger } from "../lib/logger";
 
 // Antes havia um fallback fixo ("suporte-ti-secret") caso SESSION_SECRET não
@@ -48,12 +49,66 @@ declare global {
 // token assinado ou apresentado com outro algoritmo é rejeitado.
 const JWT_ALGORITHM = "HS256" as const;
 
+// ------ Revogacao de token (logout) ------
+// O logout antes era um no-op: o token continuava valido pelos 7 dias de
+// validade, entao um token capturado (ex.: maquina compartilhada) seguia
+// servindo mesmo depois do usuario sair. Aqui cada token recebe um "jti"
+// (identificador unico) e o logout guarda esse jti numa lista de revogados ate
+// a expiracao natural do token.
+//
+// Mantida em memoria, no mesmo padrao do rate limiter (lib/rate-limit.ts), de
+// proposito: exigir uma coluna nova em "users" seria uma migracao (DDL) em
+// producao, e o ganho nao justifica o risco. Limitacoes aceitas:
+// - Nao sobrevive a reinicio do processo nem e compartilhada entre instancias.
+//   Apos um restart, os tokens revogados voltam a valer ate expirarem sozinhos.
+// - Tokens emitidos antes desta mudanca nao tem "jti" e por isso nao podem ser
+//   revogados — mas tambem nao podiam antes, entao nao ha regressao.
+const revokedTokens = new Map<string, number>(); // jti -> expiracao em ms
+
+function cleanupRevoked(now: number): void {
+  for (const [jti, exp] of revokedTokens.entries()) {
+    if (exp <= now) revokedTokens.delete(jti);
+  }
+}
+
+function isRevoked(jti: string): boolean {
+  const exp = revokedTokens.get(jti);
+  if (exp === undefined) return false;
+  if (exp <= Date.now()) {
+    revokedTokens.delete(jti);
+    return false;
+  }
+  return true;
+}
+
+// Recebe o token cru (nao verificado, porque no logout ele pode ja estar
+// expirado ou invalido) e registra o jti ate a expiracao declarada nele.
+// Nunca lanca: se o token for malformado, simplesmente nao ha o que revogar.
+export function revokeToken(token: string): void {
+  const decoded = jwt.decode(token);
+  if (!decoded || typeof decoded === "string") return;
+  const { jti, exp } = decoded as { jti?: unknown; exp?: unknown };
+  if (typeof jti !== "string" || typeof exp !== "number") return;
+  cleanupRevoked(Date.now());
+  revokedTokens.set(jti, exp * 1000);
+}
+
 export function signToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d", algorithm: JWT_ALGORITHM });
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: "7d",
+    algorithm: JWT_ALGORITHM,
+    jwtid: randomUUID(),
+  });
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] }) as JwtPayload;
+  const payload = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] }) as JwtPayload & {
+    jti?: string;
+  };
+  if (typeof payload.jti === "string" && isRevoked(payload.jti)) {
+    throw new Error("Token revogado");
+  }
+  return payload;
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {

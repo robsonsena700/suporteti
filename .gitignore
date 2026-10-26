@@ -56,3 +56,6 @@ lib/ssh/
 .env
 .env.local
 .env.*.local
+
+# Artefatos de sessao de depuracao (logs/estado local, nao versionar)
+.dbg/
