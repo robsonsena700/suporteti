@@ -17,6 +17,12 @@ const router: IRouter = Router();
 
 const userNameCache = new Map<number, { name: string; ts: number }>();
 const USER_NAME_TTL_MS = 5 * 60 * 1000;
+// Teto do cache de nomes. As entradas expiradas so eram sobrescritas quando o
+// mesmo usuario voltava a ser consultado, entao o Map crescia com todo usuario
+// que aparecesse em alguma conversa e nunca diminuia. O limite abaixo descarta
+// a entrada mais antiga antes de inserir uma nova, mantendo o crescimento
+// limitado sem precisar de um varredor periodico.
+const USER_NAME_CACHE_MAX = 1000;
 const chatMessageLimiter = createInMemoryRateLimiter({ windowMs: 60_000, max: 30 });
 
 async function getCachedUserName(userId: number): Promise<string | null> {
@@ -25,7 +31,14 @@ async function getCachedUserName(userId: number): Promise<string | null> {
   if (cached && now - cached.ts < USER_NAME_TTL_MS) return cached.name;
   const [row] = await db.select({ name: usersTable.name }).from(usersTable).where(eq(usersTable.id, userId));
   const name = row?.name ?? null;
-  if (name) userNameCache.set(userId, { name, ts: now });
+  if (name) {
+    if (userNameCache.size >= USER_NAME_CACHE_MAX && !userNameCache.has(userId)) {
+      // Map preserva a ordem de insercao: a primeira chave e a entrada mais antiga.
+      const oldest = userNameCache.keys().next().value;
+      if (oldest !== undefined) userNameCache.delete(oldest);
+    }
+    userNameCache.set(userId, { name, ts: now });
+  }
   return name;
 }
 

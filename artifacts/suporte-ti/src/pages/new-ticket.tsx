@@ -56,9 +56,8 @@ const HARDWARE_SUBTYPES = [
 // ── Form schema ───────────────────────────────────────────────────────────────
 
 const ticketSchema = z.object({
-  type: z.nativeEnum(TicketType, {
-    required_error: "Selecione o tipo de solicitação",
-    invalid_type_error: "Selecione o tipo de solicitação",
+  type: z.enum(TicketType, {
+    error: "Selecione o tipo de solicitação",
   }),
   title: z.string().min(5, "Título muito curto (mínimo 5 caracteres)"),
   description: z.string().min(10, "Descrição muito curta (mínimo 10 caracteres)"),
@@ -67,7 +66,7 @@ const ticketSchema = z.object({
     .trim()
     .min(1, "Estabelecimento / Unidade de saúde é obrigatório")
     .max(255, "Máximo de 255 caracteres"),
-  priority: z.nativeEnum(TicketPriority),
+  priority: z.enum(TicketPriority),
   hardwareSubtype: z.string().optional(),
 });
 

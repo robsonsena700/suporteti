@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { setAuthTokenGetter } from "@workspace/api-client-react/custom-fetch";
-import { useGetMe, getGetMeQueryKey, User } from "@workspace/api-client-react";
+import { useGetMe, getGetMeQueryKey, User, logout as logoutRequest } from "@workspace/api-client-react";
 
 interface AuthContextType {
   user: User | null;
@@ -87,6 +87,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       source: "auth.logout",
       action: "clear_and_redirect",
     });
+    // Avisa o backend ANTES de limpar o localStorage: o customFetch le o token
+    // pelo getter configurado acima, entao se a chave fosse removida primeiro a
+    // requisicao sairia sem Authorization e nao revogaria nada. Sem "await" de
+    // proposito: a saida do usuario nao pode travar por causa da rede. Se a
+    // chamada falhar, o pior caso e o comportamento antigo (token seguia valido
+    // ate expirar), e nao um erro na tela.
+    void logoutRequest().catch(() => {});
     localStorage.removeItem("ti_support_token");
     setAuthTokenGetter(() => null);
     setTokenState(null);
