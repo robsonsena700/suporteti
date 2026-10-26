@@ -2,6 +2,7 @@
   "name": "workspace",
   "version": "V1.0.0",
   "license": "MIT",
+  "packageManager": "pnpm@11.6.0",
   "scripts": {
     "preinstall": "node ./scripts/enforce-pnpm.cjs",
     "install:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/install-windows.ps1",
