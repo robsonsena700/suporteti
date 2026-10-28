@@ -1221,19 +1221,26 @@ export default function NewTicket() {
       });
     }
 
+    // Anexo deixou de ser obrigatorio para chamados do tipo Sistema
+    // (SOFTWARE) - continua obrigatorio para Equipamentos (HARDWARE), onde
+    // uma foto/evidencia do problema costuma ser necessaria.
+    const attachmentRequired = data.type !== TicketType.SOFTWARE;
     if (effectiveFiles.length === 0) {
-      setFileErrors(["Envie ao menos 1 anexo obrigatório antes de abrir o chamado."]);
-      reportAttachmentEvent("error", "attachment.submit.missing_attachment", {
-        stateFilesCount: files.length,
-        selectedFilesRefCount: selectedFilesRef.current.length,
-        inputFilesCount: inputFiles.length,
-      });
-      toast({
-        title: "Anexo obrigatório",
-        description: "Adicione pelo menos 1 arquivo anexo para prosseguir.",
-        variant: "destructive",
-      });
-      return;
+      if (attachmentRequired) {
+        setFileErrors(["Envie ao menos 1 anexo obrigatório antes de abrir o chamado."]);
+        reportAttachmentEvent("error", "attachment.submit.missing_attachment", {
+          stateFilesCount: files.length,
+          selectedFilesRefCount: selectedFilesRef.current.length,
+          inputFilesCount: inputFiles.length,
+        });
+        toast({
+          title: "Anexo obrigatório",
+          description: "Adicione pelo menos 1 arquivo anexo para prosseguir.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setFileErrors([]);
     }
 
     // Clear subtype if not hardware
@@ -1564,9 +1571,18 @@ export default function NewTicket() {
               {/* 6 — Anexos */}
               <div className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium leading-none mb-1">6. Anexo <span className="text-destructive">*</span></p>
+                  <p className="text-sm font-medium leading-none mb-1">
+                    6. Anexo{" "}
+                    {selectedType === TicketType.SOFTWARE ? (
+                      <span className="text-muted-foreground font-normal">(opcional)</span>
+                    ) : (
+                      <span className="text-destructive">*</span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Imagens ou documentos. Obrigatório ao menos 1 arquivo. Máximo {MAX_FILES} arquivos de até 3 MB cada.
+                    {selectedType === TicketType.SOFTWARE
+                      ? `Imagens ou documentos. Opcional para chamados do tipo Sistema. Máximo ${MAX_FILES} arquivos de até 3 MB cada.`
+                      : `Imagens ou documentos. Obrigatório ao menos 1 arquivo. Máximo ${MAX_FILES} arquivos de até 3 MB cada.`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {files.length}/{MAX_FILES} arquivo(s) anexado(s)
