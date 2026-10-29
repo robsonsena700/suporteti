@@ -1201,7 +1201,7 @@ export default function TicketDetail() {
     ticket.createdById === user?.id
     || ticket.assignedToId === user?.id
     || (user?.id != null && collaboratorIdSet.has(user.id))
-    || ((user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST) && !ownerHasCoordinator);
+    || isAdminOrAnalyst;
   const canSendNewMessage = canCreateTicketMessageUI({ canInteract: canInteractTicket, status: ticket.status });
   const canAssignTicket = canManageRole && (isAdminOrAnalyst || ticket.assignedToId == null || ticket.assignedToId === user?.id);
   const hasValidAssignee = Boolean(
@@ -1602,7 +1602,7 @@ export default function TicketDetail() {
 
               {!canInteractTicket ? (
                 <p className="text-xs text-muted-foreground">
-                  Apenas o criador do ticket, colaboradores e o responsável atual podem enviar mensagens. Você pode visualizar este chamado.
+                  Apenas o criador do ticket, colaboradores, o responsável atual e perfis Administrador/Analista podem enviar mensagens. Você pode visualizar este chamado.
                 </p>
               ) : null}
 

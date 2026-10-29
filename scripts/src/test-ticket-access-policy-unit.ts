@@ -34,7 +34,7 @@ const { computeTicketAccess, canCreateTicketMessage } = mod as {
 {
   const a = computeTicketAccess({ actorRole: "ADMIN", actorUserId: 1, ticketCreatedById: 2, ticketAssignedToId: null });
   assert.equal(a.canView, true);
-  assert.equal(a.canInteract, false);
+  assert.equal(a.canInteract, true);
   assert.equal(a.canAssign, true);
 }
 
@@ -46,6 +46,13 @@ const { computeTicketAccess, canCreateTicketMessage } = mod as {
     ticketAssignedToId: null,
     ownerHasNoCoordinator: true,
   });
+  assert.equal(a.canView, true);
+  assert.equal(a.canInteract, true);
+  assert.equal(a.canAssign, true);
+}
+
+{
+  const a = computeTicketAccess({ actorRole: "ANALYST", actorUserId: 10, ticketCreatedById: 2, ticketAssignedToId: null });
   assert.equal(a.canView, true);
   assert.equal(a.canInteract, true);
   assert.equal(a.canAssign, true);
