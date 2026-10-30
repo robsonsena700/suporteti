@@ -1,4 +1,7 @@
-﻿# Changelog
+# Changelog
+
+## v1.0.63 (2026-10-30)
+- (sem commits)
 
 ## v1.0.37 (2026-07-29)
 - Ajuste em tela (c9093a4)
