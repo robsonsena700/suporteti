@@ -994,7 +994,7 @@ router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN
   res.json(user);
 });
 
-router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMIN", "COORDINATOR"), async (req, res): Promise<void> => {
+router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMIN", "ANALYST", "COORDINATOR"), async (req, res): Promise<void> => {
   const currentUser = req.user!;
   const { ip, userAgent } = getRequestMeta(req);
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
