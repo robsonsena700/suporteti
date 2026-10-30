@@ -172,7 +172,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, next: expre
   // servidor, que e onde isso realmente ajuda.
   const code = (err as any)?.code;
   if (code === "42703" || code === "42P01") {
-    logger.error({ err }, "Unhandled error: banco de dados desatualizado (rode pnpm --filter @workspace/db run push)");
+    logger.error({ err }, "Unhandled error: banco de dados desatualizado (aplique as migrations em lib/db/migrations - local: node lib/db/scripts/apply_sql_file.cjs <arquivo.sql>, producao: scripts/remote/apply_sql_migrations.sh)");
   } else {
     logger.error({ err }, "Unhandled error");
   }
