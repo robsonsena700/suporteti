@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { setAuthTokenGetter } from "@workspace/api-client-react/custom-fetch";
+import { ApiError, setAuthTokenGetter } from "@workspace/api-client-react/custom-fetch";
 import { useGetMe, getGetMeQueryKey, User, logout as logoutRequest } from "@workspace/api-client-react";
 
 interface AuthContextType {
@@ -10,6 +10,13 @@ interface AuthContextType {
   login: (token: string) => void;
   logout: () => void;
   isLoading: boolean;
+  /**
+   * true quando a checagem de sessao falhou por um motivo que NAO indica
+   * token invalido (timeout, sem rede, erro 5xx) — nesses casos nao
+   * derrubamos a sessao do usuario, so oferecemos "tentar novamente".
+   */
+  isConnectionError: boolean;
+  retry: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -32,13 +39,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
 
-  const { data: user, isLoading, isError } = useGetMe({
+  const { data: user, isLoading, isError, error, refetch } = useGetMe({
     query: {
       enabled: !!token,
       retry: false,
       queryKey: getGetMeQueryKey(),
     },
   });
+
+  // Só um 401/403 de fato significa "token invalido". Qualquer outra falha
+  // (timeout, sem rede, 5xx) é passageira — tratar como "token invalido" aqui
+  // derrubaria a sessão de um usuário com conexão instável (comum no mobile)
+  // mesmo com um token perfeitamente válido.
+  const isAuthRejection = error instanceof ApiError && (error.status === 401 || error.status === 403);
+  const isConnectionError = isError && !isAuthRejection;
 
   useEffect(() => {
     dbg({
@@ -47,13 +61,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tokenPresent: Boolean(token),
       isLoading: Boolean(isLoading && !!token),
       isError: Boolean(isError),
+      isConnectionError,
+      errorName: error instanceof Error ? error.name : null,
       userStatus: (user as any)?.status ?? null,
       userRole: (user as any)?.role ?? null,
     });
-  }, [token, isLoading, isError, user]);
+  }, [token, isLoading, isError, isConnectionError, error, user]);
 
   useEffect(() => {
-    if (isError) {
+    if (isAuthRejection) {
       dbg({
         level: "warn",
         source: "auth.invalid_token",
@@ -64,8 +80,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthTokenGetter(() => null);
       setTokenState(null);
       setLocation("/");
+    } else if (isConnectionError) {
+      dbg({
+        level: "warn",
+        source: "auth.connection_error",
+        action: "keep_session_offer_retry",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
-  }, [isError, setLocation]);
+  }, [isAuthRejection, isConnectionError, error, setLocation]);
+
+  const retry = () => {
+    dbg({ level: "info", source: "auth.retry", action: "refetch_me" });
+    void refetch();
+  };
 
   const login = (newToken: string) => {
     dbg({
@@ -109,6 +137,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         isLoading: isLoading && !!token,
+        isConnectionError,
+        retry,
       }}
     >
       {children}
