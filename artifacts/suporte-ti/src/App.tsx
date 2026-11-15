@@ -7,6 +7,7 @@ import { ChatNotificationProvider } from "@/lib/chat-notifications";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 // Pages
 const Login = lazy(() => import("@/pages/login"));
@@ -50,16 +51,52 @@ function Redirect({ to }: { to: string }) {
   return null;
 }
 
+function RouteLoadingState() {
+  return (
+    <div className="min-h-[50vh] flex items-center justify-center">
+      <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+    </div>
+  );
+}
+
+function RouteConnectionErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 px-4 text-center">
+      <p className="text-sm text-muted-foreground max-w-sm">
+        Não foi possível confirmar sua sessão. Verifique sua conexão com a internet e tente novamente.
+      </p>
+      <Button type="button" onClick={onRetry}>
+        Tentar novamente
+      </Button>
+    </div>
+  );
+}
+
 function ProtectedRoute({ component: Component, ...rest }: any) {
-  const { user, isLoading } = useAuth();
-  
+  const { user, isLoading, isConnectionError, retry } = useAuth();
+
   if (isLoading) {
     dbg({
       level: "info",
       source: "router.protected_loading",
       path: window.location.pathname,
     });
-    return null;
+    // Antes isso retornava `null`: nada era renderizado enquanto a sessão
+    // carregava. Em conexões lentas (tipicamente mobile) isso aparecia como
+    // uma tela em branco — às vezes por tempo suficiente para parecer travado.
+    return <RouteLoadingState />;
+  }
+
+  if (isConnectionError) {
+    dbg({
+      level: "warn",
+      source: "router.protected_connection_error",
+      path: window.location.pathname,
+    });
+    // A sessão não pôde ser confirmada por falha de rede/timeout (não por
+    // token inválido). Oferece retry em vez de redirecionar para o login,
+    // o que derrubaria uma sessão válida por uma falha passageira.
+    return <RouteConnectionErrorState onRetry={retry} />;
   }
 
   return (
@@ -193,19 +230,21 @@ function App() {
     });
   }, []);
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <AuthProvider>
-            <ChatNotificationProvider>
-              <Router />
-            </ChatNotificationProvider>
-          </AuthProvider>
-        </WouterRouter>
-        <DebugOverlay />
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <AuthProvider>
+              <ChatNotificationProvider>
+                <Router />
+              </ChatNotificationProvider>
+            </AuthProvider>
+          </WouterRouter>
+          <DebugOverlay />
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -27,6 +27,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, Paperclip, X, FileText, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 // ── Hardware subtype options ──────────────────────────────────────────────────
 
@@ -1271,7 +1272,7 @@ export default function NewTicket() {
                 ticketId: ticket.id,
                 files: effectiveFiles.map(getAttachmentFileContext),
               });
-              const uploadResponse = await fetch(`/api/tickets/${ticket.id}/attachments`, {
+              const uploadResponse = await fetchWithTimeout(`/api/tickets/${ticket.id}/attachments`, {
                 method: "POST",
                 headers: {
                   Authorization: `Bearer ${localStorage.getItem("ti_support_token")}`,
@@ -1581,8 +1582,8 @@ export default function NewTicket() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {selectedType === TicketType.SOFTWARE
-                      ? `Imagens ou documentos. Opcional para chamados do tipo Sistema. Máximo ${MAX_FILES} arquivos de até 3 MB cada.`
-                      : `Imagens ou documentos. Obrigatório ao menos 1 arquivo. Máximo ${MAX_FILES} arquivos de até 3 MB cada.`}
+                      ? `Imagens ou documentos. Opcional para chamados do tipo Sistema. Máximo ${MAX_FILES} arquivos de até ${MAX_FILE_SIZE / (1024 * 1024)} MB cada.`
+                      : `Imagens ou documentos. Obrigatório ao menos 1 arquivo. Máximo ${MAX_FILES} arquivos de até ${MAX_FILE_SIZE / (1024 * 1024)} MB cada.`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {files.length}/{MAX_FILES} arquivo(s) anexado(s)

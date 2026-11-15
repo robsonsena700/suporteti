@@ -1,5 +1,11 @@
 export type CustomFetchOptions = RequestInit & {
   responseType?: "json" | "text" | "blob" | "auto";
+  /**
+   * Maximum time (ms) to wait for a response before aborting the request.
+   * Defaults to DEFAULT_TIMEOUT_MS. Pass 0 to disable the timeout entirely
+   * (the request then only aborts via an explicit `signal`, if provided).
+   */
+  timeoutMs?: number;
 };
 
 export type ErrorType<T = unknown> = ApiError<T>;
@@ -9,6 +15,14 @@ export type BodyType<T> = T;
 export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
+
+// Sem timeout, uma requisicao que trava (comum em redes moveis instaveis)
+// nunca resolve nem rejeita: no AuthProvider isso mantem isLoading=true para
+// sempre, e como ProtectedRoute nao renderiza nada nesse estado, o resultado
+// e uma tela em branco permanente (sintoma documentado em
+// debug-mobile-white-screen.md). Este timeout garante que toda chamada via
+// customFetch eventualmente falha com um erro tratavel.
+const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 // ---------------------------------------------------------------------------
@@ -233,6 +247,46 @@ export class ResponseParseError extends Error {
   }
 }
 
+export class TimeoutError extends Error {
+  readonly name = "TimeoutError";
+
+  constructor(message: string) {
+    super(message);
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+function createTimeoutSignal(
+  timeoutMs: number,
+  existing: AbortSignal | null | undefined,
+): { signal: AbortSignal | undefined; didTimeOut: () => boolean; cleanup: () => void } {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return { signal: existing ?? undefined, didTimeOut: () => false, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const onExistingAbort = () => controller.abort();
+  if (existing) {
+    if (existing.aborted) controller.abort();
+    else existing.addEventListener("abort", onExistingAbort);
+  }
+
+  return {
+    signal: controller.signal,
+    didTimeOut: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timer);
+      if (existing) existing.removeEventListener("abort", onExistingAbort);
+    },
+  };
+}
+
 async function parseJsonBody(
   response: Response,
   requestInfo: { method: string; url: string },
@@ -327,7 +381,7 @@ export async function customFetch<T = unknown>(
   options: CustomFetchOptions = {},
 ): Promise<T> {
   input = applyBaseUrl(input);
-  const { responseType = "auto", headers: headersInit, ...init } = options;
+  const { responseType = "auto", headers: headersInit, timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
 
   const method = resolveMethod(input, init.method);
 
@@ -360,6 +414,8 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
+  const { signal, didTimeOut, cleanup } = createTimeoutSignal(timeoutMs, init.signal);
+
   const debugEnabled = typeof window !== "undefined"
     && (window.localStorage.getItem("DEBUG_API") === "1" || window.localStorage.getItem("DEBUG_TICKET_MESSAGES") === "1");
 
@@ -374,13 +430,24 @@ export async function customFetch<T = unknown>(
 
   let response: Response;
   try {
-    response = await fetch(input, { ...init, method, headers });
+    response = await fetch(input, { ...init, method, headers, signal });
   } catch (err) {
+    cleanup();
+    if (didTimeOut()) {
+      const timeoutErr = new TimeoutError(
+        `${method} ${requestInfo.url} excedeu o tempo limite de ${timeoutMs}ms.`,
+      );
+      if (debugEnabled) {
+        console.error(`[api] ${new Date().toISOString()} fetch timed out ${method} ${requestInfo.url}`);
+      }
+      throw timeoutErr;
+    }
     if (debugEnabled) {
       console.error(`[api] ${new Date().toISOString()} fetch failed ${method} ${requestInfo.url}`, err);
     }
     throw err;
   }
+  cleanup();
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
