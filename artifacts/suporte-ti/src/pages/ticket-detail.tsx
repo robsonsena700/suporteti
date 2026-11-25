@@ -56,7 +56,7 @@ import { UserAvatar } from "@/components/user/user-avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { canCreateTicketMessage as canCreateTicketMessageUI } from "@/lib/tickets-utils";
 
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { Extension } from "@tiptap/core";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline as UnderlineExtension } from "@tiptap/extension-underline";
@@ -230,9 +230,12 @@ export default function TicketDetail() {
     },
   }), []);
 
-  const editor = useEditor({
+  // O StarterKit do Tiptap v3 ja inclui Link e Underline. Como usamos versoes
+  // configuradas dessas extensoes logo abaixo, elas sao desligadas aqui para
+  // nao registrar nomes duplicados ("Duplicate extension names found").
+  const editorInstance = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ link: false, underline: false }),
       UnderlineExtension,
       TextStyle,
       Color,
@@ -262,6 +265,13 @@ export default function TicketDetail() {
       },
     },
   });
+  // O useEditor pode destruir a instancia e criar outra no meio de um commit
+  // (refreshEditorInstance). Um editor destruido tem schema = null e qualquer
+  // getHTML()/getText() nele lanca "Cannot read properties of null (reading
+  // 'cached')", derrubando a tela inteira no ErrorBoundary. Por isso so
+  // expomos instancias vivas e checamos isEditorAlive() em efeitos/callbacks.
+  const editor = editorInstance && !editorInstance.isDestroyed ? editorInstance : null;
+  const isEditorAlive = (e: Editor | null | undefined): e is Editor => Boolean(e && !e.isDestroyed);
 
   const toDatetimeLocalValue = useCallback((iso: unknown): string => {
     if (iso == null) return "";
@@ -712,11 +722,11 @@ export default function TicketDetail() {
     apply: applyPersisted,
     matches: (data) => data.ticketId === ticketId,
     restoreKey: ticketId,
-    shouldConfirmUnload: () => Boolean(editor?.getText().trim()) || messageFilesRef.current.length > 0,
+    shouldConfirmUnload: () => Boolean(isEditorAlive(editor) && editor.getText().trim()) || messageFilesRef.current.length > 0,
   });
 
   useEffect(() => {
-    if (!editor) return;
+    if (!isEditorAlive(editor)) return;
     const state = pendingRestoreRef.current;
     if (!state) return;
     if (state.ticketId !== ticketId) return;
@@ -911,8 +921,9 @@ export default function TicketDetail() {
       return;
     }
 
-    const html = editor?.getHTML() ?? "";
-    const text = editor?.getText().trim() ?? "";
+    const liveEditor = isEditorAlive(editor) ? editor : null;
+    const html = liveEditor?.getHTML() ?? "";
+    const text = liveEditor?.getText().trim() ?? "";
     if (!text && messageFiles.length === 0) return;
 
     setSendingMessage(true);
@@ -930,7 +941,7 @@ export default function TicketDetail() {
       const hasRichFormatting =
         /<(strong|b|em|i|u|s|del|ul|ol|li|a|blockquote|pre|code|span|h[1-6])\b/i.test(html);
       const sendFormat = hasRichFormatting ? "HTML" : "PLAIN";
-      const sendMessage = sendFormat === "PLAIN" ? (editor?.getText() ?? "") : html;
+      const sendMessage = sendFormat === "PLAIN" ? (liveEditor?.getText() ?? "") : html;
 
       const resp = messageFiles.length > 0
         ? await (async () => {
@@ -981,7 +992,7 @@ export default function TicketDetail() {
       messageFiles.forEach((f) => URL.revokeObjectURL(f.url));
       setMessageFiles([]);
       setShowEmojiPicker(false);
-      editor?.commands.clearContent(true);
+      if (isEditorAlive(editor)) editor.commands.clearContent(true);
       setDraftHtml("");
       clearTicketDetailDraft();
     } catch (e: any) {
@@ -1827,7 +1838,7 @@ export default function TicketDetail() {
                         disabled={
                           !canSendNewMessage
                           || sendingMessage
-                          || (!editor?.getText().trim() && messageFiles.length === 0)
+                          || (!(isEditorAlive(editor) && editor.getText().trim()) && messageFiles.length === 0)
                         }
                       >
                         {sendingMessage ? <Spinner /> : <Send className="mr-2 h-4 w-4" />}
