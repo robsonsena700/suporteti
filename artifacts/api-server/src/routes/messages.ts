@@ -4,6 +4,7 @@ import { eq, asc } from "drizzle-orm";
 import { CreateMessageBody } from "@workspace/api-zod";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { enforceTicketAccess } from "../lib/access";
+import { USER_SUMMARY_COLUMNS } from "../lib/user-summary";
 import { autoAssignTicketOnMessageInteraction } from "../lib/ticket-auto-assign";
 import { canCreateTicketMessage } from "../lib/ticket-access-policy";
 import multer from "multer";
@@ -107,7 +108,7 @@ router.get("/tickets/:ticketId/messages", requireAuth, requireActive, async (req
 
   const messages = await db.query.messagesTable.findMany({
     where: eq(messagesTable.ticketId, ticketId),
-    with: { sender: true, attachments: true },
+    with: { sender: { columns: USER_SUMMARY_COLUMNS }, attachments: true },
     orderBy: (m, { asc }) => [asc(m.createdAt)],
   });
 

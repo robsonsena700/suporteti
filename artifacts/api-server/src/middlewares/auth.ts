@@ -111,19 +111,113 @@ export function verifyToken(token: string): JwtPayload {
   return payload;
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+// ------ Revalidacao do usuario a cada requisicao ------
+// O JWT carrega role/status/uf/municipio do momento do login e vale 7 dias.
+// Antes, requireAuth/requireActive/requireRoles confiavam so no token: um
+// usuario DESATIVADO ou REBAIXADO seguia com o acesso antigo ate o token
+// expirar (e um usuario recem-aprovado continuava "PENDING" ate relogar).
+// Agora o estado atual e lido do banco, com um cache curto por usuario para
+// nao gerar uma query por requisicao. Alteracoes feitas pelas rotas de
+// usuarios chamam invalidateAuthUserCache(id) e passam a valer na hora;
+// qualquer outra alteracao (ex.: SQL manual) vale em ate AUTH_USER_CACHE_TTL_MS.
+export type AuthUserSnapshot = Pick<JwtPayload, "email" | "role" | "status" | "uf" | "municipality">;
+type AuthUserLoader = (userId: number) => Promise<AuthUserSnapshot | null>;
+
+const AUTH_USER_CACHE_TTL_MS = 30_000;
+const AUTH_USER_CACHE_MAX = 5_000;
+const authUserCache = new Map<number, { value: AuthUserSnapshot | null; expiresAt: number }>();
+
+// Import dinamico de proposito: mantem este modulo importavel sem DATABASE_URL
+// (os testes unitarios de requireRoles importam este arquivo diretamente).
+const defaultAuthUserLoader: AuthUserLoader = async (userId) => {
+  const [{ db, usersTable }, { eq }] = await Promise.all([
+    import("@workspace/db"),
+    import("drizzle-orm"),
+  ]);
+  const [row] = await db
+    .select({
+      email: usersTable.email,
+      role: usersTable.role,
+      status: usersTable.status,
+      uf: usersTable.uf,
+      municipality: usersTable.municipality,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  return row ?? null;
+};
+
+let authUserLoader: AuthUserLoader = defaultAuthUserLoader;
+
+/** Somente para testes: troca a origem dos dados do usuario (null restaura o padrao). */
+export function setAuthUserLoaderForTests(loader: AuthUserLoader | null): void {
+  authUserLoader = loader ?? defaultAuthUserLoader;
+  authUserCache.clear();
+}
+
+/** Descarta o estado em cache de um usuario (ou de todos, sem argumento). */
+export function invalidateAuthUserCache(userId?: number): void {
+  if (userId === undefined) {
+    authUserCache.clear();
+    return;
+  }
+  authUserCache.delete(userId);
+}
+
+async function loadAuthUser(userId: number): Promise<AuthUserSnapshot | null> {
+  const now = Date.now();
+  const cached = authUserCache.get(userId);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  const value = await authUserLoader(userId);
+  if (authUserCache.size >= AUTH_USER_CACHE_MAX) {
+    for (const [id, entry] of authUserCache.entries()) {
+      if (entry.expiresAt <= now) authUserCache.delete(id);
+    }
+    if (authUserCache.size >= AUTH_USER_CACHE_MAX) authUserCache.clear();
+  }
+  authUserCache.set(userId, { value, expiresAt: now + AUTH_USER_CACHE_TTL_MS });
+  return value;
+}
+
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     res.status(401).json({ error: "Não autenticado" });
     return;
   }
   const token = authHeader.slice(7);
+  let payload: JwtPayload;
   try {
-    req.user = verifyToken(token);
-    next();
+    payload = verifyToken(token);
   } catch {
     res.status(401).json({ error: "Token inválido ou expirado" });
+    return;
   }
+
+  let current: AuthUserSnapshot | null;
+  try {
+    current = await loadAuthUser(payload.userId);
+  } catch (err) {
+    logger.error({ err, userId: payload.userId }, "Falha ao revalidar usuario autenticado");
+    res.status(503).json({ error: "Serviço temporariamente indisponível" });
+    return;
+  }
+  if (!current) {
+    res.status(401).json({ error: "Token inválido ou expirado" });
+    return;
+  }
+
+  req.user = {
+    userId: payload.userId,
+    email: current.email,
+    role: current.role,
+    status: current.status,
+    uf: current.uf,
+    municipality: current.municipality,
+  };
+  next();
 }
 
 export function requireRoles(...roles: string[]) {
