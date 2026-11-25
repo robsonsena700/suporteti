@@ -416,7 +416,15 @@ export async function customFetch<T = unknown>(
 
   const { signal, didTimeOut, cleanup } = createTimeoutSignal(timeoutMs, init.signal);
 
+  // Guarda extra alem do "typeof window": em React Native o RN define
+  // `window` como alias de `global` (window existe), mas nao implementa a
+  // Web Storage API, entao `window.localStorage` fica undefined. Sem este
+  // guarda, `window.localStorage.getItem(...)` lanca um TypeError antes do
+  // fetch() rodar - e esse throw nao e um ApiError, entao qualquer tela que
+  // so trata `instanceof ApiError` mostra uma mensagem generica de erro de
+  // conexao mesmo quando o servidor esta perfeitamente acessivel.
   const debugEnabled = typeof window !== "undefined"
+    && typeof window.localStorage !== "undefined"
     && (window.localStorage.getItem("DEBUG_API") === "1" || window.localStorage.getItem("DEBUG_TICKET_MESSAGES") === "1");
 
   if (debugEnabled) {
