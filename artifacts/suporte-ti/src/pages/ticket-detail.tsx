@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { EmojiClickData } from "emoji-picker-react";
 import { useRoute, Link } from "wouter";
 import { useAuth } from "@/lib/auth";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { 
   useGetTicket, 
   useUpdateTicket, 
@@ -479,7 +480,7 @@ export default function TicketDetail() {
       const token = localStorage.getItem("ti_support_token");
       const form = new FormData();
       Array.from(files).forEach((f) => form.append("files", f));
-      const resp = await fetch(`/api/tickets/${ticketId}/attachments`, {
+      const resp = await fetchWithTimeout(`/api/tickets/${ticketId}/attachments`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
@@ -513,10 +514,10 @@ export default function TicketDetail() {
     setDeletingAttachmentId(att.id);
     try {
       const token = localStorage.getItem("ti_support_token");
-      const resp = await fetch(`/api/tickets/${ticketId}/attachments/${att.id}`, {
+      const resp = await fetchWithTimeout(`/api/tickets/${ticketId}/attachments/${att.id}`, {
         method: "DELETE",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      }, 20_000);
       if (!resp.ok && resp.status !== 204) {
         const text = await resp.text();
         let data: any = null;
@@ -937,7 +938,7 @@ export default function TicketDetail() {
           form.append("format", sendFormat);
           form.append("message", sendMessage);
           messageFiles.forEach((f) => form.append("files", f.file, f.file.name));
-          const r = await fetch(`/api/tickets/${ticketId}/messages`, {
+          const r = await fetchWithTimeout(`/api/tickets/${ticketId}/messages`, {
             method: "POST",
             headers,
             body: form,
@@ -945,14 +946,14 @@ export default function TicketDetail() {
           debugTicketMessages("send_response", { status: r.status, ok: r.ok, mode: "multipart" });
           return r;
         })()
-        : await fetch(`/api/tickets/${ticketId}/messages`, {
+        : await fetchWithTimeout(`/api/tickets/${ticketId}/messages`, {
           method: "POST",
           headers: {
             ...(headers ?? {}),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ format: sendFormat, message: sendMessage }),
-        });
+        }, 20_000);
       if (messageFiles.length === 0) {
         debugTicketMessages("send_response", { status: resp.status, ok: resp.ok, mode: "json" });
       }
@@ -1201,7 +1202,7 @@ export default function TicketDetail() {
     ticket.createdById === user?.id
     || ticket.assignedToId === user?.id
     || (user?.id != null && collaboratorIdSet.has(user.id))
-    || ((user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST) && !ownerHasCoordinator);
+    || isAdminOrAnalyst;
   const canSendNewMessage = canCreateTicketMessageUI({ canInteract: canInteractTicket, status: ticket.status });
   const canAssignTicket = canManageRole && (isAdminOrAnalyst || ticket.assignedToId == null || ticket.assignedToId === user?.id);
   const hasValidAssignee = Boolean(
@@ -1602,7 +1603,7 @@ export default function TicketDetail() {
 
               {!canInteractTicket ? (
                 <p className="text-xs text-muted-foreground">
-                  Apenas o criador do ticket, colaboradores e o responsável atual podem enviar mensagens. Você pode visualizar este chamado.
+                  Apenas o criador do ticket, colaboradores, o responsável atual e perfis Administrador/Analista podem enviar mensagens. Você pode visualizar este chamado.
                 </p>
               ) : null}
 

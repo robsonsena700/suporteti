@@ -1,9 +1,10 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { db, messagesTable, ticketAuditLogsTable, ticketsTable, usersTable, ticketMessageAttachmentsTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { CreateMessageBody } from "@workspace/api-zod";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { enforceTicketAccess } from "../lib/access";
+import { USER_SUMMARY_COLUMNS } from "../lib/user-summary";
 import { autoAssignTicketOnMessageInteraction } from "../lib/ticket-auto-assign";
 import { canCreateTicketMessage } from "../lib/ticket-access-policy";
 import multer from "multer";
@@ -23,6 +24,40 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_ATTACHMENT_SIZE, files: MAX_ATTACHMENTS_PER_MESSAGE },
 });
+
+// Traduz os erros conhecidos do multer (tamanho, quantidade) em uma resposta
+// clara em vez de deixar cair no handler genérico de erro ("Erro interno do
+// servidor"), que não ajuda o usuário a entender o que precisa mudar no anexo
+// (mesmo padrão usado em ticket-attachments.ts).
+function uploadMessageAttachments(req: Request, res: Response, next: NextFunction) {
+  upload.array("files", MAX_ATTACHMENTS_PER_MESSAGE)(req, res, (err?: unknown) => {
+    if (err) {
+      logger.error({
+        source: "backend",
+        event: "message.attachment.upload.middleware_error",
+        actorUserId: req.user?.userId ?? null,
+        ticketId: req.params?.ticketId ?? null,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      }, "Message attachment upload middleware failed");
+
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          res.status(400).json({ error: `Arquivo muito grande. Máximo permitido: ${MAX_ATTACHMENT_SIZE / (1024 * 1024)} MB por arquivo.` });
+          return;
+        }
+        if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+          res.status(400).json({ error: `Máximo de ${MAX_ATTACHMENTS_PER_MESSAGE} arquivo(s) por envio.` });
+          return;
+        }
+        res.status(400).json({ error: "Não foi possível enviar o(s) arquivo(s). Tente novamente." });
+        return;
+      }
+      next(err);
+      return;
+    }
+    next();
+  });
+}
 
 function extensionOf(filename: string): string {
   return path.extname(filename || "").toLowerCase();
@@ -73,7 +108,7 @@ router.get("/tickets/:ticketId/messages", requireAuth, requireActive, async (req
 
   const messages = await db.query.messagesTable.findMany({
     where: eq(messagesTable.ticketId, ticketId),
-    with: { sender: true, attachments: true },
+    with: { sender: { columns: USER_SUMMARY_COLUMNS }, attachments: true },
     orderBy: (m, { asc }) => [asc(m.createdAt)],
   });
 
@@ -102,7 +137,7 @@ router.get("/tickets/:ticketId/messages", requireAuth, requireActive, async (req
   })));
 });
 
-router.post("/tickets/:ticketId/messages", requireAuth, requireActive, upload.array("files", MAX_ATTACHMENTS_PER_MESSAGE), async (req, res): Promise<void> => {
+router.post("/tickets/:ticketId/messages", requireAuth, requireActive, uploadMessageAttachments, async (req, res): Promise<void> => {
   const user = req.user!;
 
   const ip = String(req.ip || "");

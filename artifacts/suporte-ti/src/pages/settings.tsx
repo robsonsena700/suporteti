@@ -1510,6 +1510,164 @@ function CoordinatorApprovalSettings() {
   );
 }
 
+function AnalystPendingApprovalsSettings() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedRoles, setSelectedRoles] = useState<Record<number, UserRole>>({});
+  const [approvalCoordinatorByUser, setApprovalCoordinatorByUser] = useState<Record<number, string>>({});
+  const {
+    data: pendingUsers,
+    isLoading: isLoadingPending,
+    error: pendingError,
+  } = useListUsers(
+    { status: UserStatus.PENDING },
+    { query: { queryKey: [...getListUsersQueryKey({ status: UserStatus.PENDING }), "analyst-pending-approvals"] } },
+  );
+  const { data: allUsers, isLoading: isLoadingUsers } = useQuery({
+    queryKey: [...getListUsersQueryKey({}), "includeCoordinator", "analyst-pending-approvals"],
+    queryFn: async () => {
+      return customFetch<UserWithCoordinator[]>("/api/users?includeCoordinator=true");
+    },
+  });
+  const approveMutation = useApproveUser();
+  const visiblePendingUsers = pendingUsers ?? [];
+
+  const activeCoordinators = useMemo(
+    () => (allUsers ?? []).filter((user) => user.role === UserRole.COORDINATOR && user.status === UserStatus.ACTIVE),
+    [allUsers],
+  );
+
+  const handleApprove = (userId: number) => {
+    const role = selectedRoles[userId] || UserRole.USER;
+    const coordinatorId = approvalCoordinatorByUser[userId];
+    const payload: { role: UserRole; coordinatorId?: number } = { role };
+
+    if (role === UserRole.GESTOR && !coordinatorId) {
+      toast({ title: "Selecione um coordenador para aprovar este Gestor.", variant: "destructive" });
+      return;
+    }
+
+    if ((role === UserRole.USER || role === UserRole.GESTOR) && coordinatorId && coordinatorId !== "__none__") {
+      payload.coordinatorId = Number(coordinatorId);
+    }
+
+    approveMutation.mutate(
+      { id: userId, data: payload },
+      {
+        onSuccess: () => {
+          toast({ title: "Usuário aprovado com sucesso" });
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({ status: UserStatus.PENDING }) });
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey({}) });
+          setApprovalCoordinatorByUser((prev) => {
+            const next = { ...prev };
+            delete next[userId];
+            return next;
+          });
+        },
+        onError: (err: any) => {
+          toast({
+            title: "Não foi possível aprovar o cadastro",
+            description: err?.data?.error || "Tente novamente.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  const errorMessage =
+    (pendingError as any)?.data?.error
+    || (pendingError as Error | null)?.message
+    || "Não foi possível carregar as solicitações de aprovação.";
+
+  return (
+    <Card className="border-primary/20 shadow-md">
+      <CardHeader>
+        <CardTitle>Aprovações Pendentes</CardTitle>
+        <CardDescription>
+          Como analista, você pode revisar o perfil, vincular coordenador quando necessário e aprovar cadastros pendentes.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {pendingError ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : isLoadingPending || isLoadingUsers ? (
+          <div className="text-center py-4">Carregando...</div>
+        ) : visiblePendingUsers.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            Não há usuários aguardando aprovação.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead>E-mail</TableHead>
+                <TableHead>Localidade</TableHead>
+                <TableHead>Perfil Desejado</TableHead>
+                <TableHead>Coordenador</TableHead>
+                <TableHead className="text-right">Ação</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visiblePendingUsers.map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell className="font-medium">{user.name}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>{user.municipality} - {user.uf}</TableCell>
+                  <TableCell>
+                    <Select
+                      value={selectedRoles[user.id] || UserRole.USER}
+                      onValueChange={(v) => setSelectedRoles((prev) => ({ ...prev, [user.id]: v as UserRole }))}
+                    >
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={UserRole.USER}>Usuário Padrão</SelectItem>
+                        <SelectItem value={UserRole.GESTOR}>Gestor</SelectItem>
+                        <SelectItem value={UserRole.COORDINATOR}>Coordenador</SelectItem>
+                        <SelectItem value={UserRole.ANALYST}>Analista</SelectItem>
+                        <SelectItem value={UserRole.ADMIN}>Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={approvalCoordinatorByUser[user.id] || "__none__"}
+                      onValueChange={(v) => setApprovalCoordinatorByUser((prev) => ({ ...prev, [user.id]: v }))}
+                      disabled={!((selectedRoles[user.id] || UserRole.USER) === UserRole.USER || (selectedRoles[user.id] || UserRole.USER) === UserRole.GESTOR)}
+                    >
+                      <SelectTrigger className="w-[200px]">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Sem coordenador</SelectItem>
+                        {activeCoordinators.map((coordinator) => (
+                          <SelectItem key={coordinator.id} value={String(coordinator.id)}>
+                            {coordinator.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button size="sm" onClick={() => handleApprove(user.id)} disabled={approveMutation.isPending}>
+                      Aprovar Acesso
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { user } = useAuth();
 
@@ -1518,7 +1676,7 @@ export default function Settings() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
         <p className="text-muted-foreground mt-1">
-          Ajustes da sua conta e, para administradores ou coordenadores autorizados, gerenciamento de aprovações.
+          Ajustes da sua conta e, para administradores, analistas ou coordenadores autorizados, gerenciamento de aprovações.
         </p>
       </div>
 
@@ -1544,7 +1702,10 @@ export default function Settings() {
         </>
       ) : null}
       {user?.role === "ANALYST" ? (
-        <UserDirectorySettings scopeDescription="Como analista, você pode visualizar todos os usuários e editar a localidade (UF/Município) de qualquer cadastro." />
+        <>
+          <AnalystPendingApprovalsSettings />
+          <UserDirectorySettings scopeDescription="Como analista, você pode visualizar todos os usuários e editar a localidade (UF/Município) de qualquer cadastro." />
+        </>
       ) : null}
     </div>
   );
