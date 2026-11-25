@@ -13,7 +13,7 @@ import {
 } from "@workspace/db";
 import { eq, and, inArray, or, sql } from "drizzle-orm";
 import { UpdateUserBody } from "@workspace/api-zod";
-import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
+import { requireAuth, requireActive, requireRoles, invalidateAuthUserCache } from "../middlewares/auth";
 import { signToken } from "../middlewares/auth";
 import { isValidCpf, normalizeCpf } from "../lib/cpf";
 import { isValidBrazilMobile, normalizePhoneE164Brazil } from "../lib/phone";
@@ -396,6 +396,7 @@ router.post(
         detail,
       });
     });
+    invalidateAuthUserCache(target.id);
 
     const mailOld = buildEmailChangedNotification({
       recipientEmail: target.email,
@@ -928,6 +929,7 @@ router.patch("/users/:id", requireAuth, requireActive, async (req, res): Promise
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
     });
+  invalidateAuthUserCache(id);
 
   if (!user) {
     res.status(404).json({ error: "Usuário não encontrado" });
@@ -990,6 +992,7 @@ router.post("/users/:id/status", requireAuth, requireActive, requireRoles("ADMIN
       municipality: usersTable.municipality,
       createdAt: usersTable.createdAt,
     });
+  invalidateAuthUserCache(id);
 
   res.json(user);
 });
@@ -1200,6 +1203,7 @@ router.post("/users/:id/approve", requireAuth, requireActive, requireRoles("ADMI
 
     return approvedUser;
   });
+  invalidateAuthUserCache(id);
 
   if (!user) {
     res.status(404).json({ error: "Usuário não encontrado" });
@@ -1302,6 +1306,7 @@ router.post("/users/:id/role", requireAuth, requireActive, requireRoles("ADMIN")
 
     return updated;
   });
+  invalidateAuthUserCache(id);
 
   if (!result) {
     res.status(404).json({ error: "Usuário não encontrado" });

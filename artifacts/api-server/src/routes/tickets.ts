@@ -4,6 +4,7 @@ import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody, CreateRatingSchema } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
 import { enforceTicketAccess, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
+import { USER_SUMMARY_COLUMNS } from "../lib/user-summary";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
 import { validateMunicipalityForUf } from "../lib/ibge";
@@ -177,8 +178,8 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   const allTickets = await db.query.ticketsTable.findMany({
     where: finalWhere,
     with: {
-      createdBy: true,
-      assignedTo: true,
+      createdBy: { columns: USER_SUMMARY_COLUMNS },
+      assignedTo: { columns: USER_SUMMARY_COLUMNS },
       attachments: {
         columns: { id: true, mimeType: true },
       },
@@ -342,8 +343,8 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   const allTickets = await db.query.ticketsTable.findMany({
     where: finalWhere,
     with: {
-      createdBy: true,
-      assignedTo: true,
+      createdBy: { columns: USER_SUMMARY_COLUMNS },
+      assignedTo: { columns: USER_SUMMARY_COLUMNS },
       attachments: {
         columns: { id: true, mimeType: true },
       },
@@ -438,10 +439,10 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
   const ticket = await db.query.ticketsTable.findFirst({
     where: eq(ticketsTable.id, id),
     with: {
-      createdBy: true,
-      assignedTo: true,
+      createdBy: { columns: USER_SUMMARY_COLUMNS },
+      assignedTo: { columns: USER_SUMMARY_COLUMNS },
       messages: {
-        with: { sender: true },
+        with: { sender: { columns: USER_SUMMARY_COLUMNS } },
         orderBy: (m, { asc }) => [asc(m.createdAt)],
       },
       rating: true,
@@ -449,7 +450,7 @@ router.get("/tickets/:id", requireAuth, requireActive, async (req, res): Promise
         columns: { id: true, filename: true, mimeType: true, size: true, createdAt: true },
       },
       collaborators: {
-        with: { user: true },
+        with: { user: { columns: USER_SUMMARY_COLUMNS } },
         orderBy: (c, { asc }) => [asc(c.createdAt)],
       },
     },
