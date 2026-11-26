@@ -18,7 +18,21 @@ function redactEmail(email: string) {
   return `${visible}***@${domain}`;
 }
 
-export async function sendEmail(args: { to: string; subject: string; text: string; html?: string | undefined }): Promise<void> {
+export type EmailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+  /** Content-ID para imagens embutidas no HTML (<img src="cid:...">). */
+  cid?: string;
+};
+
+export async function sendEmail(args: {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string | undefined;
+  attachments?: EmailAttachment[];
+}): Promise<void> {
   const mode = getMailMode();
   if (mode === "disabled") return;
   if (mode === "fail") throw new Error("Falha forçada no envio de e-mail (MAIL_MODE=fail)");
@@ -55,5 +69,6 @@ export async function sendEmail(args: { to: string; subject: string; text: strin
     subject: args.subject,
     text: args.text,
     html: args.html,
+    attachments: args.attachments,
   });
 }

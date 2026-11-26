@@ -59,10 +59,11 @@ async function main() {
     throw new Error(`Invalid PORT value: "${rawPort}"`);
   }
 
-  const [{ default: app }, { logger }, { startMunicipalitiesSyncScheduler }] = await Promise.all([
+  const [{ default: app }, { logger }, { startMunicipalitiesSyncScheduler }, { startTicketNotificationWorker }] = await Promise.all([
     import("./app"),
     import("./lib/logger"),
     import("./lib/municipalities-sync"),
+    import("./lib/ticket-notification-worker"),
   ]);
 
   try {
@@ -89,6 +90,7 @@ async function main() {
 
     logger.info({ port, host: host ?? "*" }, "Server listening");
     startMunicipalitiesSyncScheduler();
+    startTicketNotificationWorker();
   };
 
   if (host) {
