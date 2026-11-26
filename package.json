@@ -39,6 +39,7 @@
     "test:auth:password-reset:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-password-reset-unit.ts && pnpm --filter @workspace/scripts exec tsx ./src/test-password-policy-unit.ts && pnpm --filter @workspace/scripts exec tsx ./src/test-email-mask-unit.ts",
     "test:auth:password-reset:integration": "pnpm --filter @workspace/scripts exec tsx ./src/test-password-reset-integration.ts",
     "test:admin:edit-email:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-rate-limit-unit.ts && pnpm --filter @workspace/scripts exec tsx ./src/test-require-roles-unit.ts",
+    "test:tickets:notification:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-ticket-notification-unit.ts",
     "test:forms:resolver:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-form-resolver-unit.ts",
     "test:dashboard:metrics:unit": "pnpm --filter @workspace/scripts exec tsx ./src/test-dashboard-metrics-unit.ts",
     "test:dashboard:consistency:integration": "node ./scripts/test-dashboard-consistency-integration.cjs",
