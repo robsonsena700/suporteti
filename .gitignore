@@ -59,3 +59,6 @@ lib/ssh/
 
 # Artefatos de sessao de depuracao (logs/estado local, nao versionar)
 .dbg/
+
+# Arquivos gerados pelo Claude (Cowork) na pasta do projeto - nao versionar
+/Claude outputs/
