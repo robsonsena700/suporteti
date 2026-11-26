@@ -41,8 +41,10 @@ const registerSchema = z.object({
   cpf: z.string().refine(isValidCpf, "CPF inválido"),
   establishment: z.string().min(2, "Estabelecimento/Unidade de Saúde é obrigatório"),
   contactPhone: z.string().refine(isValidBrazilMobile, "Contato inválido"),
-  prefersWhatsapp: z.boolean().default(false),
-  prefersTelegram: z.boolean().default(false),
+  // Sem .default(): com @hookform/resolvers 5 o tipo de entrada e saida do
+  // formulario precisa ser o mesmo; o valor inicial ja vem de defaultValues.
+  prefersWhatsapp: z.boolean(),
+  prefersTelegram: z.boolean(),
   termsAccepted: z.boolean().refine((v) => v, "Aceite os termos para continuar"),
   uf: z.string().min(2, "UF é obrigatória"),
   municipality: z.string().min(2, "Município é obrigatório"),

@@ -52,6 +52,7 @@ jobs:
           pnpm run test:auth:password-reset:unit
           pnpm run test:auth:revalidation:unit
           pnpm run test:dashboard:metrics:unit
+          pnpm run test:forms:resolver:unit
           pnpm run test:users:approval:unit
           pnpm run test:tickets:unit
           pnpm run test:tickets:resolved:unit
