@@ -143,6 +143,25 @@ function getAttachmentSessionId(): string {
   }
 }
 
+// Diagnostico de anexos. Eventos "info" (passo a passo do seletor de arquivos)
+// so sao registrados com o modo debug ligado - localStorage
+// DEBUG_ATTACHMENTS=1 ou ?debug=1 na URL. Antes iam TODOS para o servidor e,
+// como os efeitos que os geram rodavam a cada render (a cada tecla digitada
+// no formulario), cada usuario disparava dezenas de POSTs por segundo para
+// /api/attachment-diagnostics/logs. Avisos e erros continuam sempre indo.
+function isAttachmentDebugEnabled(): boolean {
+  try {
+    if (window.localStorage.getItem("DEBUG_ATTACHMENTS") === "1") return true;
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function shouldRecordAttachmentEvent(level: "info" | "warn" | "error"): boolean {
+  return level !== "info" || isAttachmentDebugEnabled();
+}
+
 function logAttachmentToConsole(level: "info" | "warn" | "error", event: string, context: Record<string, unknown>) {
   const payload = {
     source: "attachment-debug",
@@ -466,6 +485,7 @@ export default function NewTicket() {
       href: typeof window !== "undefined" ? window.location.href : null,
       ...context,
     };
+    if (!shouldRecordAttachmentEvent(level)) return;
     logAttachmentToConsole(level, event, payload);
     sendAttachmentLog(level, event, payload);
   }, [isMobile, user?.id, user?.role]);
@@ -929,6 +949,12 @@ export default function NewTicket() {
     addFiles(selected, "input-selection");
   };
 
+  // handleSelectedFiles e recriada a cada render; os efeitos abaixo usam a
+  // versao mais recente via ref para NAO precisarem re-executar (e re-registrar
+  // os listeners nativos) a cada tecla digitada no formulario.
+  const handleSelectedFilesRef = useRef(handleSelectedFiles);
+  handleSelectedFilesRef.current = handleSelectedFiles;
+
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     reportAttachmentEvent("info", "attachment.input.change_event", {
       inputValue: e.target.value || null,
@@ -965,7 +991,7 @@ export default function NewTicket() {
         files: list.map(getAttachmentFileContext),
       });
       if (list.length > 0) {
-        handleSelectedFiles(list);
+        handleSelectedFilesRef.current(list);
       }
     };
 
@@ -1005,9 +1031,12 @@ export default function NewTicket() {
       }
       nativeFileListenerAttachedRef.current = false;
     };
-  }, [handleSelectedFiles, reportAttachmentEvent]);
+  }, [reportAttachmentEvent]);
 
   useEffect(() => {
+    // O botao/input de camera so e renderizado no celular; no computador nao
+    // ha o que procurar (antes tentava 8 vezes a cada render, sempre em vao).
+    if (!isMobile) return;
     if (nativeCameraListenerAttachedRef.current) return;
     let timer: number | null = null;
     let input: HTMLInputElement | null = null;
@@ -1022,7 +1051,7 @@ export default function NewTicket() {
         files: list.map(getAttachmentFileContext),
       });
       if (list.length > 0) {
-        handleSelectedFiles(list);
+        handleSelectedFilesRef.current(list);
       }
     };
 
@@ -1062,7 +1091,7 @@ export default function NewTicket() {
       }
       nativeCameraListenerAttachedRef.current = false;
     };
-  }, [handleSelectedFiles, reportAttachmentEvent]);
+  }, [isMobile, reportAttachmentEvent]);
 
   const scheduleFileInputProbe = useCallback((origin: string) => {
     if (!filePickerActiveRef.current) return;
