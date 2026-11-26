@@ -6,6 +6,8 @@ import ExcelJS from "exceljs";
 import { requireAuth, requireActive } from "../middlewares/auth";
 import { getCoordinatorIdForGestor, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
 import { createInMemoryRateLimiter } from "../lib/rate-limit";
+import { buildTicketVisibilityWhere } from "../lib/ticket-visibility";
+import { computeDashboardMetrics, type DashboardTicketRow } from "../lib/dashboard-metrics";
 
 const router: IRouter = Router();
 
@@ -301,6 +303,99 @@ router.get("/reports/summary", requireAuth, requireActive, async (req, res): Pro
     avgResolutionHours: resolutionData.avg != null ? Number(resolutionData.avg) : null,
     avgRating: ratingData.avg != null ? Number(ratingData.avg) : null,
   });
+});
+
+// Painel de Controle: metricas segmentadas por tipo (Sistemas/Equipamentos).
+// Usa EXATAMENTE a mesma regra de visibilidade da tela de Chamados
+// (lib/ticket-visibility.ts), entao cada perfil ve no painel os mesmos
+// chamados que ve na lista. O calculo fica em lib/dashboard-metrics.ts.
+const DASHBOARD_ALLOWED_DAYS = new Set([7, 30, 90]);
+
+router.get("/reports/dashboard", requireAuth, requireActive, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const daysParam = req.query.days;
+  const parsedDays = daysParam == null ? 30 : parsePositiveIntQuery(daysParam);
+  if (parsedDays == null || !DASHBOARD_ALLOWED_DAYS.has(parsedDays)) {
+    res.status(400).json({ error: "Período inválido (use 7, 30 ou 90 dias)" });
+    return;
+  }
+
+  const visibilityWhere = (await buildTicketVisibilityWhere(user)) ?? sql`true`;
+
+  const result = await db.execute(sql`
+    select
+      tickets.id,
+      tickets.title,
+      tickets.type::text as type,
+      tickets.priority::text as priority,
+      tickets.status::text as status,
+      tickets.created_at,
+      tickets.updated_at,
+      tickets.created_by_id,
+      cu.name as created_by_name,
+      tickets.assigned_to_id,
+      au.name as assigned_to_name,
+      (
+        select min(m.created_at)
+        from public.messages m
+        join public.users su on su.id = m.sender_id
+        where m.ticket_id = tickets.id
+          and m.sender_id <> tickets.created_by_id
+          and su.role in ('ADMIN', 'ANALYST', 'COORDINATOR')
+      ) as first_response_at,
+      (
+        select max(a.created_at)
+        from public.ticket_audit_logs a
+        where a.ticket_id = tickets.id
+          and a.detail ~ 'status: (OPEN|IN_PROGRESS|AWAITING_CUSTOMER|IN_DEVELOPMENT|CLOSED) -> RESOLVED'
+      ) as resolved_at,
+      exists (
+        select 1
+        from public.ticket_audit_logs a2
+        where a2.ticket_id = tickets.id
+          and a2.detail ~ 'status: (RESOLVED|CLOSED) -> (OPEN|IN_PROGRESS|AWAITING_CUSTOMER|IN_DEVELOPMENT)'
+      ) as reopened,
+      r.rating,
+      r.created_at as rated_at
+    from public.tickets
+    left join public.users cu on cu.id = tickets.created_by_id
+    left join public.users au on au.id = tickets.assigned_to_id
+    left join public.ticket_ratings r on r.ticket_id = tickets.id
+    where ${visibilityWhere}
+  `);
+
+  const toDate = (v: unknown): Date | null => {
+    if (v == null) return null;
+    const d = v instanceof Date ? v : new Date(String(v));
+    return Number.isFinite(d.getTime()) ? d : null;
+  };
+
+  const rows: DashboardTicketRow[] = (result.rows as any[]).map((r) => ({
+    id: Number(r.id),
+    title: String(r.title ?? ""),
+    type: r.type === "HARDWARE" ? "HARDWARE" : "SOFTWARE",
+    priority: r.priority === "HIGH" || r.priority === "LOW" ? r.priority : "MEDIUM",
+    status: String(r.status),
+    createdAt: toDate(r.created_at) ?? new Date(0),
+    updatedAt: toDate(r.updated_at) ?? toDate(r.created_at) ?? new Date(0),
+    createdById: Number(r.created_by_id),
+    createdByName: r.created_by_name ?? null,
+    assignedToId: r.assigned_to_id == null ? null : Number(r.assigned_to_id),
+    assignedToName: r.assigned_to_name ?? null,
+    firstResponseAt: toDate(r.first_response_at),
+    resolvedAt: toDate(r.resolved_at),
+    reopened: r.reopened === true || r.reopened === "t",
+    rating: r.rating == null ? null : Number(r.rating),
+    ratedAt: toDate(r.rated_at),
+  }));
+
+  res.json(computeDashboardMetrics(rows, {
+    now: new Date(),
+    days: parsedDays,
+    role: user.role,
+    userId: user.userId,
+    timeZone: process.env.APP_TIMEZONE || "America/Sao_Paulo",
+  }));
 });
 
 router.get("/reports/by-status", requireAuth, requireActive, async (req, res): Promise<void> => {

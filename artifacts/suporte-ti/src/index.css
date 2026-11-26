@@ -138,9 +138,16 @@
   --priority-high-fg: #0b1220;
   --priority-critical-bg: #1b0a0a;
   --priority-critical-fg: #f8fafc;
+
+  /* Cores das series do dashboard (tipo do chamado). Paleta validada para
+     daltonismo e contraste (dataviz validate_palette): claro e escuro. */
+  --series-software: #0e6ba8;
+  --series-hardware: #7c3aed;
 }
 
 .dark {
+  --series-software: #2f8fd0;
+  --series-hardware: #9461f0;
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;

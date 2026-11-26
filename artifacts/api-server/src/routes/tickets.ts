@@ -3,8 +3,9 @@ import { db, userCoordinatorsTable, gestorCoordinatorsTable, usersTable, tickets
 import { eq, and, desc, inArray, or, sql, asc } from "drizzle-orm";
 import { CreateTicketBody, UpdateTicketBody, AssignTicketBody, CreateRatingSchema } from "@workspace/api-zod";
 import { requireAuth, requireActive, requireRoles } from "../middlewares/auth";
-import { enforceTicketAccess, getVisibleOwnerIdsForCoordinator, getVisibleOwnerIdsForGestor } from "../lib/access";
+import { enforceTicketAccess } from "../lib/access";
 import { USER_SUMMARY_COLUMNS } from "../lib/user-summary";
+import { buildTicketVisibilityWhere } from "../lib/ticket-visibility";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
 import { validateMunicipalityForUf } from "../lib/ibge";
@@ -75,36 +76,9 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
   const user = req.user!;
   const { status, type, priority, uf, municipality, mine, noCoordinator } = req.query as Record<string, string | undefined>;
 
-  const whereClauses = [];
-  if (user.role !== "ADMIN" && user.role !== "ANALYST") {
-    if (user.role === "COORDINATOR") {
-      const allowedOwners = await getVisibleOwnerIdsForCoordinator(user.userId);
-      whereClauses.push(
-        or(
-          inArray(ticketsTable.createdById, allowedOwners),
-          eq(ticketsTable.assignedToId, user.userId),
-          sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${user.userId})`,
-        ),
-      );
-    } else if (user.role === "GESTOR") {
-      const { coordinatorId, ownerIds } = await getVisibleOwnerIdsForGestor(user.userId);
-      if (!coordinatorId || ownerIds.length === 0) {
-        whereClauses.push(sql`false`);
-      } else {
-        whereClauses.push(
-          or(
-            inArray(ticketsTable.createdById, ownerIds),
-            eq(ticketsTable.assignedToId, coordinatorId),
-            sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${coordinatorId})`,
-          ),
-        );
-      }
-    } else {
-      whereClauses.push(
-        eq(ticketsTable.createdById, user.userId),
-      );
-    }
-  }
+  // Mesma regra usada pelo dashboard (lib/ticket-visibility.ts).
+  const visibilityWhere = await buildTicketVisibilityWhere(user);
+  const whereClauses = visibilityWhere ? [visibilityWhere] : [];
 
   const parsedMine = mine != null ? parseBooleanQuery(mine) : null;
   if (mine != null && parsedMine == null) {
@@ -240,36 +214,9 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
   const user = req.user!;
   const { status, type, priority, uf, municipality, mine, noCoordinator } = req.query as Record<string, string | undefined>;
 
-  const whereClauses = [];
-  if (user.role !== "ADMIN" && user.role !== "ANALYST") {
-    if (user.role === "COORDINATOR") {
-      const allowedOwners = await getVisibleOwnerIdsForCoordinator(user.userId);
-      whereClauses.push(
-        or(
-          inArray(ticketsTable.createdById, allowedOwners),
-          eq(ticketsTable.assignedToId, user.userId),
-          sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${user.userId})`,
-        ),
-      );
-    } else if (user.role === "GESTOR") {
-      const { coordinatorId, ownerIds } = await getVisibleOwnerIdsForGestor(user.userId);
-      if (!coordinatorId || ownerIds.length === 0) {
-        whereClauses.push(sql`false`);
-      } else {
-        whereClauses.push(
-          or(
-            inArray(ticketsTable.createdById, ownerIds),
-            eq(ticketsTable.assignedToId, coordinatorId),
-            sql`exists(select 1 from public.ticket_collaborators tc where tc.ticket_id = ${ticketsTable.id} and tc.user_id = ${coordinatorId})`,
-          ),
-        );
-      }
-    } else {
-      whereClauses.push(
-        eq(ticketsTable.createdById, user.userId),
-      );
-    }
-  }
+  // Mesma regra usada pelo dashboard (lib/ticket-visibility.ts).
+  const visibilityWhere = await buildTicketVisibilityWhere(user);
+  const whereClauses = visibilityWhere ? [visibilityWhere] : [];
 
   const parsedMine = mine != null ? parseBooleanQuery(mine) : null;
   if (mine != null && parsedMine == null) {
