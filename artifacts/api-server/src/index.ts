@@ -72,15 +72,30 @@ async function main() {
     process.exit(1);
   }
 
-  app.listen(port, (err) => {
+  // Interface de escuta. Por padrao o Node escuta em todas as interfaces.
+  // ATENCAO: em producao o proxy reverso (nginx da borda) fica em OUTRA
+  // maquina e chama esta API pela rede interna (10.10.1.202:3001), entao
+  // NAO usar 127.0.0.1 em producao - isso derrubaria o site. Para limitar a
+  // exposicao, defina HOST com o IP da rede interna (ex.: HOST=10.10.1.202
+  // em shared/.env) e/ou libere a porta 3001 no firewall so para o IP do
+  // proxy da borda.
+  const host = process.env.HOST?.trim() || undefined;
+
+  const onListening = (err?: Error) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
       process.exit(1);
     }
 
-    logger.info({ port }, "Server listening");
+    logger.info({ port, host: host ?? "*" }, "Server listening");
     startMunicipalitiesSyncScheduler();
-  });
+  };
+
+  if (host) {
+    app.listen(port, host, onListening);
+  } else {
+    app.listen(port, onListening);
+  }
 }
 
 main();

@@ -114,10 +114,18 @@ fi
 # 3. LIMPEZA (mantém só o necessário por ciclo, por contagem - não por tempo)
 # ========================
 
+# Corrigido: antes era `ls -t "$dir"/*.backup "$dir"/*.backup.gz | tail | xargs rm`.
+# Quando um dos padroes nao casava com nenhum arquivo (ex.: nenhum .backup.gz
+# em daily/), o ls saia com codigo 2; com `set -e` + `pipefail` isso abortava
+# o script logo na primeira limpeza (daily) - weekly, 15days, monthly etc.
+# nunca eram limpos e foram acumulando arquivos (6 em weekly em vez de 1).
 prune_cycle() {
   local dir="$1"
   local keep="$2"
-  ls -t "$dir"/*.backup "$dir"/*.backup.gz 2>/dev/null | tail -n +"$((keep + 1))" | xargs -r rm --
+  local files
+  files="$(ls -1t "$dir"/*.backup "$dir"/*.backup.gz 2>/dev/null || true)"
+  [ -n "$files" ] || return 0
+  printf '%s\n' "$files" | tail -n +"$((keep + 1))" | xargs -r -d '\n' rm -f --
 }
 
 prune_cycle "$DAILY" "$KEEP_DAILY"

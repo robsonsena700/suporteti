@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Suporte TI",
+    "slug": "suporte-ti-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "br.com.sotechsaude.suporteti"
+    },
+    "android": {
+      "package": "br.com.sotechsaude.suporteti",
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"],
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a"
+      }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permitir acesso as fotos para anexar imagens aos chamados.",
+          "cameraPermission": "Permitir acesso a camera para fotografar e anexar aos chamados."
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "https://suporteti.sotechsaude.com.br"
+    }
+  }
+}

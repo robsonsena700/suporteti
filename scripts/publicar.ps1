@@ -1,10 +1,11 @@
-param(
+﻿param(
   [ValidateSet("patch", "minor", "major")][string]$Bump = "patch",
   [string]$Remote = "origin",
   [string]$BaseBranch = "main",
   [string]$HeadBranch = "",
   [ValidateSet("merge", "rebase")][string]$SyncMode = "merge",
   [switch]$Yes,
+  [switch]$CommitAll,
   [switch]$SkipBump,
   [switch]$SkipPr,
   [switch]$SkipDeploy,
@@ -140,9 +141,16 @@ ExecGit @("pull", $Remote, $HeadBranch) | Out-Null
 $status = (ExecGit @("status", "--porcelain"))
 if ($status.Trim().Length -gt 0) {
   AssertNoSecretsInStatus -StatusText $status
-  Write-Host "Alterações detectadas:" -ForegroundColor Yellow
+  Write-Host "Alterações pendentes na branch ${HeadBranch}:" -ForegroundColor Yellow
   Write-Host $status -ForegroundColor Yellow
-  ConfirmOrThrow -Message "Confirmar commit automático de todas as alterações na branch $HeadBranch?"
+  # Antes o script fazia "git add -A" sempre que havia qualquer pendencia e
+  # acabava publicando junto trabalho que nao tinha nada a ver com a entrega
+  # (ex.: um app inteiro ainda nao comitado). Agora isso so acontece se for
+  # pedido explicitamente com -CommitAll.
+  if (-not $CommitAll) {
+    throw "Há alterações não comitadas. Comite o que pertence a esta entrega, guarde o resto com 'git stash -u' e rode de novo (ou use -CommitAll para incluir tudo)."
+  }
+  ConfirmOrThrow -Message "Confirmar commit de TODAS as alterações acima na branch ${HeadBranch}?"
   ExecGit @("add", "-A") | Out-Null
   $msg = Read-Host "Mensagem do commit (Enter = 'chore: publicar')"
   if ([string]::IsNullOrWhiteSpace($msg)) { $msg = "chore: publicar" }
@@ -208,8 +216,29 @@ if (-not $SkipPr) {
   $hasGh = $false
   try { & gh --version *> $null; $hasGh = ($LASTEXITCODE -eq 0) } catch { $hasGh = $false }
   if ($hasGh) {
-    Write-Host ">> gh pr create --base $BaseBranch --head $HeadBranch"
-    & gh pr create --base $BaseBranch --head $HeadBranch --title "Deploy: $HeadBranch -> $BaseBranch" --body "Automação via scripts/publicar.ps1 (v$newVersion)" 2>$null
+    # O gh escreve avisos em stderr; com $ErrorActionPreference = "Stop" o
+    # Windows PowerShell transformava isso em NativeCommandError e abortava o
+    # script ANTES do deploy (mesmo com o PR criado). Agora o gh roda com
+    # "Continue", o resultado e decidido pelo exit code e uma falha aqui so
+    # gera aviso - nunca impede o deploy.
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      $existingPr = (& gh pr list --base $BaseBranch --head $HeadBranch --state open --json url --jq ".[0].url" 2>$null | Out-String).Trim()
+      if ($existingPr) {
+        Write-Host "PR já aberto para $HeadBranch -> ${BaseBranch}: $existingPr" -ForegroundColor Yellow
+      } else {
+        Write-Host ">> gh pr create --base $BaseBranch --head $HeadBranch"
+        $prOut = (& gh pr create --base $BaseBranch --head $HeadBranch --title "Deploy: $HeadBranch -> $BaseBranch" --body "Automação via scripts/publicar.ps1 (v$newVersion)" 2>&1 | ForEach-Object { "$_" }) -join "`n"
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host $prOut.Trim() -ForegroundColor Green
+        } else {
+          Write-Host "Aviso: não foi possível criar o PR automaticamente:`n$prOut" -ForegroundColor Yellow
+        }
+      }
+    } finally {
+      $ErrorActionPreference = $old
+    }
   } else {
     Write-Host "GitHub CLI (gh) não encontrado. Crie o PR manualmente no GitHub:" -ForegroundColor Yellow
     Write-Host "Base: $BaseBranch"

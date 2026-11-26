@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $Port = 4173
 $Url = "http://127.0.0.1:$Port/preview/prioridades"

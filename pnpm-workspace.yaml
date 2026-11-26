@@ -39,10 +39,10 @@ catalog:
   '@replit/vite-plugin-cartographer': ^0.5.21
   '@replit/vite-plugin-dev-banner': ^0.1.2
   '@replit/vite-plugin-runtime-error-modal': ^0.0.6
-  '@tailwindcss/vite': ^4.3.3
-  '@tanstack/react-query': ^5.104.5
-  '@types/node': ^25.9.9
-  '@types/react': ^19.3.0
+  '@tailwindcss/vite': ^4.3.5
+  '@tanstack/react-query': ^5.108.4
+  '@types/node': ^25.9.12
+  '@types/react': ^19.3.2
   '@types/react-dom': ^19.3.0
   '@vitejs/plugin-react': ^5.2.0
   class-variance-authority: ^0.7.1
@@ -54,10 +54,10 @@ catalog:
   react: 19.1.0
   # Must be this exact version because expo requires it
   react-dom: 19.1.0
-  tailwind-merge: ^3.7.0
-  tailwindcss: ^4.3.3
+  tailwind-merge: ^3.7.1
+  tailwindcss: ^4.3.5
   tsx: ^4.23.15
-  vite: ^7.3.7
+  vite: ^7.3.8
   zod: ^4.6.7
 
 autoInstallPeers: false
@@ -71,6 +71,14 @@ onlyBuiltDependencies:
 overrides:
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
+  # Correcoes do pnpm audit (Security Audit semanal):
+  # - exceljs 4.4.0 (ultima versao) ainda depende de uuid 8, afetado por
+  #   GHSA-g3hv-75wg-m249 (so v3/v5/v6 com buffer; exceljs usa so v4, mas o
+  #   audit reprova mesmo assim). uuid 11 mantem `require('uuid').v4`.
+  "exceljs>uuid": "^11.1.1"
+  # - @expo/fingerprint (ferramenta de build do app mobile) usa minimatch 10,
+  #   afetado por DoS em globparts. A API usada e a mesma no 11.
+  "@expo/fingerprint>minimatch": "^11.0.1"
 
 allowBuilds:
   esbuild: false
