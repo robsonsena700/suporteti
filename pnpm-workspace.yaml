@@ -71,6 +71,14 @@ onlyBuiltDependencies:
 overrides:
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
+  # Correcoes do pnpm audit (Security Audit semanal):
+  # - exceljs 4.4.0 (ultima versao) ainda depende de uuid 8, afetado por
+  #   GHSA-g3hv-75wg-m249 (so v3/v5/v6 com buffer; exceljs usa so v4, mas o
+  #   audit reprova mesmo assim). uuid 11 mantem `require('uuid').v4`.
+  "exceljs>uuid": "^11.1.1"
+  # - @expo/fingerprint (ferramenta de build do app mobile) usa minimatch 10,
+  #   afetado por DoS em globparts. A API usada e a mesma no 11.
+  "@expo/fingerprint>minimatch": "^11.0.1"
 
 allowBuilds:
   esbuild: false
