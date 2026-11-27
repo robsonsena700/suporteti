@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { Link } from "wouter";
 import { useQuery, useQueryClient, type Query } from "@tanstack/react-query";
 import {
@@ -55,6 +55,8 @@ type Props = {
   applyClientFilters: (tickets: Ticket[]) => Ticket[];
   onShowAllFinished: () => void;
   onOpenImage?: (ticket: TicketListItem) => void;
+  /** Recebe os chamados exibidos no quadro (usado na exportação CSV/PDF). */
+  onVisibleTicketsChange?: (tickets: TicketListItem[]) => void;
 };
 
 type UpdatePlan = Extract<KanbanMovePlan, { kind: "update" }>;
@@ -90,7 +92,7 @@ function useFinishedTickets(status: "RESOLVED" | "CLOSED", baseParams: KanbanBas
   });
 }
 
-export function TicketsKanban({ actor, baseParams, applyClientFilters, onShowAllFinished, onOpenImage }: Props) {
+export function TicketsKanban({ actor, baseParams, applyClientFilters, onShowAllFinished, onOpenImage, onVisibleTicketsChange }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -124,6 +126,10 @@ export function TicketsKanban({ actor, baseParams, applyClientFilters, onShowAll
     }
     return byColumn;
   }, [allTickets, applyClientFilters, pending]);
+
+  useEffect(() => {
+    onVisibleTicketsChange?.(KANBAN_COLUMNS.flatMap((c) => columns[c.id]));
+  }, [columns, onVisibleTicketsChange]);
 
   const columnState: Record<KanbanColumnId, { loading: boolean; error: boolean; capped: boolean }> = {
     OPEN: { loading: openQuery.isLoading, error: openQuery.isError, capped: false },

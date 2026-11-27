@@ -549,56 +549,14 @@ export default function Reports() {
     URL.revokeObjectURL(url);
   }, []);
 
-  const readApiError = useCallback(async (resp: Response): Promise<string> => {
-    const contentType = resp.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      const data = await resp.json().catch(() => null);
-      const message = data && typeof data === "object" && "error" in data ? (data as any).error : null;
-      if (typeof message === "string" && message.trim()) return message;
+  // customFetch já lança ApiError quando a resposta não é 2xx (e devolve o corpo, não o Response).
+  const describeExportError = useCallback((err: unknown, fallback: string): string => {
+    if (err instanceof ApiError) {
+      const detail = (err.data as { error?: unknown } | null)?.error;
+      if (typeof detail === "string" && detail.trim()) return detail;
+      return `${fallback} (${err.status})`;
     }
-    const text = await resp.text().catch(() => "");
-    return text.trim() || `Falha na operação (${resp.status})`;
-  }, []);
-
-  const createPrintTarget = useCallback(() => {
-    const win = window.open("", "_blank", "noopener,noreferrer");
-    if (win) {
-      return {
-        writeAndPrint: (html: string) => {
-          win.document.open();
-          win.document.write(html);
-          win.document.close();
-          win.focus();
-          setTimeout(() => win.print(), 150);
-        },
-      };
-    }
-
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    document.body.appendChild(iframe);
-
-    const iframeWin = iframe.contentWindow;
-    if (!iframeWin) {
-      iframe.remove();
-      return null;
-    }
-
-    return {
-      writeAndPrint: (html: string) => {
-        iframeWin.document.open();
-        iframeWin.document.write(html);
-        iframeWin.document.close();
-        iframeWin.focus();
-        setTimeout(() => iframeWin.print(), 150);
-        setTimeout(() => iframe.remove(), 2_000);
-      },
-    };
+    return fallback;
   }, []);
 
   const buildExportTimestamp = useCallback(() => {
@@ -627,61 +585,17 @@ export default function Reports() {
     try {
       const ts = buildExportTimestamp();
       const params = buildOverviewExportParams({ format: formatKind });
-      const resp = (await customFetch(`/api/reports/export?${params.toString()}`, { method: "GET" })) as Response;
-      if (!resp.ok) {
-        setOverviewExportError(await readApiError(resp));
-        return;
-      }
-      const blob = await resp.blob();
+      const blob = await customFetch<Blob>(`/api/reports/export?${params.toString()}`, { method: "GET", responseType: "blob" });
       const ext = formatKind === "pdf" ? "pdf" : formatKind === "xlsx" ? "xlsx" : "csv";
       downloadBlob(blob, `relatorios_${ts}.${ext}`);
-    } catch {
-      setOverviewExportError("Falha ao exportar. Tente novamente.");
+    } catch (err) {
+      setOverviewExportError(describeExportError(err, "Falha ao exportar. Tente novamente."));
     } finally {
       setOverviewExporting(null);
     }
-  }, [buildExportTimestamp, buildOverviewExportParams, downloadBlob, readApiError, user]);
+  }, [buildExportTimestamp, buildOverviewExportParams, describeExportError, downloadBlob, user]);
 
-  const exportOverviewPrint = useCallback(async (alsoDownloadPdf: boolean) => {
-    if (!user) {
-      setOverviewExportError("Você precisa estar autenticado para exportar.");
-      return;
-    }
-    setOverviewExportError(null);
-    setOverviewExporting("pdf");
-    const target = createPrintTarget();
-    if (!target) {
-      setOverviewExportError("Não foi possível abrir a impressão no navegador. Verifique as permissões de pop-up.");
-      setOverviewExporting(null);
-      return;
-    }
-    try {
-      const ts = buildExportTimestamp();
-      const printParams = buildOverviewExportParams({ format: "print" });
-      const resp = (await customFetch(`/api/reports/export?${printParams.toString()}`, { method: "GET" })) as Response;
-      if (!resp.ok) {
-        setOverviewExportError(await readApiError(resp));
-        return;
-      }
-      const html = await resp.text();
-      target.writeAndPrint(html);
-
-      if (alsoDownloadPdf) {
-        const pdfParams = buildOverviewExportParams({ format: "pdf" });
-        const pdfResp = (await customFetch(`/api/reports/export?${pdfParams.toString()}`, { method: "GET" })) as Response;
-        if (pdfResp.ok) {
-          const pdfBlob = await pdfResp.blob();
-          downloadBlob(pdfBlob, `relatorios_${ts}.pdf`);
-        }
-      }
-    } catch {
-      setOverviewExportError("Falha ao imprimir/exportar. Tente novamente.");
-    } finally {
-      setOverviewExporting(null);
-    }
-  }, [buildExportTimestamp, buildOverviewExportParams, createPrintTarget, downloadBlob, readApiError, user]);
-
-  const exportTicketsDownload = useCallback(async (formatKind: "csv" | "xlsx") => {
+  const exportTicketsDownload = useCallback(async (formatKind: "pdf" | "csv" | "xlsx") => {
     if (!user) {
       setTicketsExportError("Você precisa estar autenticado para exportar.");
       return;
@@ -697,71 +611,16 @@ export default function Reports() {
       if (tableType) params.set("type", tableType);
       if (tablePriority) params.set("priority", tablePriority);
 
-      const resp = (await customFetch(`/api/reports/tickets/export?${params.toString()}`, { method: "GET" })) as Response;
-      if (!resp.ok) {
-        setTicketsExportError(await readApiError(resp));
-        return;
-      }
-      const blob = await resp.blob();
+      const blob = await customFetch<Blob>(`/api/reports/tickets/export?${params.toString()}`, { method: "GET", responseType: "blob" });
       const ts = buildExportTimestamp();
-      const ext = formatKind === "xlsx" ? "xlsx" : "csv";
+      const ext = formatKind === "pdf" ? "pdf" : formatKind === "xlsx" ? "xlsx" : "csv";
       downloadBlob(blob, `relatorios_chamados_${ts}.${ext}`);
-    } catch {
-      setTicketsExportError("Falha ao exportar. Tente novamente.");
+    } catch (err) {
+      setTicketsExportError(describeExportError(err, "Falha ao exportar. Tente novamente."));
     } finally {
       setTicketsExporting(null);
     }
-  }, [buildExportTimestamp, downloadBlob, readApiError, reportParams.from, reportParams.to, tablePriority, tableStatus, tableType, user]);
-
-  const exportTicketsPdf = useCallback(async () => {
-    if (!user) {
-      setTicketsExportError("Você precisa estar autenticado para exportar.");
-      return;
-    }
-    setTicketsExportError(null);
-    setTicketsExporting("pdf");
-    const ts = buildExportTimestamp();
-    const target = createPrintTarget();
-    if (!target) {
-      setTicketsExportError("Não foi possível abrir a impressão no navegador. Verifique as permissões de pop-up.");
-      setTicketsExporting(null);
-      return;
-    }
-    const params = new URLSearchParams();
-    params.set("format", "print");
-    if (reportParams.from) params.set("from", reportParams.from);
-    if (reportParams.to) params.set("to", reportParams.to);
-    if (tableStatus) params.set("status", tableStatus);
-    if (tableType) params.set("type", tableType);
-    if (tablePriority) params.set("priority", tablePriority);
-
-    const resp = (await customFetch(`/api/reports/tickets/export?${params.toString()}`, { method: "GET" })) as Response;
-    if (!resp.ok) {
-      setTicketsExportError(await readApiError(resp));
-      setTicketsExporting(null);
-      return;
-    }
-    const html = await resp.text();
-    target.writeAndPrint(html);
-
-    const pdfParams = new URLSearchParams();
-    pdfParams.set("format", "pdf");
-    if (reportParams.from) pdfParams.set("from", reportParams.from);
-    if (reportParams.to) pdfParams.set("to", reportParams.to);
-    if (tableStatus) pdfParams.set("status", tableStatus);
-    if (tableType) pdfParams.set("type", tableType);
-    if (tablePriority) pdfParams.set("priority", tablePriority);
-
-    const pdfResp = (await customFetch(`/api/reports/tickets/export?${pdfParams.toString()}`, { method: "GET" })) as Response;
-    if (!pdfResp.ok) {
-      setTicketsExportError(await readApiError(pdfResp));
-      setTicketsExporting(null);
-      return;
-    }
-    const pdfBlob = await pdfResp.blob();
-    downloadBlob(pdfBlob, `relatorios_chamados_${ts}.pdf`);
-    setTicketsExporting(null);
-  }, [buildExportTimestamp, createPrintTarget, downloadBlob, readApiError, reportParams.from, reportParams.to, tablePriority, tableStatus, tableType, user]);
+  }, [buildExportTimestamp, describeExportError, downloadBlob, reportParams.from, reportParams.to, tablePriority, tableStatus, tableType, user]);
 
   const professionalRankingData = professionalRankingQuery.data ?? professionalRankingCached;
   const isProfessionalRankingCached = !professionalRankingQuery.data && Boolean(professionalRankingCached);
@@ -849,10 +708,10 @@ export default function Reports() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => exportOverviewPrint(true)}
+                onClick={() => exportOverviewDownload("pdf")}
                 disabled={isFetchingAny || overviewExporting !== null}
               >
-                {overviewExporting === "pdf" ? "Imprimindo..." : "Exportar PDF"}
+                {overviewExporting === "pdf" ? "Gerando PDF..." : "Exportar PDF"}
               </Button>
               <Popover>
                 <PopoverTrigger asChild>
@@ -1431,10 +1290,10 @@ export default function Reports() {
             <Button
               type="button"
               variant="outline"
-              onClick={exportTicketsPdf}
+              onClick={() => exportTicketsDownload("pdf")}
               disabled={ticketsQuery.isFetching || ticketsExporting !== null}
             >
-              {ticketsExporting === "pdf" ? "Imprimindo..." : "Exportar PDF"}
+              {ticketsExporting === "pdf" ? "Gerando PDF..." : "Exportar PDF"}
             </Button>
             <Popover>
               <PopoverTrigger asChild>
