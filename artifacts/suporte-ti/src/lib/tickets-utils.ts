@@ -131,3 +131,69 @@ export function buildTicketsPageItems(current: number, totalPages: number): Tick
   }
   return items;
 }
+
+export type TicketsPeriod = "all" | "today" | "7d" | "30d" | "90d" | "custom";
+
+export const TICKETS_PERIOD_LABELS: Record<TicketsPeriod, string> = {
+  all: "Todo o período",
+  today: "Hoje",
+  "7d": "Últimos 7 dias",
+  "30d": "Últimos 30 dias",
+  "90d": "Últimos 90 dias",
+  custom: "Personalizado",
+};
+
+export type TicketsPeriodRange = { start: number | null; end: number | null };
+
+function parseLocalDate(value: string | undefined | null, endOfDay: boolean): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? "").trim());
+  if (!m) return null;
+  const d = endOfDay
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999)
+    : new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+/** Intervalo (horário local) do filtro de período, aplicado sobre a data de abertura do chamado. */
+export function resolveTicketsPeriodRange(
+  period: TicketsPeriod,
+  customFrom?: string | null,
+  customTo?: string | null,
+  now: Date = new Date(),
+): TicketsPeriodRange {
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const daysBack = (n: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - (n - 1)).getTime();
+  switch (period) {
+    case "today":
+      return { start: startOfToday, end: null };
+    case "7d":
+      return { start: daysBack(7), end: null };
+    case "30d":
+      return { start: daysBack(30), end: null };
+    case "90d":
+      return { start: daysBack(90), end: null };
+    case "custom": {
+      let start = parseLocalDate(customFrom, false);
+      let end = parseLocalDate(customTo, true);
+      if (start != null && end != null && start > end) {
+        // Datas invertidas: troca para não esconder tudo por engano.
+        const s0 = parseLocalDate(customTo, false);
+        const e0 = parseLocalDate(customFrom, true);
+        start = s0;
+        end = e0;
+      }
+      return { start, end };
+    }
+    default:
+      return { start: null, end: null };
+  }
+}
+
+export function isWithinTicketsPeriod(createdAt: string | Date | null | undefined, range: TicketsPeriodRange): boolean {
+  if (range.start == null && range.end == null) return true;
+  const t = createdAt ? new Date(createdAt).getTime() : NaN;
+  if (!Number.isFinite(t)) return false;
+  if (range.start != null && t < range.start) return false;
+  if (range.end != null && t > range.end) return false;
+  return true;
+}

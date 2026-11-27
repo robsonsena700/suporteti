@@ -60,3 +60,40 @@ console.log("Teste unitário do módulo de chamados (cards/filtros/ordenação) 
   assert.deepEqual(buildTicketsPageItems(5, 10), [1, "ellipsis-start", 4, 5, 6, "ellipsis-end", 10]);
   assert.deepEqual(buildTicketsPageItems(40, 79), [1, "ellipsis-start", 39, 40, 41, "ellipsis-end", 79]);
 }
+
+{
+  const { resolveTicketsPeriodRange, isWithinTicketsPeriod } = mod as any;
+  const exp = await import(pathToFileURL(path.resolve(__dirname, "../../artifacts/suporte-ti/src/lib/tickets-export.ts")).href);
+  const now = new Date(2026, 10, 27, 15, 0, 0);
+  const all = resolveTicketsPeriodRange("all", null, null, now);
+  assert.deepEqual(all, { start: null, end: null });
+  assert.equal(isWithinTicketsPeriod("2020-01-01T00:00:00Z", all), true);
+
+  const today = resolveTicketsPeriodRange("today", null, null, now);
+  assert.equal(today.start, new Date(2026, 10, 27).getTime());
+  assert.equal(isWithinTicketsPeriod(new Date(2026, 10, 27, 0, 5), today), true);
+  assert.equal(isWithinTicketsPeriod(new Date(2026, 10, 26, 23, 59), today), false);
+
+  const d7 = resolveTicketsPeriodRange("7d", null, null, now);
+  assert.equal(d7.start, new Date(2026, 10, 21).getTime());
+
+  const custom = resolveTicketsPeriodRange("custom", "2026-11-01", "2026-11-10", now);
+  assert.equal(isWithinTicketsPeriod(new Date(2026, 10, 10, 23, 30), custom), true);
+  assert.equal(isWithinTicketsPeriod(new Date(2026, 10, 11, 0, 1), custom), false);
+  assert.equal(isWithinTicketsPeriod(new Date(2026, 9, 31, 23, 59), custom), false);
+  const swapped = resolveTicketsPeriodRange("custom", "2026-11-10", "2026-11-01", now);
+  assert.deepEqual(swapped, custom);
+  assert.deepEqual(resolveTicketsPeriodRange("custom", "", "lixo", now), { start: null, end: null });
+  assert.equal(isWithinTicketsPeriod(null, custom), false);
+
+  // Exportação: CSV seguro (sem fórmulas) e HTML escapado
+  assert.equal(exp.csvCell("=HYPERLINK(1)"), "'=HYPERLINK(1)");
+  assert.equal(exp.csvCell('a;b"c'), '"a;b""c"');
+  assert.equal(exp.csvCell("linha1\nlinha2"), "linha1 linha2");
+  const csv = exp.buildTicketsCsv([{ id: 7, title: "Impressora; sala 2", status: "OPEN", priority: "HIGH", type: "HARDWARE", uf: "CE", municipality: "Fortaleza", createdAt: new Date(2026, 10, 1, 9, 5), createdBy: { name: "Ana" }, assignedTo: null, emailSentCount: 0 }]);
+  assert.ok(csv.startsWith("\uFEFFID;Título;Status"));
+  assert.ok(csv.includes('7;"Impressora; sala 2";Aberto;Alta;Equipamentos;Ana;CE;Fortaleza;;Não atribuído;01/11/2026 09:05;;Não'));
+  const html = exp.buildTicketsPrintHtml([{ id: 1, title: "<script>x</script>", status: "OPEN", priority: "LOW", type: "SOFTWARE", createdAt: now }], { title: "T", filters: [], generatedAt: now });
+  assert.ok(!html.includes("<script>x"));
+  assert.ok(html.includes("&lt;script&gt;x&lt;/script&gt;"));
+}
