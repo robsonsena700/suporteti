@@ -141,7 +141,16 @@ export default function Login() {
               Solicite acesso
             </Link>
           </div>
-          <div className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
+            <Link href="/politica-de-privacidade" className="text-muted-foreground hover:text-primary hover:underline">
+              Política de Privacidade
+            </Link>
+            <span className="text-muted-foreground">•</span>
+            <Link href="/termos-de-uso" className="text-muted-foreground hover:text-primary hover:underline">
+              Termos de Uso
+            </Link>
+          </div>
+          <div className="mt-2 flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <span>Versão {__APP_VERSION__}</span>
             <span>•</span>
             <span>{__APP_ENV__ === "production" ? "Produção" : "Desenvolvimento"}</span>

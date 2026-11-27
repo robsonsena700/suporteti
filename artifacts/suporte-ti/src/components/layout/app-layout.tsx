@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu } from "lucide-react";
 import { AppFooter } from "@/components/layout/app-footer";
+import { PrivacyAckDialog } from "@/components/privacy/privacy-ack-dialog";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -31,7 +32,9 @@ export function AppLayout({ children }: AppLayoutProps) {
     location === "/"
     || location === "/registro"
     || location.startsWith("/esqueci-senha")
-    || location.startsWith("/redefinir-senha");
+    || location.startsWith("/redefinir-senha")
+    || location === "/politica-de-privacidade"
+    || location === "/termos-de-uso";
   const isPendingRoute = location === "/pendente";
   const isReceiptRoute = location.includes("/comprovante");
 
@@ -40,9 +43,11 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const isFullScreen = location === "/chat";
+  const ackDialog = user && !isPendingRoute ? <PrivacyAckDialog /> : null;
 
   return (
     <div className="flex h-screen bg-background overflow-hidden safe-area-px safe-area-py">
+      {ackDialog}
       {!isMobile ? (
         <Sidebar />
       ) : (

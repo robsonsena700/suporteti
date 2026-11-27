@@ -57,6 +57,7 @@ jobs:
           pnpm run test:users:approval:unit
           pnpm run test:tickets:unit
           pnpm run test:tickets:kanban:unit
+          pnpm run test:privacy:unit
           pnpm run test:tickets:resolved:unit
           pnpm run test:tickets:access-policy:unit
           pnpm run test:tickets:messages:unit
