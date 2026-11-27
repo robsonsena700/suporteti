@@ -33,3 +33,30 @@ assert.deepEqual(sortedUserAsc.map(t => t.id), [1, 3, 2]);
 
 console.log("Teste unitário do módulo de chamados (cards/filtros/ordenação) concluído com sucesso.");
 
+{
+  const { buildTicketsPageItems, getTicketsPageInfo, normalizeTicketsPageSize } = mod as {
+    buildTicketsPageItems: (current: number, total: number) => Array<number | string>;
+    getTicketsPageInfo: (total: number, page: number, size: number) => { page: number; totalPages: number; start: number; end: number; total: number };
+    normalizeTicketsPageSize: (v: unknown) => number;
+  };
+
+  assert.equal(normalizeTicketsPageSize(undefined), 18);
+  assert.equal(normalizeTicketsPageSize("20"), 20);
+  assert.equal(normalizeTicketsPageSize(15), 15);
+  assert.equal(normalizeTicketsPageSize(50), 18);
+
+  assert.deepEqual(getTicketsPageInfo(74, 1, 18), { page: 1, totalPages: 5, start: 1, end: 18, total: 74 });
+  assert.deepEqual(getTicketsPageInfo(74, 5, 18), { page: 5, totalPages: 5, start: 73, end: 74, total: 74 });
+  assert.deepEqual(getTicketsPageInfo(74, 99, 18), { page: 5, totalPages: 5, start: 73, end: 74, total: 74 });
+  assert.deepEqual(getTicketsPageInfo(74, 0, 18), { page: 1, totalPages: 5, start: 1, end: 18, total: 74 });
+  assert.deepEqual(getTicketsPageInfo(0, 3, 18), { page: 1, totalPages: 1, start: 0, end: 0, total: 0 });
+  assert.equal(getTicketsPageInfo(1566, 1, 20).totalPages, 79);
+
+  assert.deepEqual(buildTicketsPageItems(1, 1), [1]);
+  assert.deepEqual(buildTicketsPageItems(1, 3), [1, 2, 3]);
+  assert.deepEqual(buildTicketsPageItems(1, 5), [1, 2, "ellipsis-end", 5]);
+  assert.deepEqual(buildTicketsPageItems(3, 5), [1, 2, 3, 4, 5]);
+  assert.deepEqual(buildTicketsPageItems(5, 5), [1, "ellipsis-start", 4, 5]);
+  assert.deepEqual(buildTicketsPageItems(5, 10), [1, "ellipsis-start", 4, 5, 6, "ellipsis-end", 10]);
+  assert.deepEqual(buildTicketsPageItems(40, 79), [1, "ellipsis-start", 39, 40, 41, "ellipsis-end", 79]);
+}

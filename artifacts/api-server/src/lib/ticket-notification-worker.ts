@@ -21,6 +21,7 @@ import QRCode from "qrcode";
 import { db } from "@workspace/db";
 import { logger } from "./logger";
 import { sendEmail } from "./mailer";
+import { recordTicketEmailDelivery } from "./ticket-email-deliveries";
 import { getAppPublicUrl } from "./password-reset";
 import {
   buildTicketNotificationEmail,
@@ -160,6 +161,7 @@ export async function runTicketNotificationCycle(): Promise<{ events: number; em
             attachments: qrPng ? [{ filename: `chamado-${ticket.id}.png`, content: qrPng, contentType: "image/png", cid: "qr-chamado" }] : undefined,
           });
           emails++;
+          await recordTicketEmailDelivery({ ticketId: ticket.id, recipientUserId: p.user.id, isRequester: p.isRequester });
         } catch (err) {
           failures++;
           logger.error({ err, ticketId, userId: p.user.id, trackingId: mail.trackingId }, "Notificacao de chamados: falha no envio");
