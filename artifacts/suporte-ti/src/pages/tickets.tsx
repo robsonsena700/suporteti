@@ -15,29 +15,68 @@ import {
   ListResolvedTicketsParams,
   UserRole
 } from "@workspace/api-client-react";
-import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, PlusCircle, Printer, Star } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { canViewResolvedTicketRating, filterAndSortTickets } from "@/lib/tickets-utils";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { ChevronLeft, ChevronRight, LayoutGrid, PlusCircle, Search, SquareKanban, Star } from "lucide-react";
+import {
+  TICKETS_PAGE_SIZE_OPTIONS,
+  buildTicketsPageItems,
+  canViewResolvedTicketRating,
+  filterAndSortTickets,
+  getTicketsPageInfo,
+  normalizeTicketsPageSize,
+  type TicketsPageSize,
+} from "@/lib/tickets-utils";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
+import { TicketsKanban } from "@/components/tickets/tickets-kanban";
+import { TicketCard, hasTicketEmailSent, type TicketListItem } from "@/components/tickets/ticket-card";
+import { matchesTicketQuickSearch } from "@/lib/tickets-kanban";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@workspace/api-client-react/custom-fetch";
 import { cn } from "@/lib/utils";
-import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
-import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 
-const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
 const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v2";
+const PAGE_SIZE_KEY = "suporte-ti:tickets:page-size";
+const VIEW_MODE_KEY = "suporte-ti:tickets:view-mode";
+
+type TicketsViewMode = "cards" | "kanban";
+type KanbanCategory = "ALL" | TicketType;
+
+function getInitialViewMode(): TicketsViewMode {
+  if (typeof window === "undefined") return "cards";
+  try {
+    return window.localStorage.getItem(VIEW_MODE_KEY) === "kanban" ? "kanban" : "cards";
+  } catch {
+    return "cards";
+  }
+}
+
+const TAB_LABELS: Record<TicketsMainTab, string> = {
+  [TicketType.SOFTWARE]: "Sistema",
+  [TicketType.HARDWARE]: "Equipamentos",
+  RESOLVED: "Resolvidos",
+};
+
+type TicketsPageState = { sig: string; page: number };
+
+function formatCount(n: number): string {
+  return n.toLocaleString("pt-BR");
+}
+
+function getInitialPageSize(): TicketsPageSize {
+  if (typeof window === "undefined") return normalizeTicketsPageSize(undefined);
+  try {
+    return normalizeTicketsPageSize(window.localStorage.getItem(PAGE_SIZE_KEY));
+  } catch {
+    return normalizeTicketsPageSize(undefined);
+  }
+}
 
 type TicketsMainTab = TicketType | "RESOLVED";
 
@@ -57,14 +96,16 @@ type TicketsListPersistedState = {
   actorUserId: number;
   typeTab: TicketsMainTab;
   filters: TicketsFilters;
-  userFilter: string;
-  locationFilter: string;
-  responsibleFilter: string;
-  sortBy: "createdAt" | "user" | "location" | "responsible";
-  sortDir: "asc" | "desc";
+  // Campos dos antigos "Filtros de chamados" (removidos): mantidos opcionais só para ler estados salvos.
+  userFilter?: string;
+  locationFilter?: string;
+  responsibleFilter?: string;
+  sortBy?: "createdAt" | "user" | "location" | "responsible";
+  sortDir?: "asc" | "desc";
   mineOnlyByTab: MineOnlyByTab;
   scrollY: number | null;
   lastActiveTicketId: number | null;
+  pageState?: TicketsPageState;
   savedAt: number;
 };
 
@@ -201,7 +242,6 @@ function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; 
 
 export default function Tickets() {
   const { user } = useAuth();
-  const canSelectUf = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR || user?.role === UserRole.GESTOR;
   const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
@@ -212,36 +252,23 @@ export default function Tickets() {
     const type = initialTypeTab === "RESOLVED" ? undefined : (initialTypeTab as TicketType);
     return { type };
   });
-  const [userFilter, setUserFilter] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
-  const [responsibleFilter, setResponsibleFilter] = useState("");
-  const [sortBy, setSortBy] = useState<"createdAt" | "user" | "location" | "responsible">("createdAt");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(FILTERS_ACCORDION_KEY) === "1";
-  });
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageModalTicketId, setImageModalTicketId] = useState<number | null>(null);
   const [imageModalTicketTitle, setImageModalTicketTitle] = useState<string>("");
   const [lastActiveTicketId, setLastActiveTicketId] = useState<number | null>(null);
+  const [pageSize, setPageSize] = useState<TicketsPageSize>(() => getInitialPageSize());
+  const [viewMode, setViewMode] = useState<TicketsViewMode>(() => getInitialViewMode());
+  const [kanbanCategory, setKanbanCategory] = useState<KanbanCategory>(() =>
+    initialTypeTab === "RESOLVED" ? "ALL" : (initialTypeTab as TicketType),
+  );
+  const [quickSearch, setQuickSearch] = useState("");
+  const [emailFilter, setEmailFilter] = useState<"all" | "sent" | "not_sent">("all");
+  const [pageState, setPageState] = useState<TicketsPageState>({ sig: "", page: 1 });
+  const listTopRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
-  const municipalityValueRef = useRef<string | undefined>(undefined);
-  const [municipalities, setMunicipalities] = useState<string[]>([]);
-  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
 
   const activeMineOnly = mineOnlyByTab[typeTab] ?? true;
-
-  useEffect(() => {
-    municipalityValueRef.current = filters.municipality;
-  }, [filters.municipality]);
-
-  const municipalityUf = useMemo(() => {
-    if (!user) return "";
-    if (canSelectUf) return filters.uf ?? "";
-    return user.uf ?? "";
-  }, [user, canSelectUf, filters.uf]);
 
   useEffect(() => {
     if (typeTab !== "RESOLVED" && (filters.status === TicketStatus.RESOLVED || filters.status === TicketStatus.CLOSED)) {
@@ -264,53 +291,6 @@ export default function Tickets() {
       return next;
     });
   }, [canManageRole, activeMineOnly, canSeeNoCoordinatorFilter, noCoordinatorOnly]);
-
-  useEffect(() => {
-    if (!municipalityUf) {
-      setMunicipalities([]);
-      setFilters((f) => (f.municipality ? { ...f, municipality: undefined } : f));
-      return;
-    }
-
-    const cached = getCachedMunicipalities(municipalityUf);
-    if (cached.length > 0) {
-      setMunicipalities(cached);
-    }
-
-    if (typeof navigator !== "undefined" && !navigator.onLine && cached.length > 0) {
-      const current = municipalityValueRef.current;
-      if (current && !cached.includes(current)) {
-        setFilters((f) => ({ ...f, municipality: undefined }));
-      }
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingMunicipalities(true);
-
-    fetchMunicipalitiesByUf(municipalityUf)
-      .then((data) => {
-        if (cancelled) return;
-        setMunicipalities(data);
-        const current = municipalityValueRef.current;
-        if (current && !data.includes(current)) {
-          setFilters((f) => ({ ...f, municipality: undefined }));
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMunicipalities([]);
-        setFilters((f) => ({ ...f, municipality: undefined }));
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setIsLoadingMunicipalities(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [municipalityUf]);
 
   const listTicketsParams: ListTicketsParams = {
     status:
@@ -344,16 +324,32 @@ export default function Tickets() {
 
   const listTicketsQuery = useListTickets(listTicketsParams, {
     query: {
-      enabled: typeTab !== "RESOLVED",
+      enabled: viewMode === "cards" && typeTab !== "RESOLVED",
       queryKey: getListTicketsQueryKey(listTicketsParams),
     }
   });
 
   const listResolvedTicketsQuery = useListResolvedTickets(listResolvedTicketsParams, {
     query: {
-      enabled: typeTab === "RESOLVED",
+      enabled: viewMode === "cards" && typeTab === "RESOLVED",
       queryKey: getListResolvedTicketsQueryKey(listResolvedTicketsParams),
     }
+  });
+
+  // Contagens das abas abertas: mesma consulta da listagem (com o "Meus chamados" de cada aba),
+  // então a aba ativa reaproveita o cache e as demais ficam sempre atualizadas.
+  const buildOpenTabParams = (tab: TicketType): ListTicketsParams => ({
+    ...listTicketsParams,
+    type: tab,
+    mine: canManageRole ? (mineOnlyByTab[tab] ? true : undefined) : undefined,
+  });
+  const softwareCountParams = buildOpenTabParams(TicketType.SOFTWARE);
+  const hardwareCountParams = buildOpenTabParams(TicketType.HARDWARE);
+  const softwareCountQuery = useListTickets(softwareCountParams, {
+    query: { enabled: !!user, queryKey: getListTicketsQueryKey(softwareCountParams) },
+  });
+  const hardwareCountQuery = useListTickets(hardwareCountParams, {
+    query: { enabled: !!user, queryKey: getListTicketsQueryKey(hardwareCountParams) },
   });
 
   const activeQuery = typeTab === "RESOLVED" ? listResolvedTicketsQuery : listTicketsQuery;
@@ -373,15 +369,119 @@ export default function Tickets() {
     return (err as any)?.message || "Não foi possível carregar os chamados.";
   }, [error, isError]);
 
-  const visibleTickets = useMemo(() => {
-    return filterAndSortTickets(tickets ?? [], {
-      userFilter,
-      locationFilter,
-      responsibleFilter,
-      sortBy,
-      sortDir,
+  // Filtros locais compartilhados pelas visões Normal (Cards) e Kanban.
+  const applyClientFilters = useCallback(
+    <T extends Parameters<typeof filterAndSortTickets>[0][number]>(list: T[]): T[] =>
+      filterAndSortTickets(list, { sortBy: "createdAt", sortDir: "desc" })
+        .filter((t) => matchesTicketQuickSearch(t as any, quickSearch))
+        .filter((t) => emailFilter === "all" || hasTicketEmailSent(t as any) === (emailFilter === "sent")),
+    [quickSearch, emailFilter],
+  );
+
+  const visibleTickets = useMemo(() => applyClientFilters(tickets ?? []), [tickets, applyClientFilters]);
+
+  const tabCounts = useMemo(() => {
+    const count = (data: Parameters<typeof filterAndSortTickets>[0] | undefined) =>
+      data ? applyClientFilters(data).length : undefined;
+    const counts: Record<TicketsMainTab, number | undefined> = {
+      [TicketType.SOFTWARE]: count(softwareCountQuery.data),
+      [TicketType.HARDWARE]: count(hardwareCountQuery.data),
+      // Resolvidos só carrega ao abrir a aba (volume alto); fora dela usa o cache, se houver.
+      RESOLVED: count(listResolvedTicketsQuery.data),
+    };
+    if (tickets) counts[typeTab] = visibleTickets.length;
+    return counts;
+  }, [
+    softwareCountQuery.data,
+    hardwareCountQuery.data,
+    listResolvedTicketsQuery.data,
+    tickets,
+    typeTab,
+    visibleTickets.length,
+    applyClientFilters,
+  ]);
+
+  // A página pertence a uma combinação de aba/filtros/ordem/tamanho: qualquer mudança volta para a página 1.
+  const pageSig = useMemo(
+    () => JSON.stringify([typeTab, filters, pageSize, quickSearch.trim(), emailFilter]),
+    [typeTab, filters, pageSize, quickSearch, emailFilter],
+  );
+  const pageInfo = getTicketsPageInfo(
+    visibleTickets.length,
+    pageState.sig === pageSig ? pageState.page : 1,
+    pageSize,
+  );
+  const pagedTickets = useMemo(
+    () => visibleTickets.slice((pageInfo.page - 1) * pageSize, pageInfo.page * pageSize),
+    [visibleTickets, pageInfo.page, pageSize],
+  );
+  const pageItems = buildTicketsPageItems(pageInfo.page, pageInfo.totalPages);
+
+  const goToPage = (next: number) => {
+    const target = Math.min(Math.max(1, next), pageInfo.totalPages);
+    if (target === pageInfo.page) return;
+    setPageState({ sig: pageSig, page: target });
+    listTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const openImageModal = (t: { id: number; title: string }) => {
+    setImageModalTicketId(t.id);
+    setImageModalTicketTitle(`#${t.id} — ${t.title}`);
+    setImageModalOpen(true);
+  };
+
+  const changeTypeTab = (next: TicketsMainTab) => {
+    setTypeTab(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(TYPE_TAB_KEY, next);
+    }
+    setFilters((f) => {
+      if (next === "RESOLVED") {
+        const nextStatus = f.status === TicketStatus.OPEN || f.status === TicketStatus.IN_PROGRESS ? undefined : f.status;
+        return { ...f, type: undefined, status: nextStatus };
+      }
+      const nextStatus = f.status === TicketStatus.RESOLVED || f.status === TicketStatus.CLOSED ? undefined : f.status;
+      return { ...f, type: next, status: nextStatus };
     });
-  }, [tickets, userFilter, locationFilter, responsibleFilter, sortBy, sortDir]);
+  };
+
+  const changeViewMode = (next: TicketsViewMode) => {
+    if (next === viewMode) return;
+    setViewMode(next);
+    if (next === "kanban") setKanbanCategory(typeTab === "RESOLVED" ? "ALL" : (typeTab as TicketType));
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, next);
+    } catch {
+    }
+  };
+
+  const changeKanbanCategory = (next: KanbanCategory) => {
+    setKanbanCategory(next);
+    if (next !== "ALL") changeTypeTab(next);
+  };
+
+  const kanbanBaseParams = useMemo(
+    () => ({
+      type: kanbanCategory === "ALL" ? undefined : kanbanCategory,
+      priority: filters.priority,
+      uf: filters.uf,
+      municipality: filters.municipality,
+      mine: filters.mine,
+      noCoordinator: filters.noCoordinator,
+    }),
+    [kanbanCategory, filters.priority, filters.uf, filters.municipality, filters.mine, filters.noCoordinator],
+  );
+
+  const kanbanActor = useMemo(() => (user ? { id: user.id, role: String(user.role) } : null), [user]);
+
+  const changePageSize = (value: string) => {
+    const next = normalizeTicketsPageSize(value);
+    setPageSize(next);
+    try {
+      window.localStorage.setItem(PAGE_SIZE_KEY, String(next));
+    } catch {
+    }
+  };
 
   const summaryCounts = useMemo(() => {
     let openCount = 0;
@@ -389,6 +489,7 @@ export default function Tickets() {
     let resolvedCount = 0;
     let closedCount = 0;
     let noCoordinatorCount = 0;
+    let emailSentCount = 0;
 
     for (const t of visibleTickets) {
       if (t.status === TicketStatus.OPEN) openCount += 1;
@@ -396,9 +497,10 @@ export default function Tickets() {
       if (t.status === TicketStatus.RESOLVED) resolvedCount += 1;
       if (t.status === TicketStatus.CLOSED) closedCount += 1;
       if (t.ownerHasCoordinator === false) noCoordinatorCount += 1;
+      if (hasTicketEmailSent(t as TicketListItem)) emailSentCount += 1;
     }
 
-    return { openCount, inProgressCount, resolvedCount, closedCount, noCoordinatorCount };
+    return { openCount, inProgressCount, resolvedCount, closedCount, noCoordinatorCount, emailSentCount };
   }, [visibleTickets]);
 
   const buildPersisted = useCallback((): TicketsListPersistedState | null => {
@@ -407,17 +509,13 @@ export default function Tickets() {
       actorUserId: user.id,
       typeTab,
       filters,
-      userFilter,
-      locationFilter,
-      responsibleFilter,
-      sortBy,
-      sortDir,
       mineOnlyByTab,
       scrollY: typeof window !== "undefined" ? window.scrollY : null,
       lastActiveTicketId,
+      pageState: pageState.sig === pageSig ? pageState : undefined,
       savedAt: Date.now(),
     };
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId]);
+  }, [user, typeTab, filters, mineOnlyByTab, lastActiveTicketId, pageState, pageSig]);
 
   const saveNow = useCallback(() => {
     const next = buildPersisted();
@@ -428,16 +526,18 @@ export default function Tickets() {
   const applyPersisted = useCallback((state: TicketsListPersistedState | null) => {
     if (!state) return;
     setTypeTab(state.typeTab);
-    setFilters(state.filters);
-    setUserFilter(state.userFilter);
-    setLocationFilter(state.locationFilter);
-    setResponsibleFilter(state.responsibleFilter);
-    setSortBy(state.sortBy);
-    setSortDir(state.sortDir);
+    // Só restaura filtros que ainda têm controle na tela (status/UF/município saíram com o painel de filtros).
+    setFilters({
+      type: state.filters.type,
+      priority: state.filters.priority,
+      mine: state.filters.mine,
+      noCoordinator: state.filters.noCoordinator,
+    });
     setMineOnlyByTab(state.mineOnlyByTab ?? {
       ...buildDefaultMineOnlyByTab(user?.role),
     });
     setLastActiveTicketId(state.lastActiveTicketId);
+    setPageState(state.pageState ?? { sig: "", page: 1 });
     pendingScrollYRef.current = state.scrollY;
   }, []);
 
@@ -513,62 +613,136 @@ export default function Tickets() {
     if (!user) return;
     const id = setTimeout(() => saveNow(), 200);
     return () => clearTimeout(id);
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, saveNow]);
+  }, [user, typeTab, filters, mineOnlyByTab, lastActiveTicketId, pageState, saveNow]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Chamados</h1>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-bold tracking-tight">
+            Chamados
+            <span className="text-muted-foreground font-semibold"> · {viewMode === "kanban" ? "Kanban" : "Visão Normal"}</span>
+          </h1>
           <p className="text-muted-foreground mt-1">
-            Gerencie e acompanhe as solicitações de suporte.
+            {viewMode === "kanban"
+              ? "Arraste os cards entre as colunas para atualizar o status do atendimento."
+              : "Visualização em grade de cards com todos os informativos e indicador de e-mail enviado."}
           </p>
         </div>
-        <Button asChild>
-          <Link href="/chamados/novo">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Abrir Chamado
-          </Link>
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label="Modo de visualização" className="inline-flex h-10 items-center rounded-lg border bg-muted/50 p-1">
+            {([
+              { id: "cards", label: "Normal (Cards)", Icon: LayoutGrid },
+              { id: "kanban", label: "Kanban", Icon: SquareKanban },
+            ] as const).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={viewMode === id}
+                onClick={() => changeViewMode(id)}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors",
+                  viewMode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4" aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+          <Button asChild>
+            <Link href="/chamados/novo">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Abrir Chamado
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {viewMode === "kanban" ? (
         <Tabs
-          value={typeTab}
-          onValueChange={(v) => {
-            const next = v as TicketsMainTab;
-            setTypeTab(next);
-            if (typeof window !== "undefined") {
-              window.localStorage.setItem(TYPE_TAB_KEY, next);
-            }
-            setFilters((f) => {
-              if (next === "RESOLVED") {
-                const nextStatus = f.status === TicketStatus.OPEN || f.status === TicketStatus.IN_PROGRESS ? undefined : f.status;
-                return { ...f, type: undefined, status: nextStatus };
-              }
-              const nextStatus = f.status === TicketStatus.RESOLVED || f.status === TicketStatus.CLOSED ? undefined : f.status;
-              return { ...f, type: next, status: nextStatus };
-            });
-          }}
+          className="min-w-0 max-w-full overflow-x-auto"
+          value={kanbanCategory}
+          onValueChange={(v) => changeKanbanCategory(v as KanbanCategory)}
         >
-          <TabsList className="h-11 p-1">
-            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-4">
+          <TabsList className="h-11 w-max p-1">
+            <TabsTrigger value="ALL" className="h-9 px-3 sm:px-4">Todos</TabsTrigger>
+            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 gap-1.5 px-3 sm:px-4">
+              <span className="h-2 w-2 rounded-full bg-[var(--series-software)]" aria-hidden="true" />
               Sistema
             </TabsTrigger>
-            <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-4">
+            <TabsTrigger value={TicketType.HARDWARE} className="h-9 gap-1.5 px-3 sm:px-4">
+              <span className="h-2 w-2 rounded-full bg-[var(--series-hardware)]" aria-hidden="true" />
               Equipamentos
-            </TabsTrigger>
-            <TabsTrigger value="RESOLVED" className="h-9 px-4">
-              Resolvidos
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="text-xs text-muted-foreground">
-          {typeTab === "RESOLVED"
-            ? "Exibindo chamados resolvidos"
-            : typeTab === TicketType.SOFTWARE
-              ? "Exibindo chamados de Sistema"
-              : "Exibindo chamados de Equipamentos"}
+        ) : (
+        <Tabs
+          className="min-w-0 max-w-full overflow-x-auto"
+          value={typeTab}
+          onValueChange={(v) => changeTypeTab(v as TicketsMainTab)}
+        >
+          <TabsList className="h-11 w-max p-1">
+            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-3 sm:px-4">
+              Sistema
+              {tabCounts[TicketType.SOFTWARE] !== undefined ? (
+                <span className="ml-1 tabular-nums text-muted-foreground">({formatCount(tabCounts[TicketType.SOFTWARE] ?? 0)})</span>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-3 sm:px-4">
+              Equipamentos
+              {tabCounts[TicketType.HARDWARE] !== undefined ? (
+                <span className="ml-1 tabular-nums text-muted-foreground">({formatCount(tabCounts[TicketType.HARDWARE] ?? 0)})</span>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="RESOLVED" className="h-9 px-3 sm:px-4">
+              Resolvidos
+              {tabCounts["RESOLVED"] !== undefined ? (
+                <span className="ml-1 tabular-nums text-muted-foreground">({formatCount(tabCounts["RESOLVED"] ?? 0)})</span>
+              ) : null}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Select
+            value={filters.priority || "all"}
+            onValueChange={(v) => setFilters((f) => ({ ...f, priority: v === "all" ? undefined : (v as TicketPriority) }))}
+          >
+            <SelectTrigger className="h-9 sm:w-[170px]" aria-label="Filtrar por prioridade">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Prioridade: Todas</SelectItem>
+              <SelectItem value={TicketPriority.HIGH}>Prioridade: Alta</SelectItem>
+              <SelectItem value={TicketPriority.MEDIUM}>Prioridade: Média</SelectItem>
+              <SelectItem value={TicketPriority.LOW}>Prioridade: Baixa</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={emailFilter} onValueChange={(v) => setEmailFilter(v as typeof emailFilter)}>
+            <SelectTrigger className="h-9 sm:w-[160px]" aria-label="Filtrar por e-mail enviado">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">E-mail: Todos</SelectItem>
+              <SelectItem value="sent">E-mail: Enviado</SelectItem>
+              <SelectItem value="not_sent">E-mail: Não enviado</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="relative sm:w-80">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              type="search"
+              value={quickSearch}
+              onChange={(e) => setQuickSearch(e.target.value.slice(0, 120))}
+              placeholder="Buscar por #ID, título, solicitante, responsável ou unidade, UF..."
+              aria-label="Buscar chamados"
+              className="h-9 pl-8"
+            />
+          </div>
         </div>
       </div>
 
@@ -599,211 +773,19 @@ export default function Tickets() {
         </div>
       ) : null}
 
-      <Card>
-        <CardContent className="p-4">
-          <Accordion
-            type="single"
-            collapsible
-            value={filtersAccordionOpen ? "filters" : ""}
-            onValueChange={(value) => {
-              const open = value === "filters";
-              setFiltersAccordionOpen(open);
-              if (typeof window !== "undefined") {
-                window.localStorage.setItem(FILTERS_ACCORDION_KEY, open ? "1" : "0");
-              }
-            }}
-            className="w-full"
-          >
-            <AccordionItem value="filters" className="border-b-0">
-              <AccordionTrigger
-                className="py-2 hover:no-underline"
-                aria-label={filtersAccordionOpen ? "Recolher filtros" : "Expandir filtros"}
-              >
-                <div className="text-left">
-                  <p className="text-sm font-semibold">Filtros de chamados</p>
-                  <p className="text-xs text-muted-foreground">Status, prioridade, UF, município, localização, responsável e ordenação</p>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="pt-2">
-                <div className="space-y-4">
-                  <div className={cn("grid grid-cols-1 gap-4", canSelectUf ? "md:grid-cols-4" : "md:grid-cols-3")}>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Status</label>
-                      <Select
-                        value={filters.status || "all"}
-                        onValueChange={(v) => {
-                          if (v === "all") {
-                            setFilters((f) => ({ ...f, status: undefined }));
-                            return;
-                          }
-                          const nextStatus = v as TicketStatus;
-                          if ((nextStatus === TicketStatus.RESOLVED || nextStatus === TicketStatus.CLOSED) && typeTab !== "RESOLVED") {
-                            setTypeTab("RESOLVED");
-                            if (typeof window !== "undefined") {
-                              window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
-                            }
-                            setFilters((f) => ({ ...f, type: undefined, status: nextStatus }));
-                            return;
-                          }
-                          if ((nextStatus === TicketStatus.OPEN || nextStatus === TicketStatus.IN_PROGRESS || nextStatus === TicketStatus.AWAITING_CUSTOMER || nextStatus === TicketStatus.IN_DEVELOPMENT) && typeTab === "RESOLVED") {
-                            setFilters((f) => ({ ...f, status: undefined }));
-                            return;
-                          }
-                          setFilters((f) => ({ ...f, status: nextStatus }));
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={typeTab === "RESOLVED" ? "Todos (resolvidos/cancelados)" : "Abertos e em andamento"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">
-                            {typeTab === "RESOLVED" ? "Todos (resolvidos/cancelados)" : "Abertos e em andamento"}
-                          </SelectItem>
-                          {typeTab !== "RESOLVED" ? (
-                            <>
-                              <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>
-                              <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
-                              <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem>
-                              <SelectItem value={TicketStatus.IN_DEVELOPMENT}>Em Desenvolvimento</SelectItem>
-                              <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                              <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
-                            </>
-                          ) : (
-                            <>
-                              <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                              <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
-                            </>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Prioridade</label>
-                      <Select
-                        value={filters.priority || "all"}
-                        onValueChange={(v) => setFilters(f => ({ ...f, priority: v === "all" ? undefined : v as TicketPriority }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Todas" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todas</SelectItem>
-                          <SelectItem value={TicketPriority.LOW}>Baixa</SelectItem>
-                          <SelectItem value={TicketPriority.MEDIUM}>Média</SelectItem>
-                          <SelectItem value={TicketPriority.HIGH}>Alta</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {canSelectUf ? (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">UF</label>
-                        <Select
-                          value={filters.uf || "all"}
-                          onValueChange={(v) => setFilters((f) => ({ ...f, uf: v === "all" ? undefined : v, municipality: undefined }))}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Todas as UFs" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Todas as UFs</SelectItem>
-                            {UFS.map(uf => (
-                              <SelectItem key={uf} value={uf}>{uf}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ) : null}
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-sm font-medium">Município</label>
-                        {filters.municipality ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => setFilters((f) => ({ ...f, municipality: undefined }))}
-                          >
-                            Limpar
-                          </Button>
-                        ) : null}
-                      </div>
-                      <MunicipalityCombobox
-                        uf={municipalityUf}
-                        value={filters.municipality ?? ""}
-                        options={municipalities}
-                        loading={isLoadingMunicipalities}
-                        disabled={!municipalityUf}
-                        onChange={(value) => setFilters((f) => ({ ...f, municipality: value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Filtrar por usuário</label>
-                      <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="Nome do solicitante" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Filtrar por localização</label>
-                      <Input value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} placeholder="UF ou Município" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Filtrar por responsável</label>
-                      <Input value={responsibleFilter} onChange={(e) => setResponsibleFilter(e.target.value)} placeholder="Nome do responsável" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Ordenar por</label>
-                      <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="createdAt">Data</SelectItem>
-                          <SelectItem value="user">Usuário</SelectItem>
-                          <SelectItem value="location">Localização</SelectItem>
-                          <SelectItem value="responsible">Responsável</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Ordem</label>
-                      <Select value={sortDir} onValueChange={(v) => setSortDir(v as any)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="asc">Crescente</SelectItem>
-                          <SelectItem value="desc">Decrescente</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        </CardContent>
-      </Card>
-
+      {viewMode === "cards" ? (
       <div className="flex flex-wrap items-center gap-2">
         {typeTab === "RESOLVED" ? (
           <>
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-600" />
               <span className="font-medium">Resolvidos:</span>
-              <span className="font-semibold">{summaryCounts.resolvedCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.resolvedCount)}</span>
             </div>
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-slate-600" />
               <span className="font-medium">Cancelados:</span>
-              <span className="font-semibold">{summaryCounts.closedCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.closedCount)}</span>
             </div>
           </>
         ) : (
@@ -811,12 +793,12 @@ export default function Tickets() {
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-slate-900" />
               <span className="font-medium">Abertos:</span>
-              <span className="font-semibold">{summaryCounts.openCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.openCount)}</span>
             </div>
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-orange-500" />
               <span className="font-medium">Em Andamento:</span>
-              <span className="font-semibold">{summaryCounts.inProgressCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.inProgressCount)}</span>
             </div>
           </>
         )}
@@ -824,11 +806,29 @@ export default function Tickets() {
           <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
             <span className="h-2 w-2 rounded-full bg-amber-500" />
             <span className="font-medium">Sem Coordenador:</span>
-            <span className="font-semibold">{summaryCounts.noCoordinatorCount}</span>
+            <span className="font-semibold tabular-nums">{formatCount(summaryCounts.noCoordinatorCount)}</span>
           </div>
         ) : null}
+        <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+          <span className="h-2 w-2 rounded-full bg-emerald-600" />
+          <span className="font-medium">E-mail Enviado:</span>
+          <span className="font-semibold tabular-nums">{formatCount(summaryCounts.emailSentCount)}</span>
+        </div>
       </div>
+      ) : null}
 
+      {viewMode === "kanban" ? (
+        <TicketsKanban
+          actor={kanbanActor}
+          baseParams={kanbanBaseParams}
+          applyClientFilters={applyClientFilters}
+          onOpenImage={openImageModal}
+          onShowAllFinished={() => {
+            changeViewMode("cards");
+            changeTypeTab("RESOLVED");
+          }}
+        />
+      ) : (
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
@@ -863,112 +863,114 @@ export default function Tickets() {
               Nenhum chamado encontrado com os filtros atuais.
             </div>
           ) : (
-            <div key={typeTab} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
-              {visibleTickets.map((ticket) => (
-                <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
-                  {(() => {
-                    const noCoordinator = ticket.ownerHasCoordinator === false;
-                    return (
-                  <div
-                    className={cn(
-                      "rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors",
-                      noCoordinator ? "border-amber-400/70 ring-1 ring-amber-400/20" : null,
-                    )}
-                    onClick={() => {
-                      setLastActiveTicketId(ticket.id);
-                      saveNow();
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold truncate">#{ticket.id} — {ticket.title}</p>
-                          {noCoordinator ? (
-                            <span className="rounded-full border border-amber-400/50 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                              Sem coordenador
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {ticket.createdBy?.name ?? "—"} • {ticket.uf} - {ticket.municipality}
-                        </p>
-                        {ticket.establishment ? (
-                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                            {ticket.establishment}
-                          </p>
-                        ) : null}
-                        {ticket.createdBy?.role === UserRole.GESTOR ? (
-                          <div className="mt-1">
-                            <span className="rounded-full border border-indigo-300/50 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
-                              Chamado do Gestor associado
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-col gap-2 items-end">
-                        <StatusBadge status={ticket.status} />
-                        <PriorityBadge priority={ticket.priority} />
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <TypeBadge type={ticket.type} />
-                      {ticket.status === TicketStatus.OPEN && (ticket.imageAttachmentsCount ?? 0) > 0 ? (
-                        <button
-                          type="button"
-                          aria-label="Visualizar imagem anexada"
-                          className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium hover:bg-muted/50 tap-target"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setImageModalTicketId(ticket.id);
-                            setImageModalTicketTitle(`#${ticket.id} — ${ticket.title}`);
-                            setImageModalOpen(true);
-                          }}
-                        >
-                          <ImageIcon className="h-3.5 w-3.5" />
-                          imagem ({ticket.imageAttachmentsCount})
-                        </button>
-                      ) : (
-                        <div className="flex items-center">
-                          {ticket.status === TicketStatus.RESOLVED ? (
-                            <ResolvedTicketRatingStars ticketId={ticket.id} actorRole={user?.role} />
-                          ) : null}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          aria-label="Imprimir comprovante"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            window.open(`/chamados/${ticket.id}/comprovante`, "_blank", "noopener,noreferrer");
-                          }}
-                        >
-                          <Printer className="h-4 w-4" />
-                        </Button>
-                        <p className="text-xs text-muted-foreground">
-                          {format(new Date(ticket.createdAt), "dd/MM/yyyy", { locale: ptBR })}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 pt-3 border-t text-sm">
-                      <p className="text-xs text-muted-foreground">Responsável</p>
-                      <p className="font-medium truncate">{ticket.assignedTo?.name ?? "Não atribuído"}</p>
-                    </div>
-                  </div>
-                    );
-                  })()}
-                </Link>
+            <>
+            <div ref={listTopRef} className="mb-4 flex flex-col gap-3 scroll-mt-24 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                Exibindo{" "}
+                <span className="font-semibold text-foreground tabular-nums">
+                  {formatCount(pageInfo.start)}–{formatCount(pageInfo.end)}
+                </span>{" "}
+                de <span className="font-semibold text-foreground tabular-nums">{formatCount(pageInfo.total)}</span>{" "}
+                {pageInfo.total === 1 ? "chamado" : "chamados"}
+              </p>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="tickets_page_size" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Cards por tela
+                </Label>
+                <Select value={String(pageSize)} onValueChange={changePageSize}>
+                  <SelectTrigger id="tickets_page_size" className="h-9 w-[84px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TICKETS_PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div key={`${typeTab}-${pageInfo.page}-${pageSize}`} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
+              {pagedTickets.map((ticket) => (
+                <TicketCard
+                  key={ticket.id}
+                  ticket={ticket as TicketListItem}
+                  onOpen={() => {
+                    setLastActiveTicketId(ticket.id);
+                    saveNow();
+                  }}
+                  onOpenImage={openImageModal}
+                  footerExtra={
+                    ticket.status === TicketStatus.RESOLVED ? (
+                      <ResolvedTicketRatingStars ticketId={ticket.id} actorRole={user?.role} />
+                    ) : null
+                  }
+                />
               ))}
             </div>
+            <nav
+              aria-label="Paginação de chamados"
+              className="mt-6 flex flex-col-reverse items-center justify-between gap-3 border-t pt-4 sm:flex-row"
+            >
+              <p className="text-xs text-muted-foreground">
+                Página {formatCount(pageInfo.page)} de {formatCount(pageInfo.totalPages)} · {pageSize} cards por tela ({TAB_LABELS[typeTab]})
+              </p>
+              <ul className="flex flex-wrap items-center justify-center gap-1">
+                <li>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={pageInfo.page <= 1}
+                    onClick={() => goToPage(pageInfo.page - 1)}
+                    aria-label="Página anterior"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">Anterior</span>
+                  </Button>
+                </li>
+                {pageItems.map((item) =>
+                  typeof item === "number" ? (
+                    <li key={item}>
+                      <Button
+                        type="button"
+                        variant={item === pageInfo.page ? "default" : "ghost"}
+                        size="sm"
+                        className="min-w-9 tabular-nums"
+                        aria-label={`Página ${item}`}
+                        aria-current={item === pageInfo.page ? "page" : undefined}
+                        onClick={() => goToPage(item)}
+                      >
+                        {formatCount(item)}
+                      </Button>
+                    </li>
+                  ) : (
+                    <li key={item} aria-hidden="true" className="px-1.5 text-sm text-muted-foreground select-none">
+                      …
+                    </li>
+                  ),
+                )}
+                <li>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={pageInfo.page >= pageInfo.totalPages}
+                    onClick={() => goToPage(pageInfo.page + 1)}
+                    aria-label="Próxima página"
+                  >
+                    <span className="hidden sm:inline">Próxima</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </li>
+              </ul>
+            </nav>
+            </>
           )}
         </CardContent>
       </Card>
+      )}
 
       {imageModalTicketId != null ? (
         <TicketImageModal

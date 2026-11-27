@@ -8,6 +8,8 @@ import { USER_SUMMARY_COLUMNS } from "../lib/user-summary";
 import { buildTicketVisibilityWhere } from "../lib/ticket-visibility";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
+import { parseExpectedStatus, parseListLimit, TICKET_STATUS_CONFLICT_MESSAGE } from "../lib/ticket-status-concurrency";
+import { loadTicketEmailSummary } from "../lib/ticket-email-deliveries";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { logger } from "../lib/logger";
 import { createInMemoryRateLimiter } from "../lib/rate-limit";
@@ -175,6 +177,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
       .where(inArray(gestorCoordinatorsTable.gestorId, ownerIds));
     gestorOwners.forEach((r) => ownersWithCoordinator.add(r.gestorId));
   }
+  const emailSummary = await loadTicketEmailSummary(allTickets.map((t) => t.id));
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
@@ -193,6 +196,9 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
+    emailSentAt: emailSummary.get(t.id)?.lastSentAt ?? null,
+    emailSentCount: emailSummary.get(t.id)?.count ?? 0,
+    emailRequesterNotified: emailSummary.get(t.id)?.requesterNotified ?? false,
     createdBy: t.createdBy ? {
       id: t.createdBy.id,
       name: t.createdBy.name,
@@ -212,7 +218,12 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
 
 router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { status, type, priority, uf, municipality, mine, noCoordinator } = req.query as Record<string, string | undefined>;
+  const { status, type, priority, uf, municipality, mine, noCoordinator, limit } = req.query as Record<string, string | undefined>;
+  const parsedLimit = parseListLimit(limit);
+  if (parsedLimit === "invalid") {
+    res.status(400).json({ error: "Limite inválido" });
+    return;
+  }
 
   // Mesma regra usada pelo dashboard (lib/ticket-visibility.ts).
   const visibilityWhere = await buildTicketVisibilityWhere(user);
@@ -296,9 +307,12 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
         columns: { id: true, mimeType: true },
       },
     },
-    orderBy: [desc(ticketsTable.createdAt)],
+    // Com limite (quadro Kanban), traz os finalizados mais recentes.
+    orderBy: parsedLimit ? [desc(ticketsTable.updatedAt), desc(ticketsTable.id)] : [desc(ticketsTable.createdAt)],
+    ...(parsedLimit ? { limit: parsedLimit } : {}),
   });
 
+  const emailSummary = await loadTicketEmailSummary(allTickets.map((t) => t.id));
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
@@ -315,6 +329,9 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
+    emailSentAt: emailSummary.get(t.id)?.lastSentAt ?? null,
+    emailSentCount: emailSummary.get(t.id)?.count ?? 0,
+    emailRequesterNotified: emailSummary.get(t.id)?.requesterNotified ?? false,
     createdBy: t.createdBy ? {
       id: t.createdBy.id,
       name: t.createdBy.name,
@@ -788,6 +805,20 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     return;
   }
 
+  // Concorrência otimista: quem arrasta um card informa o status que viu na tela.
+  const expectedStatus = parseExpectedStatus(req.body);
+  if (expectedStatus === "invalid") {
+    res.status(400).json({ error: "Status esperado inválido" });
+    return;
+  }
+  if (expectedStatus && expectedStatus !== existing.status) {
+    res.status(409).json({ error: TICKET_STATUS_CONFLICT_MESSAGE, currentStatus: existing.status });
+    return;
+  }
+  const updateWhere = expectedStatus
+    ? and(eq(ticketsTable.id, id), eq(ticketsTable.status, expectedStatus))
+    : eq(ticketsTable.id, id);
+
   const requestedStatus = parsed.data.status;
   const isReopenAction =
     typeof requestedStatus === "string"
@@ -852,8 +883,9 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     ? await db.transaction(async (tx) => {
       const [updated] = await tx.update(ticketsTable)
         .set(parsed.data)
-        .where(eq(ticketsTable.id, id))
+        .where(updateWhere)
         .returning();
+      if (!updated) return [];
 
       const preview = awaitingCustomerMessage.trim().slice(0, 140);
       const [msg] = await tx.insert(messagesTable).values({
@@ -885,8 +917,14 @@ router.patch("/tickets/:id", requireAuth, requireActive, async (req, res): Promi
     })
     : await db.update(ticketsTable)
       .set(parsed.data)
-      .where(eq(ticketsTable.id, id))
+      .where(updateWhere)
       .returning();
+
+  if (!ticket) {
+    // Só acontece quando o status mudou entre a leitura e a gravação (expectedStatus).
+    res.status(409).json({ error: TICKET_STATUS_CONFLICT_MESSAGE });
+    return;
+  }
 
   if (!shouldNotifyAwaitingCustomer) {
     await auditTicketUpdate({ ticketId: id, actorUserId: user.userId, changes });
@@ -951,6 +989,16 @@ router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res)
     return;
   }
 
+  const expectedStatus = parseExpectedStatus(req.body);
+  if (expectedStatus === "invalid") {
+    res.status(400).json({ error: "Status esperado inválido" });
+    return;
+  }
+  if (expectedStatus && expectedStatus !== existing.status) {
+    res.status(409).json({ error: TICKET_STATUS_CONFLICT_MESSAGE, currentStatus: existing.status });
+    return;
+  }
+
   if (!existing.assignedToId) {
     res.status(400).json({ error: "Para alterar o status, é obrigatório atribuir previamente um responsável (Admin, Coordenador ou Analista)." });
     return;
@@ -968,8 +1016,13 @@ router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res)
     const [updated] = await tx
       .update(ticketsTable)
       .set({ status: "RESOLVED" })
-      .where(eq(ticketsTable.id, id))
+      .where(
+        expectedStatus
+          ? and(eq(ticketsTable.id, id), eq(ticketsTable.status, expectedStatus))
+          : eq(ticketsTable.id, id),
+      )
       .returning();
+    if (!updated) return [];
 
     const preview = solutionMessage.trim().slice(0, 140);
     const [msg] = await tx.insert(messagesTable).values({
@@ -999,6 +1052,10 @@ router.post("/tickets/:id/resolve", requireAuth, requireActive, async (req, res)
   });
 
   if (!ticket) {
+    if (expectedStatus) {
+      res.status(409).json({ error: TICKET_STATUS_CONFLICT_MESSAGE });
+      return;
+    }
     res.status(404).json({ error: "Chamado não encontrado" });
     return;
   }

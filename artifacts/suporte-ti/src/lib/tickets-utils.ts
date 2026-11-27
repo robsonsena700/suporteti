@@ -75,3 +75,59 @@ export function filterAndSortTickets<T extends TicketLikeBase>(
     return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * factor;
   });
 }
+
+export const TICKETS_PAGE_SIZE_OPTIONS = [15, 18, 20] as const;
+export type TicketsPageSize = (typeof TICKETS_PAGE_SIZE_OPTIONS)[number];
+export const DEFAULT_TICKETS_PAGE_SIZE: TicketsPageSize = 18;
+
+export function normalizeTicketsPageSize(value: unknown): TicketsPageSize {
+  const n = typeof value === "string" ? Number(value) : value;
+  return (TICKETS_PAGE_SIZE_OPTIONS as readonly unknown[]).includes(n)
+    ? (n as TicketsPageSize)
+    : DEFAULT_TICKETS_PAGE_SIZE;
+}
+
+export type TicketsPageInfo = {
+  page: number;
+  totalPages: number;
+  start: number;
+  end: number;
+  total: number;
+};
+
+/** Calcula a página efetiva (limitada ao intervalo válido) e o intervalo 1-based exibido. */
+export function getTicketsPageInfo(total: number, requestedPage: number, pageSize: number): TicketsPageInfo {
+  const safeTotal = Math.max(0, Math.floor(total));
+  const size = Math.max(1, Math.floor(pageSize));
+  const totalPages = Math.max(1, Math.ceil(safeTotal / size));
+  const page = Math.min(Math.max(1, Math.floor(requestedPage) || 1), totalPages);
+  if (safeTotal === 0) return { page: 1, totalPages: 1, start: 0, end: 0, total: 0 };
+  const start = (page - 1) * size + 1;
+  const end = Math.min(safeTotal, page * size);
+  return { page, totalPages, start, end, total: safeTotal };
+}
+
+export type TicketsPageItem = number | "ellipsis-start" | "ellipsis-end";
+
+/**
+ * Itens da barra de paginação: sempre a primeira e a última página, a atual e suas vizinhas.
+ * Lacunas de uma única página mostram a página; lacunas maiores viram reticências.
+ * Ex.: (1, 5) => [1, 2, "ellipsis-end", 5]; (5, 10) => [1, "ellipsis-start", 4, 5, 6, "ellipsis-end", 10].
+ */
+export function buildTicketsPageItems(current: number, totalPages: number): TicketsPageItem[] {
+  const total = Math.max(1, Math.floor(totalPages));
+  const page = Math.min(Math.max(1, Math.floor(current) || 1), total);
+  const wanted = new Set<number>([1, total, page - 1, page, page + 1]);
+  const pages = [...wanted].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const items: TicketsPageItem[] = [];
+  for (let i = 0; i < pages.length; i += 1) {
+    const p = pages[i];
+    const prev = pages[i - 1];
+    if (prev !== undefined) {
+      if (p - prev === 2) items.push(prev + 1);
+      else if (p - prev > 2) items.push(p > page ? "ellipsis-end" : "ellipsis-start");
+    }
+    items.push(p);
+  }
+  return items;
+}
