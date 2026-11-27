@@ -12,6 +12,7 @@ import { sendEmail } from "../lib/mailer";
 import { buildPasswordResetEmail, buildPasswordResetLink, generateResetToken, hashResetToken } from "../lib/password-reset";
 import { isPasswordReused, validatePasswordStrength } from "../lib/password-policy";
 import { createInMemoryRateLimiter } from "../lib/rate-limit";
+import { recordPrivacyAcceptance } from "./privacy";
 
 const router: IRouter = Router();
 
@@ -132,6 +133,14 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     role: "USER",
     status: "PENDING",
   }).returning();
+
+  // Evidência do aceite (LGPD): versão e hash da Política e dos Termos vigentes, data/hora e IP.
+  // Falha aqui não impede o cadastro; o usuário verá o aviso de ciência no primeiro acesso.
+  try {
+    await recordPrivacyAcceptance({ userId: user.id, kind: "ACEITE_CADASTRO", ip: String(req.ip || "").slice(0, 100) || null });
+  } catch (err) {
+    logger.warn({ err, userId: user.id }, "Privacidade: falha ao registrar aceite no cadastro");
+  }
 
   const token = signToken({
     userId: user.id,

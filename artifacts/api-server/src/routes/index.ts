@@ -14,6 +14,7 @@ import attachmentDiagnosticsRouter from "./attachment-diagnostics";
 import ibgeRouter from "./ibge";
 import establishmentsRouter from "./establishments";
 import ticketAuditRouter from "./ticket-audit";
+import privacyRouter from "./privacy";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(chatAttachmentsRouter);
 router.use(ibgeRouter);
 router.use(establishmentsRouter);
 router.use(ticketAuditRouter);
+router.use(privacyRouter);
 
 export default router;

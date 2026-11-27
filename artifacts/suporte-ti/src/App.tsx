@@ -26,6 +26,9 @@ const Profile = lazy(() => import("@/pages/profile"));
 const Chat = lazy(() => import("@/pages/chat"));
 const PriorityPreview = lazy(() => import("@/pages/priority-preview"));
 const NotFound = lazy(() => import("@/pages/not-found"));
+const PrivacyPolicyPage = lazy(() => import("@/pages/privacy-document").then((m) => ({ default: m.PrivacyPolicyPage })));
+const TermsOfUsePage = lazy(() => import("@/pages/privacy-document").then((m) => ({ default: m.TermsOfUsePage })));
+const PrivacyCenter = lazy(() => import("@/pages/privacy-center"));
 
 const queryClient = new QueryClient();
 
@@ -107,10 +110,12 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
         if (!user) {
           return <Redirect to="/" />;
         }
-        if (user.status === "PENDING" && window.location.pathname !== "/pendente") {
+        // A Central de Privacidade fica disponível a qualquer titular, inclusive com cadastro pendente.
+        const isPrivacyCenter = window.location.pathname === "/privacidade";
+        if (user.status === "PENDING" && window.location.pathname !== "/pendente" && !isPrivacyCenter) {
           return <Redirect to="/pendente" />;
         }
-        if (!user.birthDate && window.location.pathname !== "/perfil") {
+        if (!user.birthDate && window.location.pathname !== "/perfil" && !isPrivacyCenter) {
           return <Redirect to="/perfil" />;
         }
         if (rest.adminOnly && user.role !== "ADMIN") {
@@ -140,6 +145,9 @@ function Router() {
           <Route path="/esqueci-senha" component={ForgotPassword} />
           <Route path="/redefinir-senha" component={ResetPassword} />
           <Route path="/registro" component={Register} />
+          <Route path="/politica-de-privacidade" component={PrivacyPolicyPage} />
+          <Route path="/termos-de-uso" component={TermsOfUsePage} />
+          <ProtectedRoute path="/privacidade" component={PrivacyCenter} />
           
           <ProtectedRoute path="/pendente" component={Pending} />
           <ProtectedRoute path="/dashboard" component={Dashboard} />
