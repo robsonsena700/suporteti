@@ -9,6 +9,7 @@ import { buildTicketVisibilityWhere } from "../lib/ticket-visibility";
 import { canReopenClosedTicket, REOPEN_WINDOW_HOURS } from "../lib/ticket-reopen-policy";
 import { canReceiveReassign, requiresStaffAssigneeForStatus } from "../lib/ticket-reassign-policy";
 import { parseExpectedStatus, parseListLimit, TICKET_STATUS_CONFLICT_MESSAGE } from "../lib/ticket-status-concurrency";
+import { loadTicketEmailSummary } from "../lib/ticket-email-deliveries";
 import { validateMunicipalityForUf } from "../lib/ibge";
 import { logger } from "../lib/logger";
 import { createInMemoryRateLimiter } from "../lib/rate-limit";
@@ -176,6 +177,7 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
       .where(inArray(gestorCoordinatorsTable.gestorId, ownerIds));
     gestorOwners.forEach((r) => ownersWithCoordinator.add(r.gestorId));
   }
+  const emailSummary = await loadTicketEmailSummary(allTickets.map((t) => t.id));
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
@@ -194,6 +196,9 @@ router.get("/tickets", requireAuth, requireActive, async (req, res): Promise<voi
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
+    emailSentAt: emailSummary.get(t.id)?.lastSentAt ?? null,
+    emailSentCount: emailSummary.get(t.id)?.count ?? 0,
+    emailRequesterNotified: emailSummary.get(t.id)?.requesterNotified ?? false,
     createdBy: t.createdBy ? {
       id: t.createdBy.id,
       name: t.createdBy.name,
@@ -307,6 +312,7 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
     ...(parsedLimit ? { limit: parsedLimit } : {}),
   });
 
+  const emailSummary = await loadTicketEmailSummary(allTickets.map((t) => t.id));
   const result = allTickets.map(t => ({
     id: t.id,
     title: t.title,
@@ -323,6 +329,9 @@ router.get("/tickets/resolved", requireAuth, requireActive, async (req, res): Pr
     assignedToId: t.assignedToId,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
+    emailSentAt: emailSummary.get(t.id)?.lastSentAt ?? null,
+    emailSentCount: emailSummary.get(t.id)?.count ?? 0,
+    emailRequesterNotified: emailSummary.get(t.id)?.requesterNotified ?? false,
     createdBy: t.createdBy ? {
       id: t.createdBy.id,
       name: t.createdBy.name,

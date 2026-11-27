@@ -4,13 +4,12 @@ import { useQuery, useQueryClient, type Query } from "@tanstack/react-query";
 import {
   useListTickets,
   getListTicketsQueryKey,
-  TicketType,
   type ListTicketsParams,
   type Ticket,
 } from "@workspace/api-client-react";
 import { ApiError, customFetch } from "@workspace/api-client-react/custom-fetch";
-import { ArrowRightLeft, GripVertical, Loader2, Lock } from "lucide-react";
-import { PriorityBadge } from "@/components/ui/status-badge";
+import { ArrowRightLeft, Loader2, Lock } from "lucide-react";
+import { TicketCard, type TicketListItem } from "@/components/tickets/ticket-card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -55,14 +54,10 @@ type Props = {
   /** Filtros locais (busca, usuário, localização, responsável e ordenação) já usados na visão de cards. */
   applyClientFilters: (tickets: Ticket[]) => Ticket[];
   onShowAllFinished: () => void;
+  onOpenImage?: (ticket: TicketListItem) => void;
 };
 
 type UpdatePlan = Extract<KanbanMovePlan, { kind: "update" }>;
-
-const SUBSTATUS_LABEL: Record<string, string> = {
-  AWAITING_CUSTOMER: "Aguardando cliente",
-  IN_DEVELOPMENT: "Em desenvolvimento",
-};
 
 function toSearch(params: Record<string, unknown>): string {
   const sp = new URLSearchParams();
@@ -95,7 +90,7 @@ function useFinishedTickets(status: "RESOLVED" | "CLOSED", baseParams: KanbanBas
   });
 }
 
-export function TicketsKanban({ actor, baseParams, applyClientFilters, onShowAllFinished }: Props) {
+export function TicketsKanban({ actor, baseParams, applyClientFilters, onShowAllFinished, onOpenImage }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -329,6 +324,7 @@ export function TicketsKanban({ actor, baseParams, applyClientFilters, onShowAll
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
                       onMove={requestMove}
+                      onOpenImage={onOpenImage}
                     />
                   ))
                 )}
@@ -418,20 +414,19 @@ function KanbanCard({
   onDragStart,
   onDragEnd,
   onMove,
+  onOpenImage,
 }: {
-  ticket: Ticket;
+  ticket: TicketListItem;
   actor: KanbanActor | null;
   isPending: boolean;
   isDragging: boolean;
   onDragStart: (e: DragEvent<HTMLElement>, ticket: Ticket) => void;
   onDragEnd: () => void;
   onMove: (ticket: Ticket, target: KanbanColumnId) => void;
+  onOpenImage?: (ticket: TicketListItem) => void;
 }) {
   const draggable = !isPending && canDragKanbanTicket(ticket, actor);
   const source = kanbanColumnOf(ticket.status);
-  const substatus = SUBSTATUS_LABEL[ticket.status];
-  const isSoftware = ticket.type === TicketType.SOFTWARE;
-  const unit = ticket.establishment || ticket.municipality;
   const lockReason = useMemo(() => {
     if (draggable || isPending) return null;
     for (const c of KANBAN_COLUMNS) {
@@ -441,14 +436,54 @@ function KanbanCard({
     return null;
   }, [draggable, isPending, ticket, actor]);
 
+  const moveMenu = isPending ? (
+    <span className="inline-flex h-7 w-7 items-center justify-center" aria-label="Atualizando">
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+    </span>
+  ) : (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Mover chamado #${ticket.id}`}
+          title={lockReason ?? "Mover para outra coluna"}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          {lockReason ? <Lock className="h-3.5 w-3.5" /> : <ArrowRightLeft className="h-3.5 w-3.5" />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>Mover para</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {KANBAN_COLUMNS.filter((c) => c.id !== source).map((c) => {
+          const plan = planKanbanMove(ticket, c.id, actor);
+          const blocked = plan.kind === "blocked";
+          return (
+            <DropdownMenuItem
+              key={c.id}
+              disabled={blocked}
+              onSelect={() => onMove(ticket, c.id)}
+              className="flex flex-col items-start gap-0.5"
+            >
+              <span className="flex items-center gap-2">
+                <span className={cn("h-2 w-2 rounded-full", c.dotClass)} aria-hidden="true" />
+                {c.title}
+              </span>
+              {blocked ? <span className="text-[11px] leading-snug text-muted-foreground">{plan.reason}</span> : null}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div
       className={cn(
-        "group relative rounded-lg border bg-card shadow-sm transition",
-        draggable ? "cursor-grab active:cursor-grabbing hover:border-primary/40" : null,
+        "rounded-xl shadow-sm transition",
+        draggable ? "cursor-grab active:cursor-grabbing" : null,
         isDragging ? "opacity-40" : null,
         isPending ? "opacity-70" : null,
-        ticket.ownerHasCoordinator === false ? "border-amber-400/70" : null,
       )}
       draggable={draggable}
       onDragStart={(e) => onDragStart(e, ticket)}
@@ -456,85 +491,7 @@ function KanbanCard({
       aria-busy={isPending || undefined}
       title={lockReason ?? undefined}
     >
-      <Link
-        href={`/chamados/${ticket.id}`}
-        draggable={false}
-        className="block rounded-lg p-3 pr-9 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground tabular-nums">#{ticket.id}</span>
-          <PriorityBadge priority={ticket.priority} />
-        </div>
-        <p className="mt-1 truncate text-sm font-semibold" title={ticket.title}>{ticket.title}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-          {ticket.createdBy?.name ?? "—"}
-          {unit ? ` · ${unit}` : ""}
-        </p>
-        {substatus ? (
-          <span className="mt-1.5 inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-            {substatus}
-          </span>
-        ) : null}
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span
-            className="rounded px-1.5 py-0.5 text-[11px] font-semibold"
-            style={{
-              color: isSoftware ? "var(--series-software)" : "var(--series-hardware)",
-              backgroundColor: `color-mix(in srgb, ${isSoftware ? "var(--series-software)" : "var(--series-hardware)"} 12%, transparent)`,
-            }}
-          >
-            {isSoftware ? "Sistema" : "Equipamentos"}
-          </span>
-          <span className="truncate text-xs font-medium">{ticket.assignedTo?.name ?? "Não atribuído"}</span>
-        </div>
-      </Link>
-
-      <div className="absolute right-1.5 top-1.5 flex flex-col items-center gap-0.5">
-        {isPending ? (
-          <Loader2 className="m-1.5 h-4 w-4 animate-spin text-muted-foreground" aria-label="Atualizando" />
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground opacity-70 group-hover:opacity-100"
-                aria-label={`Mover chamado #${ticket.id}`}
-              >
-                <ArrowRightLeft className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>Mover para</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {KANBAN_COLUMNS.filter((c) => c.id !== source).map((c) => {
-                const plan = planKanbanMove(ticket, c.id, actor);
-                const blocked = plan.kind === "blocked";
-                return (
-                  <DropdownMenuItem
-                    key={c.id}
-                    disabled={blocked}
-                    onSelect={() => onMove(ticket, c.id)}
-                    className="flex flex-col items-start gap-0.5"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className={cn("h-2 w-2 rounded-full", c.dotClass)} aria-hidden="true" />
-                      {c.title}
-                    </span>
-                    {blocked ? <span className="text-[11px] leading-snug text-muted-foreground">{plan.reason}</span> : null}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {draggable ? (
-          <GripVertical className="h-3.5 w-3.5 text-muted-foreground/60" aria-hidden="true" />
-        ) : lockReason ? (
-          <Lock className="h-3 w-3 text-muted-foreground/60" aria-label={lockReason} />
-        ) : null}
-      </div>
+      <TicketCard ticket={ticket} variant="kanban" onOpenImage={onOpenImage} actions={moveMenu} />
     </div>
   );
 }

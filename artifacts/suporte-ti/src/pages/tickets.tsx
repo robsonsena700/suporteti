@@ -15,15 +15,12 @@ import {
   ListResolvedTicketsParams,
   UserRole
 } from "@workspace/api-client-react";
-import { StatusBadge, PriorityBadge, TypeBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, ChevronRight, Image as ImageIcon, LayoutGrid, PlusCircle, Printer, Search, SquareKanban, Star } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { ChevronLeft, ChevronRight, LayoutGrid, PlusCircle, Search, SquareKanban, Star } from "lucide-react";
 import {
   TICKETS_PAGE_SIZE_OPTIONS,
   buildTicketsPageItems,
@@ -36,6 +33,7 @@ import {
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
 import { TicketsKanban } from "@/components/tickets/tickets-kanban";
+import { TicketCard, hasTicketEmailSent, type TicketListItem } from "@/components/tickets/ticket-card";
 import { matchesTicketQuickSearch } from "@/lib/tickets-kanban";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -277,6 +275,7 @@ export default function Tickets() {
     initialTypeTab === "RESOLVED" ? "ALL" : (initialTypeTab as TicketType),
   );
   const [quickSearch, setQuickSearch] = useState("");
+  const [emailFilter, setEmailFilter] = useState<"all" | "sent" | "not_sent">("all");
   const [pageState, setPageState] = useState<TicketsPageState>({ sig: "", page: 1 });
   const listTopRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
@@ -447,8 +446,9 @@ export default function Tickets() {
   const applyClientFilters = useCallback(
     <T extends Parameters<typeof filterAndSortTickets>[0][number]>(list: T[]): T[] =>
       filterAndSortTickets(list, { userFilter, locationFilter, responsibleFilter, sortBy, sortDir })
-        .filter((t) => matchesTicketQuickSearch(t as any, quickSearch)),
-    [userFilter, locationFilter, responsibleFilter, sortBy, sortDir, quickSearch],
+        .filter((t) => matchesTicketQuickSearch(t as any, quickSearch))
+        .filter((t) => emailFilter === "all" || hasTicketEmailSent(t as any) === (emailFilter === "sent")),
+    [userFilter, locationFilter, responsibleFilter, sortBy, sortDir, quickSearch, emailFilter],
   );
 
   const visibleTickets = useMemo(() => applyClientFilters(tickets ?? []), [tickets, applyClientFilters]);
@@ -476,8 +476,8 @@ export default function Tickets() {
 
   // A página pertence a uma combinação de aba/filtros/ordem/tamanho: qualquer mudança volta para a página 1.
   const pageSig = useMemo(
-    () => JSON.stringify([typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch.trim()]),
-    [typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch],
+    () => JSON.stringify([typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch.trim(), emailFilter]),
+    [typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch, emailFilter],
   );
   const pageInfo = getTicketsPageInfo(
     visibleTickets.length,
@@ -495,6 +495,12 @@ export default function Tickets() {
     if (target === pageInfo.page) return;
     setPageState({ sig: pageSig, page: target });
     listTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const openImageModal = (t: { id: number; title: string }) => {
+    setImageModalTicketId(t.id);
+    setImageModalTicketTitle(`#${t.id} — ${t.title}`);
+    setImageModalOpen(true);
   };
 
   const changeTypeTab = (next: TicketsMainTab) => {
@@ -556,6 +562,7 @@ export default function Tickets() {
     let resolvedCount = 0;
     let closedCount = 0;
     let noCoordinatorCount = 0;
+    let emailSentCount = 0;
 
     for (const t of visibleTickets) {
       if (t.status === TicketStatus.OPEN) openCount += 1;
@@ -563,9 +570,10 @@ export default function Tickets() {
       if (t.status === TicketStatus.RESOLVED) resolvedCount += 1;
       if (t.status === TicketStatus.CLOSED) closedCount += 1;
       if (t.ownerHasCoordinator === false) noCoordinatorCount += 1;
+      if (hasTicketEmailSent(t as TicketListItem)) emailSentCount += 1;
     }
 
-    return { openCount, inProgressCount, resolvedCount, closedCount, noCoordinatorCount };
+    return { openCount, inProgressCount, resolvedCount, closedCount, noCoordinatorCount, emailSentCount };
   }, [visibleTickets]);
 
   const buildPersisted = useCallback((): TicketsListPersistedState | null => {
@@ -686,18 +694,19 @@ export default function Tickets() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="text-3xl font-bold tracking-tight">
-            Chamados{viewMode === "kanban" ? <span className="text-muted-foreground font-semibold"> · Kanban</span> : null}
+            Chamados
+            <span className="text-muted-foreground font-semibold"> · {viewMode === "kanban" ? "Kanban" : "Visão Normal"}</span>
           </h1>
           <p className="text-muted-foreground mt-1">
             {viewMode === "kanban"
               ? "Arraste os cards entre as colunas para atualizar o status do atendimento."
-              : "Gerencie e acompanhe as solicitações de suporte."}
+              : "Visualização em grade de cards com todos os informativos e indicador de e-mail enviado."}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <div role="radiogroup" aria-label="Modo de visualização" className="inline-flex h-10 items-center rounded-lg border bg-muted/50 p-1">
             {([
               { id: "cards", label: "Normal (Cards)", Icon: LayoutGrid },
@@ -788,6 +797,16 @@ export default function Tickets() {
               <SelectItem value={TicketPriority.HIGH}>Prioridade: Alta</SelectItem>
               <SelectItem value={TicketPriority.MEDIUM}>Prioridade: Média</SelectItem>
               <SelectItem value={TicketPriority.LOW}>Prioridade: Baixa</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={emailFilter} onValueChange={(v) => setEmailFilter(v as typeof emailFilter)}>
+            <SelectTrigger className="h-9 sm:w-[160px]" aria-label="Filtrar por e-mail enviado">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">E-mail: Todos</SelectItem>
+              <SelectItem value="sent">E-mail: Enviado</SelectItem>
+              <SelectItem value="not_sent">E-mail: Não enviado</SelectItem>
             </SelectContent>
           </Select>
           <div className="relative sm:w-72">
@@ -1061,6 +1080,11 @@ export default function Tickets() {
             <span className="font-semibold tabular-nums">{formatCount(summaryCounts.noCoordinatorCount)}</span>
           </div>
         ) : null}
+        <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
+          <span className="h-2 w-2 rounded-full bg-emerald-600" />
+          <span className="font-medium">E-mail Enviado:</span>
+          <span className="font-semibold tabular-nums">{formatCount(summaryCounts.emailSentCount)}</span>
+        </div>
       </div>
       ) : null}
 
@@ -1069,6 +1093,7 @@ export default function Tickets() {
           actor={kanbanActor}
           baseParams={kanbanBaseParams}
           applyClientFilters={applyClientFilters}
+          onOpenImage={openImageModal}
           onShowAllFinished={() => {
             changeViewMode("cards");
             changeTypeTab("RESOLVED");
@@ -1139,105 +1164,20 @@ export default function Tickets() {
             </div>
             <div key={`${typeTab}-${pageInfo.page}-${pageSize}`} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
               {pagedTickets.map((ticket) => (
-                <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
-                  {(() => {
-                    const noCoordinator = ticket.ownerHasCoordinator === false;
-                    return (
-                  <div
-                    className={cn(
-                      "rounded-xl border bg-card p-4 hover:bg-muted/30 transition-colors",
-                      noCoordinator ? "border-amber-400/70 ring-1 ring-amber-400/20" : null,
-                    )}
-                    onClick={() => {
-                      setLastActiveTicketId(ticket.id);
-                      saveNow();
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold truncate">#{ticket.id} — {ticket.title}</p>
-                          {noCoordinator ? (
-                            <span className="rounded-full border border-amber-400/50 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                              Sem coordenador
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {ticket.createdBy?.name ?? "—"} • {ticket.uf} - {ticket.municipality}
-                        </p>
-                        {ticket.establishment ? (
-                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                            {ticket.establishment}
-                          </p>
-                        ) : null}
-                        {ticket.createdBy?.role === UserRole.GESTOR ? (
-                          <div className="mt-1">
-                            <span className="rounded-full border border-indigo-300/50 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
-                              Chamado do Gestor associado
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-col gap-2 items-end">
-                        <StatusBadge status={ticket.status} />
-                        <PriorityBadge priority={ticket.priority} />
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <TypeBadge type={ticket.type} />
-                      {ticket.status === TicketStatus.OPEN && (ticket.imageAttachmentsCount ?? 0) > 0 ? (
-                        <button
-                          type="button"
-                          aria-label="Visualizar imagem anexada"
-                          className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium hover:bg-muted/50 tap-target"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setImageModalTicketId(ticket.id);
-                            setImageModalTicketTitle(`#${ticket.id} — ${ticket.title}`);
-                            setImageModalOpen(true);
-                          }}
-                        >
-                          <ImageIcon className="h-3.5 w-3.5" />
-                          imagem ({ticket.imageAttachmentsCount})
-                        </button>
-                      ) : (
-                        <div className="flex items-center">
-                          {ticket.status === TicketStatus.RESOLVED ? (
-                            <ResolvedTicketRatingStars ticketId={ticket.id} actorRole={user?.role} />
-                          ) : null}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          aria-label="Imprimir comprovante"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            window.open(`/chamados/${ticket.id}/comprovante`, "_blank", "noopener,noreferrer");
-                          }}
-                        >
-                          <Printer className="h-4 w-4" />
-                        </Button>
-                        <p className="text-xs text-muted-foreground">
-                          {format(new Date(ticket.createdAt), "dd/MM/yyyy", { locale: ptBR })}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 pt-3 border-t text-sm">
-                      <p className="text-xs text-muted-foreground">Responsável</p>
-                      <p className="font-medium truncate">{ticket.assignedTo?.name ?? "Não atribuído"}</p>
-                    </div>
-                  </div>
-                    );
-                  })()}
-                </Link>
+                <TicketCard
+                  key={ticket.id}
+                  ticket={ticket as TicketListItem}
+                  onOpen={() => {
+                    setLastActiveTicketId(ticket.id);
+                    saveNow();
+                  }}
+                  onOpenImage={openImageModal}
+                  footerExtra={
+                    ticket.status === TicketStatus.RESOLVED ? (
+                      <ResolvedTicketRatingStars ticketId={ticket.id} actorRole={user?.role} />
+                    ) : null
+                  }
+                />
               ))}
             </div>
             <nav
