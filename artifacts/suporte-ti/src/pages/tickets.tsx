@@ -21,10 +21,18 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Image as ImageIcon, PlusCircle, Printer, Star } from "lucide-react";
+import { ChevronLeft, ChevronRight, Image as ImageIcon, PlusCircle, Printer, Star } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { canViewResolvedTicketRating, filterAndSortTickets } from "@/lib/tickets-utils";
+import {
+  TICKETS_PAGE_SIZE_OPTIONS,
+  buildTicketsPageItems,
+  canViewResolvedTicketRating,
+  filterAndSortTickets,
+  getTicketsPageInfo,
+  normalizeTicketsPageSize,
+  type TicketsPageSize,
+} from "@/lib/tickets-utils";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
 import { Switch } from "@/components/ui/switch";
@@ -38,6 +46,28 @@ import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/mun
 const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
 const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v2";
+const PAGE_SIZE_KEY = "suporte-ti:tickets:page-size";
+
+const TAB_LABELS: Record<TicketsMainTab, string> = {
+  [TicketType.SOFTWARE]: "Sistema",
+  [TicketType.HARDWARE]: "Equipamentos",
+  RESOLVED: "Resolvidos",
+};
+
+type TicketsPageState = { sig: string; page: number };
+
+function formatCount(n: number): string {
+  return n.toLocaleString("pt-BR");
+}
+
+function getInitialPageSize(): TicketsPageSize {
+  if (typeof window === "undefined") return normalizeTicketsPageSize(undefined);
+  try {
+    return normalizeTicketsPageSize(window.localStorage.getItem(PAGE_SIZE_KEY));
+  } catch {
+    return normalizeTicketsPageSize(undefined);
+  }
+}
 
 type TicketsMainTab = TicketType | "RESOLVED";
 
@@ -65,6 +95,7 @@ type TicketsListPersistedState = {
   mineOnlyByTab: MineOnlyByTab;
   scrollY: number | null;
   lastActiveTicketId: number | null;
+  pageState?: TicketsPageState;
   savedAt: number;
 };
 
@@ -225,6 +256,9 @@ export default function Tickets() {
   const [imageModalTicketId, setImageModalTicketId] = useState<number | null>(null);
   const [imageModalTicketTitle, setImageModalTicketTitle] = useState<string>("");
   const [lastActiveTicketId, setLastActiveTicketId] = useState<number | null>(null);
+  const [pageSize, setPageSize] = useState<TicketsPageSize>(() => getInitialPageSize());
+  const [pageState, setPageState] = useState<TicketsPageState>({ sig: "", page: 1 });
+  const listTopRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
   const municipalityValueRef = useRef<string | undefined>(undefined);
@@ -356,6 +390,22 @@ export default function Tickets() {
     }
   });
 
+  // Contagens das abas abertas: mesma consulta da listagem (com o "Meus chamados" de cada aba),
+  // então a aba ativa reaproveita o cache e as demais ficam sempre atualizadas.
+  const buildOpenTabParams = (tab: TicketType): ListTicketsParams => ({
+    ...listTicketsParams,
+    type: tab,
+    mine: canManageRole ? (mineOnlyByTab[tab] ? true : undefined) : undefined,
+  });
+  const softwareCountParams = buildOpenTabParams(TicketType.SOFTWARE);
+  const hardwareCountParams = buildOpenTabParams(TicketType.HARDWARE);
+  const softwareCountQuery = useListTickets(softwareCountParams, {
+    query: { enabled: !!user, queryKey: getListTicketsQueryKey(softwareCountParams) },
+  });
+  const hardwareCountQuery = useListTickets(hardwareCountParams, {
+    query: { enabled: !!user, queryKey: getListTicketsQueryKey(hardwareCountParams) },
+  });
+
   const activeQuery = typeTab === "RESOLVED" ? listResolvedTicketsQuery : listTicketsQuery;
   const tickets = activeQuery.data;
   const isLoading = activeQuery.isLoading;
@@ -382,6 +432,64 @@ export default function Tickets() {
       sortDir,
     });
   }, [tickets, userFilter, locationFilter, responsibleFilter, sortBy, sortDir]);
+
+  const tabCounts = useMemo(() => {
+    const opts = { userFilter, locationFilter, responsibleFilter, sortBy, sortDir };
+    const count = (data: Parameters<typeof filterAndSortTickets>[0] | undefined) =>
+      data ? filterAndSortTickets(data, opts).length : undefined;
+    const counts: Record<TicketsMainTab, number | undefined> = {
+      [TicketType.SOFTWARE]: count(softwareCountQuery.data),
+      [TicketType.HARDWARE]: count(hardwareCountQuery.data),
+      // Resolvidos só carrega ao abrir a aba (volume alto); fora dela usa o cache, se houver.
+      RESOLVED: count(listResolvedTicketsQuery.data),
+    };
+    if (tickets) counts[typeTab] = visibleTickets.length;
+    return counts;
+  }, [
+    softwareCountQuery.data,
+    hardwareCountQuery.data,
+    listResolvedTicketsQuery.data,
+    tickets,
+    typeTab,
+    visibleTickets.length,
+    userFilter,
+    locationFilter,
+    responsibleFilter,
+    sortBy,
+    sortDir,
+  ]);
+
+  // A página pertence a uma combinação de aba/filtros/ordem/tamanho: qualquer mudança volta para a página 1.
+  const pageSig = useMemo(
+    () => JSON.stringify([typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize]),
+    [typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize],
+  );
+  const pageInfo = getTicketsPageInfo(
+    visibleTickets.length,
+    pageState.sig === pageSig ? pageState.page : 1,
+    pageSize,
+  );
+  const pagedTickets = useMemo(
+    () => visibleTickets.slice((pageInfo.page - 1) * pageSize, pageInfo.page * pageSize),
+    [visibleTickets, pageInfo.page, pageSize],
+  );
+  const pageItems = buildTicketsPageItems(pageInfo.page, pageInfo.totalPages);
+
+  const goToPage = (next: number) => {
+    const target = Math.min(Math.max(1, next), pageInfo.totalPages);
+    if (target === pageInfo.page) return;
+    setPageState({ sig: pageSig, page: target });
+    listTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const changePageSize = (value: string) => {
+    const next = normalizeTicketsPageSize(value);
+    setPageSize(next);
+    try {
+      window.localStorage.setItem(PAGE_SIZE_KEY, String(next));
+    } catch {
+    }
+  };
 
   const summaryCounts = useMemo(() => {
     let openCount = 0;
@@ -415,9 +523,10 @@ export default function Tickets() {
       mineOnlyByTab,
       scrollY: typeof window !== "undefined" ? window.scrollY : null,
       lastActiveTicketId,
+      pageState: pageState.sig === pageSig ? pageState : undefined,
       savedAt: Date.now(),
     };
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId]);
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, pageState, pageSig]);
 
   const saveNow = useCallback(() => {
     const next = buildPersisted();
@@ -438,6 +547,7 @@ export default function Tickets() {
       ...buildDefaultMineOnlyByTab(user?.role),
     });
     setLastActiveTicketId(state.lastActiveTicketId);
+    setPageState(state.pageState ?? { sig: "", page: 1 });
     pendingScrollYRef.current = state.scrollY;
   }, []);
 
@@ -513,7 +623,7 @@ export default function Tickets() {
     if (!user) return;
     const id = setTimeout(() => saveNow(), 200);
     return () => clearTimeout(id);
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, saveNow]);
+  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, pageState, saveNow]);
 
   return (
     <div className="space-y-6">
@@ -534,6 +644,7 @@ export default function Tickets() {
 
       <div className="flex items-center justify-between gap-3">
         <Tabs
+          className="min-w-0 max-w-full overflow-x-auto"
           value={typeTab}
           onValueChange={(v) => {
             const next = v as TicketsMainTab;
@@ -551,19 +662,28 @@ export default function Tickets() {
             });
           }}
         >
-          <TabsList className="h-11 p-1">
-            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-4">
+          <TabsList className="h-11 w-max p-1">
+            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-3 sm:px-4">
               Sistema
+              {tabCounts[TicketType.SOFTWARE] !== undefined ? (
+                <span className="ml-1 tabular-nums text-muted-foreground">({formatCount(tabCounts[TicketType.SOFTWARE] ?? 0)})</span>
+              ) : null}
             </TabsTrigger>
-            <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-4">
+            <TabsTrigger value={TicketType.HARDWARE} className="h-9 px-3 sm:px-4">
               Equipamentos
+              {tabCounts[TicketType.HARDWARE] !== undefined ? (
+                <span className="ml-1 tabular-nums text-muted-foreground">({formatCount(tabCounts[TicketType.HARDWARE] ?? 0)})</span>
+              ) : null}
             </TabsTrigger>
-            <TabsTrigger value="RESOLVED" className="h-9 px-4">
+            <TabsTrigger value="RESOLVED" className="h-9 px-3 sm:px-4">
               Resolvidos
+              {tabCounts["RESOLVED"] !== undefined ? (
+                <span className="ml-1 tabular-nums text-muted-foreground">({formatCount(tabCounts["RESOLVED"] ?? 0)})</span>
+              ) : null}
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="text-xs text-muted-foreground">
+        <div className="hidden text-xs text-muted-foreground md:block">
           {typeTab === "RESOLVED"
             ? "Exibindo chamados resolvidos"
             : typeTab === TicketType.SOFTWARE
@@ -798,12 +918,12 @@ export default function Tickets() {
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-600" />
               <span className="font-medium">Resolvidos:</span>
-              <span className="font-semibold">{summaryCounts.resolvedCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.resolvedCount)}</span>
             </div>
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-slate-600" />
               <span className="font-medium">Cancelados:</span>
-              <span className="font-semibold">{summaryCounts.closedCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.closedCount)}</span>
             </div>
           </>
         ) : (
@@ -811,12 +931,12 @@ export default function Tickets() {
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-slate-900" />
               <span className="font-medium">Abertos:</span>
-              <span className="font-semibold">{summaryCounts.openCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.openCount)}</span>
             </div>
             <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
               <span className="h-2 w-2 rounded-full bg-orange-500" />
               <span className="font-medium">Em Andamento:</span>
-              <span className="font-semibold">{summaryCounts.inProgressCount}</span>
+              <span className="font-semibold tabular-nums">{formatCount(summaryCounts.inProgressCount)}</span>
             </div>
           </>
         )}
@@ -824,7 +944,7 @@ export default function Tickets() {
           <div className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-sm">
             <span className="h-2 w-2 rounded-full bg-amber-500" />
             <span className="font-medium">Sem Coordenador:</span>
-            <span className="font-semibold">{summaryCounts.noCoordinatorCount}</span>
+            <span className="font-semibold tabular-nums">{formatCount(summaryCounts.noCoordinatorCount)}</span>
           </div>
         ) : null}
       </div>
@@ -863,8 +983,36 @@ export default function Tickets() {
               Nenhum chamado encontrado com os filtros atuais.
             </div>
           ) : (
-            <div key={typeTab} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
-              {visibleTickets.map((ticket) => (
+            <>
+            <div ref={listTopRef} className="mb-4 flex flex-col gap-3 scroll-mt-24 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                Exibindo{" "}
+                <span className="font-semibold text-foreground tabular-nums">
+                  {formatCount(pageInfo.start)}–{formatCount(pageInfo.end)}
+                </span>{" "}
+                de <span className="font-semibold text-foreground tabular-nums">{formatCount(pageInfo.total)}</span>{" "}
+                {pageInfo.total === 1 ? "chamado" : "chamados"}
+              </p>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="tickets_page_size" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Cards por tela
+                </Label>
+                <Select value={String(pageSize)} onValueChange={changePageSize}>
+                  <SelectTrigger id="tickets_page_size" className="h-9 w-[84px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TICKETS_PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div key={`${typeTab}-${pageInfo.page}-${pageSize}`} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in-0 duration-200">
+              {pagedTickets.map((ticket) => (
                 <Link key={ticket.id} href={`/chamados/${ticket.id}`} className="block">
                   {(() => {
                     const noCoordinator = ticket.ownerHasCoordinator === false;
@@ -966,6 +1114,64 @@ export default function Tickets() {
                 </Link>
               ))}
             </div>
+            <nav
+              aria-label="Paginação de chamados"
+              className="mt-6 flex flex-col-reverse items-center justify-between gap-3 border-t pt-4 sm:flex-row"
+            >
+              <p className="text-xs text-muted-foreground">
+                Página {formatCount(pageInfo.page)} de {formatCount(pageInfo.totalPages)} · {pageSize} cards por tela ({TAB_LABELS[typeTab]})
+              </p>
+              <ul className="flex flex-wrap items-center justify-center gap-1">
+                <li>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={pageInfo.page <= 1}
+                    onClick={() => goToPage(pageInfo.page - 1)}
+                    aria-label="Página anterior"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">Anterior</span>
+                  </Button>
+                </li>
+                {pageItems.map((item) =>
+                  typeof item === "number" ? (
+                    <li key={item}>
+                      <Button
+                        type="button"
+                        variant={item === pageInfo.page ? "default" : "ghost"}
+                        size="sm"
+                        className="min-w-9 tabular-nums"
+                        aria-label={`Página ${item}`}
+                        aria-current={item === pageInfo.page ? "page" : undefined}
+                        onClick={() => goToPage(item)}
+                      >
+                        {formatCount(item)}
+                      </Button>
+                    </li>
+                  ) : (
+                    <li key={item} aria-hidden="true" className="px-1.5 text-sm text-muted-foreground select-none">
+                      …
+                    </li>
+                  ),
+                )}
+                <li>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={pageInfo.page >= pageInfo.totalPages}
+                    onClick={() => goToPage(pageInfo.page + 1)}
+                    aria-label="Próxima página"
+                  >
+                    <span className="hidden sm:inline">Próxima</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </li>
+              </ul>
+            </nav>
+            </>
           )}
         </CardContent>
       </Card>
