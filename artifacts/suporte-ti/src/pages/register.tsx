@@ -372,9 +372,21 @@ export default function Register() {
                       <Checkbox checked={field.value} onCheckedChange={(v) => field.onChange(Boolean(v))} />
                     </FormControl>
                     <div className="space-y-1 leading-none">
-                      <FormLabel className="mb-0">
-                        Eu concordo com os Termos de Uso e a Política de Privacidade.
+                      <FormLabel className="mb-0 font-normal leading-snug">
+                        Li e concordo com os{" "}
+                        <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline-offset-2 hover:underline">
+                          Termos de Uso
+                        </a>{" "}
+                        e declaro ciência da{" "}
+                        <a href="/politica-de-privacidade" target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline-offset-2 hover:underline">
+                          Política de Privacidade
+                        </a>
+                        .
                       </FormLabel>
+                      <p className="text-xs text-muted-foreground">
+                        Seus dados (inclusive CPF e data de nascimento) são usados para identificar quem solicita o acesso e prestar o suporte.
+                        Não informe dados de pacientes nos chamados.
+                      </p>
                       <FormMessage />
                     </div>
                   </FormItem>

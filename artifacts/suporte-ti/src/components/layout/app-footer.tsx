@@ -22,6 +22,10 @@ export function AppFooter() {
           <div>Ambiente: {__APP_ENV__ === "production" ? "Produção" : "Desenvolvimento"}</div>
           <div>Build: {buildTime}</div>
           <div>Último login: {formatLastLogin((user as any)?.lastLoginAt)}</div>
+          <div className="flex gap-3">
+            <a href="/politica-de-privacidade" className="hover:text-primary hover:underline">Política de Privacidade</a>
+            <a href="/termos-de-uso" className="hover:text-primary hover:underline">Termos de Uso</a>
+          </div>
         </div>
       </div>
     </footer>

@@ -9,6 +9,7 @@ import {
   LogOut,
   User as UserIcon,
   MessageSquare,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       ? [{ name: "Relatorios", href: "/relatorios", icon: BarChart3, badge: 0 }]
       : []),
     { name: "Configuracoes", href: "/configuracoes", icon: Settings, badge: 0 },
+    { name: "Privacidade", href: "/privacidade", icon: ShieldCheck, badge: 0 },
   ];
 
   const NAV_LABELS: Record<string, string> = {
@@ -41,6 +43,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     Chat: "Chat",
     Relatorios: "Relatórios",
     Configuracoes: "Configurações",
+    Privacidade: "Privacidade",
   };
 
   return (

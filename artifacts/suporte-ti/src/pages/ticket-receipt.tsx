@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { useRoute } from "wouter";
 import { getGetTicketQueryKey, useGetTicket, TicketPriority, TicketStatus, TicketType } from "@workspace/api-client-react";
 import { format } from "date-fns";
@@ -62,20 +63,35 @@ export default function TicketReceipt() {
     if (typeof window === "undefined") return "";
     return `${window.location.origin}/chamados/${ticket.id}`;
   }, [ticket]);
-  const qrUrl = useMemo(() => {
-    if (!ticketUrl) return "";
-    const size = 180;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(ticketUrl)}`;
+  // QR Code gerado no próprio navegador (antes um serviço externo recebia o link do chamado).
+  const [qrUrl, setQrUrl] = useState("");
+  useEffect(() => {
+    if (!ticketUrl) {
+      setQrUrl("");
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(ticketUrl, { width: 360, margin: 1, errorCorrectionLevel: "M" })
+      .then((url) => {
+        if (!cancelled) setQrUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [ticketUrl]);
 
   useEffect(() => {
     if (!autoPrint) return;
     if (!ticket) return;
+    if (ticketUrl && !qrUrl) return; // espera o QR Code ficar pronto para sair na impressão
     if (printedRef.current) return;
     printedRef.current = true;
     const t = window.setTimeout(() => window.print(), 300);
     return () => window.clearTimeout(t);
-  }, [autoPrint, ticket]);
+  }, [autoPrint, ticket, ticketUrl, qrUrl]);
 
   if (isLoading) {
     return (
@@ -266,7 +282,7 @@ export default function TicketReceipt() {
               </h3>
               <div className="flex gap-4 items-start">
                 <div className="w-24 h-24 border border-slate-200 bg-white p-1 shrink-0">
-                  <img src={qrUrl} alt="QR Code" className="w-full h-full object-contain" />
+                  {qrUrl ? <img src={qrUrl} alt="QR Code do chamado" className="w-full h-full object-contain" /> : null}
                 </div>
                 <div>
                   <p className="text-[11px] text-slate-600 leading-snug">
