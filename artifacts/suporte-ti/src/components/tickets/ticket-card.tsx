@@ -77,6 +77,8 @@ export function TicketCard({ ticket, variant = "grid", onOpen, onOpenImage, foot
   const noCoordinator = ticket.ownerHasCoordinator === false;
   const imageCount = ticket.imageAttachmentsCount ?? 0;
   const location = [ticket.uf, ticket.municipality].filter(Boolean).join(" – ");
+  // No Kanban a coluna já diz o status; só os subestados de "Em Andamento" continuam visíveis.
+  const showStatus = !compact || ticket.status === "AWAITING_CUSTOMER" || ticket.status === "IN_DEVELOPMENT";
 
   return (
     <div
@@ -96,9 +98,11 @@ export function TicketCard({ ticket, variant = "grid", onOpen, onOpenImage, foot
           <p className={cn("min-w-0 truncate font-semibold", compact ? "text-[13px]" : "text-sm")} title={`#${ticket.id} — ${ticket.title}`}>
             #{ticket.id} — {ticket.title}
           </p>
-          <div className="shrink-0">
-            <StatusBadge status={ticket.status} />
-          </div>
+          {showStatus ? (
+            <div className="shrink-0">
+              <StatusBadge status={ticket.status} />
+            </div>
+          ) : null}
         </div>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0 text-xs text-muted-foreground">

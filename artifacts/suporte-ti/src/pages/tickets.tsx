@@ -20,13 +20,19 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, ChevronRight, LayoutGrid, PlusCircle, Search, SquareKanban, Star } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, FileText, LayoutGrid, PlusCircle, Search, SquareKanban, Star } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PRIORITY_LABELS, buildTicketsCsv, buildTicketsPrintHtml, downloadTextFile, exportTimestamp, printHtml } from "@/lib/tickets-export";
 import {
   TICKETS_PAGE_SIZE_OPTIONS,
   buildTicketsPageItems,
   canViewResolvedTicketRating,
   filterAndSortTickets,
   getTicketsPageInfo,
+  isWithinTicketsPeriod,
+  resolveTicketsPeriodRange,
+  TICKETS_PERIOD_LABELS,
+  type TicketsPeriod,
   normalizeTicketsPageSize,
   type TicketsPageSize,
 } from "@/lib/tickets-utils";
@@ -242,6 +248,7 @@ function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; 
 
 export default function Tickets() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR || user?.role === UserRole.GESTOR;
   const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
@@ -263,6 +270,10 @@ export default function Tickets() {
   );
   const [quickSearch, setQuickSearch] = useState("");
   const [emailFilter, setEmailFilter] = useState<"all" | "sent" | "not_sent">("all");
+  const [period, setPeriod] = useState<TicketsPeriod>("all");
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
+  const [kanbanVisibleTickets, setKanbanVisibleTickets] = useState<TicketListItem[]>([]);
   const [pageState, setPageState] = useState<TicketsPageState>({ sig: "", page: 1 });
   const listTopRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
@@ -369,13 +380,20 @@ export default function Tickets() {
     return (err as any)?.message || "Não foi possível carregar os chamados.";
   }, [error, isError]);
 
+  // Período calculado uma vez por mudança (e não a cada card).
+  const periodRange = useMemo(
+    () => resolveTicketsPeriodRange(period, periodFrom, periodTo),
+    [period, periodFrom, periodTo],
+  );
+
   // Filtros locais compartilhados pelas visões Normal (Cards) e Kanban.
   const applyClientFilters = useCallback(
     <T extends Parameters<typeof filterAndSortTickets>[0][number]>(list: T[]): T[] =>
       filterAndSortTickets(list, { sortBy: "createdAt", sortDir: "desc" })
         .filter((t) => matchesTicketQuickSearch(t as any, quickSearch))
-        .filter((t) => emailFilter === "all" || hasTicketEmailSent(t as any) === (emailFilter === "sent")),
-    [quickSearch, emailFilter],
+        .filter((t) => emailFilter === "all" || hasTicketEmailSent(t as any) === (emailFilter === "sent"))
+        .filter((t) => isWithinTicketsPeriod((t as any).createdAt, periodRange)),
+    [quickSearch, emailFilter, periodRange],
   );
 
   const visibleTickets = useMemo(() => applyClientFilters(tickets ?? []), [tickets, applyClientFilters]);
@@ -403,8 +421,8 @@ export default function Tickets() {
 
   // A página pertence a uma combinação de aba/filtros/ordem/tamanho: qualquer mudança volta para a página 1.
   const pageSig = useMemo(
-    () => JSON.stringify([typeTab, filters, pageSize, quickSearch.trim(), emailFilter]),
-    [typeTab, filters, pageSize, quickSearch, emailFilter],
+    () => JSON.stringify([typeTab, filters, pageSize, quickSearch.trim(), emailFilter, periodRange]),
+    [typeTab, filters, pageSize, quickSearch, emailFilter, periodRange],
   );
   const pageInfo = getTicketsPageInfo(
     visibleTickets.length,
@@ -473,6 +491,49 @@ export default function Tickets() {
   );
 
   const kanbanActor = useMemo(() => (user ? { id: user.id, role: String(user.role) } : null), [user]);
+
+  const describeActiveFilters = (): string[] => {
+    const parts: string[] = [];
+    if (viewMode === "kanban") {
+      parts.push(`Categoria: ${kanbanCategory === "ALL" ? "Todas" : TAB_LABELS[kanbanCategory]}`);
+    } else {
+      parts.push(`Aba: ${TAB_LABELS[typeTab]}`);
+    }
+    if (filters.priority) parts.push(`Prioridade: ${PRIORITY_LABELS[filters.priority] ?? filters.priority}`);
+    if (emailFilter !== "all") parts.push(`E-mail: ${emailFilter === "sent" ? "Enviado" : "Não enviado"}`);
+    if (period !== "all") {
+      parts.push(
+        period === "custom"
+          ? `Período: ${periodFrom ? periodFrom.split("-").reverse().join("/") : "início"} a ${periodTo ? periodTo.split("-").reverse().join("/") : "hoje"}`
+          : `Período: ${TICKETS_PERIOD_LABELS[period]}`,
+      );
+    }
+    if (quickSearch.trim()) parts.push(`Busca: "${quickSearch.trim()}"`);
+    if (filters.mine) parts.push("Meus chamados");
+    if (filters.noCoordinator) parts.push("Sem coordenador");
+    return parts;
+  };
+
+  // Exporta exatamente o que está filtrado na tela (todas as páginas), sem nova consulta ao servidor.
+  const exportRows = (): TicketListItem[] =>
+    viewMode === "kanban" ? kanbanVisibleTickets : (visibleTickets as TicketListItem[]);
+
+  const exportCsv = () => {
+    const rows = exportRows();
+    downloadTextFile(buildTicketsCsv(rows), `chamados_${exportTimestamp()}.csv`, "text/csv;charset=utf-8");
+  };
+
+  const exportPdf = () => {
+    const rows = exportRows();
+    const html = buildTicketsPrintHtml(rows, {
+      title: `Chamados — ${viewMode === "kanban" ? "Kanban" : "Visão Normal"}`,
+      filters: describeActiveFilters(),
+      generatedAt: new Date(),
+    });
+    if (!printHtml(html)) {
+      toast({ title: "Não foi possível abrir a impressão do navegador.", variant: "destructive" });
+    }
+  };
 
   const changePageSize = (value: string) => {
     const next = normalizeTicketsPageSize(value);
@@ -707,12 +768,36 @@ export default function Tickets() {
           </TabsList>
         </Tabs>
         )}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="outline" className="h-9 self-start lg:self-auto" aria-label="Exportar chamados filtrados">
+              <Download className="mr-2 h-4 w-4" />
+              Exportar
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              Exporta os chamados filtrados na tela
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={exportPdf}>
+              <FileText className="mr-2 h-4 w-4" />
+              Imprimir / salvar em PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={exportCsv}>
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Baixar planilha CSV
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
           <Select
             value={filters.priority || "all"}
             onValueChange={(v) => setFilters((f) => ({ ...f, priority: v === "all" ? undefined : (v as TicketPriority) }))}
           >
-            <SelectTrigger className="h-9 sm:w-[170px]" aria-label="Filtrar por prioridade">
+            <SelectTrigger className="h-9 md:w-[170px]" aria-label="Filtrar por prioridade">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -723,7 +808,7 @@ export default function Tickets() {
             </SelectContent>
           </Select>
           <Select value={emailFilter} onValueChange={(v) => setEmailFilter(v as typeof emailFilter)}>
-            <SelectTrigger className="h-9 sm:w-[160px]" aria-label="Filtrar por e-mail enviado">
+            <SelectTrigger className="h-9 md:w-[160px]" aria-label="Filtrar por e-mail enviado">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -732,7 +817,40 @@ export default function Tickets() {
               <SelectItem value="not_sent">E-mail: Não enviado</SelectItem>
             </SelectContent>
           </Select>
-          <div className="relative sm:w-80">
+          <Select value={period} onValueChange={(v) => setPeriod(v as TicketsPeriod)}>
+            <SelectTrigger className="h-9 md:w-[220px]" aria-label="Filtrar por período de abertura">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(TICKETS_PERIOD_LABELS) as TicketsPeriod[]).map((key) => (
+                <SelectItem key={key} value={key}>
+                  Período: {TICKETS_PERIOD_LABELS[key]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {period === "custom" ? (
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={periodFrom}
+                max={periodTo || undefined}
+                onChange={(e) => setPeriodFrom(e.target.value)}
+                aria-label="Data inicial de abertura"
+                className="h-9 w-[150px]"
+              />
+              <span className="text-sm text-muted-foreground">até</span>
+              <Input
+                type="date"
+                value={periodTo}
+                min={periodFrom || undefined}
+                onChange={(e) => setPeriodTo(e.target.value)}
+                aria-label="Data final de abertura"
+                className="h-9 w-[150px]"
+              />
+            </div>
+          ) : null}
+          <div className="relative min-w-[220px] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               type="search"
@@ -743,7 +861,6 @@ export default function Tickets() {
               className="h-9 pl-8"
             />
           </div>
-        </div>
       </div>
 
       {canManageRole ? (
@@ -823,6 +940,7 @@ export default function Tickets() {
           baseParams={kanbanBaseParams}
           applyClientFilters={applyClientFilters}
           onOpenImage={openImageModal}
+          onVisibleTicketsChange={setKanbanVisibleTickets}
           onShowAllFinished={() => {
             changeViewMode("cards");
             changeTypeTab("RESOLVED");
