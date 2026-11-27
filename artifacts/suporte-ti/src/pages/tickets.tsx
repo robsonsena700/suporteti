@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, ChevronRight, Image as ImageIcon, PlusCircle, Printer, Star } from "lucide-react";
+import { ChevronLeft, ChevronRight, Image as ImageIcon, LayoutGrid, PlusCircle, Printer, Search, SquareKanban, Star } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -35,6 +35,8 @@ import {
 } from "@/lib/tickets-utils";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
+import { TicketsKanban } from "@/components/tickets/tickets-kanban";
+import { matchesTicketQuickSearch } from "@/lib/tickets-kanban";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -47,6 +49,19 @@ const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
 const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v2";
 const PAGE_SIZE_KEY = "suporte-ti:tickets:page-size";
+const VIEW_MODE_KEY = "suporte-ti:tickets:view-mode";
+
+type TicketsViewMode = "cards" | "kanban";
+type KanbanCategory = "ALL" | TicketType;
+
+function getInitialViewMode(): TicketsViewMode {
+  if (typeof window === "undefined") return "cards";
+  try {
+    return window.localStorage.getItem(VIEW_MODE_KEY) === "kanban" ? "kanban" : "cards";
+  } catch {
+    return "cards";
+  }
+}
 
 const TAB_LABELS: Record<TicketsMainTab, string> = {
   [TicketType.SOFTWARE]: "Sistema",
@@ -257,6 +272,11 @@ export default function Tickets() {
   const [imageModalTicketTitle, setImageModalTicketTitle] = useState<string>("");
   const [lastActiveTicketId, setLastActiveTicketId] = useState<number | null>(null);
   const [pageSize, setPageSize] = useState<TicketsPageSize>(() => getInitialPageSize());
+  const [viewMode, setViewMode] = useState<TicketsViewMode>(() => getInitialViewMode());
+  const [kanbanCategory, setKanbanCategory] = useState<KanbanCategory>(() =>
+    initialTypeTab === "RESOLVED" ? "ALL" : (initialTypeTab as TicketType),
+  );
+  const [quickSearch, setQuickSearch] = useState("");
   const [pageState, setPageState] = useState<TicketsPageState>({ sig: "", page: 1 });
   const listTopRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
@@ -378,14 +398,14 @@ export default function Tickets() {
 
   const listTicketsQuery = useListTickets(listTicketsParams, {
     query: {
-      enabled: typeTab !== "RESOLVED",
+      enabled: viewMode === "cards" && typeTab !== "RESOLVED",
       queryKey: getListTicketsQueryKey(listTicketsParams),
     }
   });
 
   const listResolvedTicketsQuery = useListResolvedTickets(listResolvedTicketsParams, {
     query: {
-      enabled: typeTab === "RESOLVED",
+      enabled: viewMode === "cards" && typeTab === "RESOLVED",
       queryKey: getListResolvedTicketsQueryKey(listResolvedTicketsParams),
     }
   });
@@ -423,20 +443,19 @@ export default function Tickets() {
     return (err as any)?.message || "Não foi possível carregar os chamados.";
   }, [error, isError]);
 
-  const visibleTickets = useMemo(() => {
-    return filterAndSortTickets(tickets ?? [], {
-      userFilter,
-      locationFilter,
-      responsibleFilter,
-      sortBy,
-      sortDir,
-    });
-  }, [tickets, userFilter, locationFilter, responsibleFilter, sortBy, sortDir]);
+  // Filtros locais compartilhados pelas visões Normal (Cards) e Kanban.
+  const applyClientFilters = useCallback(
+    <T extends Parameters<typeof filterAndSortTickets>[0][number]>(list: T[]): T[] =>
+      filterAndSortTickets(list, { userFilter, locationFilter, responsibleFilter, sortBy, sortDir })
+        .filter((t) => matchesTicketQuickSearch(t as any, quickSearch)),
+    [userFilter, locationFilter, responsibleFilter, sortBy, sortDir, quickSearch],
+  );
+
+  const visibleTickets = useMemo(() => applyClientFilters(tickets ?? []), [tickets, applyClientFilters]);
 
   const tabCounts = useMemo(() => {
-    const opts = { userFilter, locationFilter, responsibleFilter, sortBy, sortDir };
     const count = (data: Parameters<typeof filterAndSortTickets>[0] | undefined) =>
-      data ? filterAndSortTickets(data, opts).length : undefined;
+      data ? applyClientFilters(data).length : undefined;
     const counts: Record<TicketsMainTab, number | undefined> = {
       [TicketType.SOFTWARE]: count(softwareCountQuery.data),
       [TicketType.HARDWARE]: count(hardwareCountQuery.data),
@@ -452,17 +471,13 @@ export default function Tickets() {
     tickets,
     typeTab,
     visibleTickets.length,
-    userFilter,
-    locationFilter,
-    responsibleFilter,
-    sortBy,
-    sortDir,
+    applyClientFilters,
   ]);
 
   // A página pertence a uma combinação de aba/filtros/ordem/tamanho: qualquer mudança volta para a página 1.
   const pageSig = useMemo(
-    () => JSON.stringify([typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize]),
-    [typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize],
+    () => JSON.stringify([typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch.trim()]),
+    [typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch],
   );
   const pageInfo = getTicketsPageInfo(
     visibleTickets.length,
@@ -481,6 +496,50 @@ export default function Tickets() {
     setPageState({ sig: pageSig, page: target });
     listTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  const changeTypeTab = (next: TicketsMainTab) => {
+    setTypeTab(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(TYPE_TAB_KEY, next);
+    }
+    setFilters((f) => {
+      if (next === "RESOLVED") {
+        const nextStatus = f.status === TicketStatus.OPEN || f.status === TicketStatus.IN_PROGRESS ? undefined : f.status;
+        return { ...f, type: undefined, status: nextStatus };
+      }
+      const nextStatus = f.status === TicketStatus.RESOLVED || f.status === TicketStatus.CLOSED ? undefined : f.status;
+      return { ...f, type: next, status: nextStatus };
+    });
+  };
+
+  const changeViewMode = (next: TicketsViewMode) => {
+    if (next === viewMode) return;
+    setViewMode(next);
+    if (next === "kanban") setKanbanCategory(typeTab === "RESOLVED" ? "ALL" : (typeTab as TicketType));
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, next);
+    } catch {
+    }
+  };
+
+  const changeKanbanCategory = (next: KanbanCategory) => {
+    setKanbanCategory(next);
+    if (next !== "ALL") changeTypeTab(next);
+  };
+
+  const kanbanBaseParams = useMemo(
+    () => ({
+      type: kanbanCategory === "ALL" ? undefined : kanbanCategory,
+      priority: filters.priority,
+      uf: filters.uf,
+      municipality: filters.municipality,
+      mine: filters.mine,
+      noCoordinator: filters.noCoordinator,
+    }),
+    [kanbanCategory, filters.priority, filters.uf, filters.municipality, filters.mine, filters.noCoordinator],
+  );
+
+  const kanbanActor = useMemo(() => (user ? { id: user.id, role: String(user.role) } : null), [user]);
 
   const changePageSize = (value: string) => {
     const next = normalizeTicketsPageSize(value);
@@ -629,38 +688,70 @@ export default function Tickets() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Chamados</h1>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Chamados{viewMode === "kanban" ? <span className="text-muted-foreground font-semibold"> · Kanban</span> : null}
+          </h1>
           <p className="text-muted-foreground mt-1">
-            Gerencie e acompanhe as solicitações de suporte.
+            {viewMode === "kanban"
+              ? "Arraste os cards entre as colunas para atualizar o status do atendimento."
+              : "Gerencie e acompanhe as solicitações de suporte."}
           </p>
         </div>
-        <Button asChild>
-          <Link href="/chamados/novo">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Abrir Chamado
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label="Modo de visualização" className="inline-flex h-10 items-center rounded-lg border bg-muted/50 p-1">
+            {([
+              { id: "cards", label: "Normal (Cards)", Icon: LayoutGrid },
+              { id: "kanban", label: "Kanban", Icon: SquareKanban },
+            ] as const).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={viewMode === id}
+                onClick={() => changeViewMode(id)}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors",
+                  viewMode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4" aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+          <Button asChild>
+            <Link href="/chamados/novo">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Abrir Chamado
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {viewMode === "kanban" ? (
+        <Tabs
+          className="min-w-0 max-w-full overflow-x-auto"
+          value={kanbanCategory}
+          onValueChange={(v) => changeKanbanCategory(v as KanbanCategory)}
+        >
+          <TabsList className="h-11 w-max p-1">
+            <TabsTrigger value="ALL" className="h-9 px-3 sm:px-4">Todos</TabsTrigger>
+            <TabsTrigger value={TicketType.SOFTWARE} className="h-9 gap-1.5 px-3 sm:px-4">
+              <span className="h-2 w-2 rounded-full bg-[var(--series-software)]" aria-hidden="true" />
+              Sistema
+            </TabsTrigger>
+            <TabsTrigger value={TicketType.HARDWARE} className="h-9 gap-1.5 px-3 sm:px-4">
+              <span className="h-2 w-2 rounded-full bg-[var(--series-hardware)]" aria-hidden="true" />
+              Equipamentos
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        ) : (
         <Tabs
           className="min-w-0 max-w-full overflow-x-auto"
           value={typeTab}
-          onValueChange={(v) => {
-            const next = v as TicketsMainTab;
-            setTypeTab(next);
-            if (typeof window !== "undefined") {
-              window.localStorage.setItem(TYPE_TAB_KEY, next);
-            }
-            setFilters((f) => {
-              if (next === "RESOLVED") {
-                const nextStatus = f.status === TicketStatus.OPEN || f.status === TicketStatus.IN_PROGRESS ? undefined : f.status;
-                return { ...f, type: undefined, status: nextStatus };
-              }
-              const nextStatus = f.status === TicketStatus.RESOLVED || f.status === TicketStatus.CLOSED ? undefined : f.status;
-              return { ...f, type: next, status: nextStatus };
-            });
-          }}
+          onValueChange={(v) => changeTypeTab(v as TicketsMainTab)}
         >
           <TabsList className="h-11 w-max p-1">
             <TabsTrigger value={TicketType.SOFTWARE} className="h-9 px-3 sm:px-4">
@@ -683,12 +774,33 @@ export default function Tickets() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="hidden text-xs text-muted-foreground md:block">
-          {typeTab === "RESOLVED"
-            ? "Exibindo chamados resolvidos"
-            : typeTab === TicketType.SOFTWARE
-              ? "Exibindo chamados de Sistema"
-              : "Exibindo chamados de Equipamentos"}
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Select
+            value={filters.priority || "all"}
+            onValueChange={(v) => setFilters((f) => ({ ...f, priority: v === "all" ? undefined : (v as TicketPriority) }))}
+          >
+            <SelectTrigger className="h-9 sm:w-[170px]" aria-label="Filtrar por prioridade">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Prioridade: Todas</SelectItem>
+              <SelectItem value={TicketPriority.HIGH}>Prioridade: Alta</SelectItem>
+              <SelectItem value={TicketPriority.MEDIUM}>Prioridade: Média</SelectItem>
+              <SelectItem value={TicketPriority.LOW}>Prioridade: Baixa</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="relative sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              type="search"
+              value={quickSearch}
+              onChange={(e) => setQuickSearch(e.target.value.slice(0, 120))}
+              placeholder="Buscar por #ID, título, solicitante ou unidade…"
+              aria-label="Buscar chamados"
+              className="h-9 pl-8"
+            />
+          </div>
         </div>
       </div>
 
@@ -750,6 +862,7 @@ export default function Tickets() {
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Status</label>
                       <Select
+                        disabled={viewMode === "kanban"}
                         value={filters.status || "all"}
                         onValueChange={(v) => {
                           if (v === "all") {
@@ -912,6 +1025,7 @@ export default function Tickets() {
         </CardContent>
       </Card>
 
+      {viewMode === "cards" ? (
       <div className="flex flex-wrap items-center gap-2">
         {typeTab === "RESOLVED" ? (
           <>
@@ -948,7 +1062,19 @@ export default function Tickets() {
           </div>
         ) : null}
       </div>
+      ) : null}
 
+      {viewMode === "kanban" ? (
+        <TicketsKanban
+          actor={kanbanActor}
+          baseParams={kanbanBaseParams}
+          applyClientFilters={applyClientFilters}
+          onShowAllFinished={() => {
+            changeViewMode("cards");
+            changeTypeTab("RESOLVED");
+          }}
+        />
+      ) : (
       <Card>
         <CardContent className="p-4">
           {isLoading ? (
@@ -1175,6 +1301,7 @@ export default function Tickets() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {imageModalTicketId != null ? (
         <TicketImageModal
