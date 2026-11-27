@@ -138,13 +138,21 @@ export function canDragKanbanTicket(ticket: KanbanTicket, actor: KanbanActor | n
 }
 
 export function matchesTicketQuickSearch(
-  t: { id: number; title?: string | null; createdBy?: { name?: string | null } | null; establishment?: string | null; municipality?: string | null },
+  t: {
+    id: number;
+    title?: string | null;
+    createdBy?: { name?: string | null } | null;
+    assignedTo?: { name?: string | null } | null;
+    establishment?: string | null;
+    municipality?: string | null;
+    uf?: string | null;
+  },
   query: string,
 ): boolean {
   const q = query.trim().toLowerCase().replace(/^#/, "");
   if (!q) return true;
   if (/^\d+$/.test(q) && String(t.id).startsWith(q)) return true;
-  const hay = [t.title, t.createdBy?.name, t.establishment, t.municipality]
+  const hay = [t.title, t.createdBy?.name, t.assignedTo?.name, t.establishment, t.municipality, t.uf]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()

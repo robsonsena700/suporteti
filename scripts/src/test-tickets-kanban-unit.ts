@@ -83,13 +83,17 @@ assert.equal(canDragKanbanTicket(oldClosed, admin, NOW), false);
 assert.equal(canDragKanbanTicket(closed, admin, NOW), true);
 
 // Busca rápida
-const t = { id: 1806, title: "Impressora de etiqueta", createdBy: { name: "Alex Brito" }, establishment: "Hospital São Paulo", municipality: "Fortaleza" };
+const t = { id: 1806, title: "Impressora de etiqueta", createdBy: { name: "Alex Brito" }, assignedTo: { name: "Aurean Marinho" }, establishment: "Hospital São Paulo", municipality: "Fortaleza", uf: "CE" };
 assert.equal(matchesTicketQuickSearch(t, ""), true);
 assert.equal(matchesTicketQuickSearch(t, "#1806"), true);
 assert.equal(matchesTicketQuickSearch(t, "180"), true);
 assert.equal(matchesTicketQuickSearch(t, "sao paulo"), true);
 assert.equal(matchesTicketQuickSearch(t, "ALEX"), true);
 assert.equal(matchesTicketQuickSearch(t, "monitor"), false);
+assert.equal(matchesTicketQuickSearch(t, "aurean"), true);
+assert.equal(matchesTicketQuickSearch(t, "ce"), true);
+assert.equal(matchesTicketQuickSearch(t, "fortaleza"), true);
+assert.equal(matchesTicketQuickSearch(t, "rj"), false);
 
 // API: status esperado e limite
 assert.equal(parseExpectedStatus({}), null);

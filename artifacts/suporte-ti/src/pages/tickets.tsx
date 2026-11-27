@@ -30,7 +30,6 @@ import {
   normalizeTicketsPageSize,
   type TicketsPageSize,
 } from "@/lib/tickets-utils";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { TicketImageModal } from "@/components/tickets/ticket-image-modal";
 import { TicketsKanban } from "@/components/tickets/tickets-kanban";
 import { TicketCard, hasTicketEmailSent, type TicketListItem } from "@/components/tickets/ticket-card";
@@ -40,10 +39,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@workspace/api-client-react/custom-fetch";
 import { cn } from "@/lib/utils";
-import { MunicipalityCombobox } from "@/components/forms/municipality-combobox";
-import { UFS, fetchMunicipalitiesByUf, getCachedMunicipalities } from "@/lib/municipalities";
 
-const FILTERS_ACCORDION_KEY = "tickets_filters_accordion_open";
 const TYPE_TAB_KEY = "tickets_type_tab";
 const TICKETS_LIST_STATE_KEY = "suporte-ti:tickets:list:state:v2";
 const PAGE_SIZE_KEY = "suporte-ti:tickets:page-size";
@@ -100,11 +96,12 @@ type TicketsListPersistedState = {
   actorUserId: number;
   typeTab: TicketsMainTab;
   filters: TicketsFilters;
-  userFilter: string;
-  locationFilter: string;
-  responsibleFilter: string;
-  sortBy: "createdAt" | "user" | "location" | "responsible";
-  sortDir: "asc" | "desc";
+  // Campos dos antigos "Filtros de chamados" (removidos): mantidos opcionais só para ler estados salvos.
+  userFilter?: string;
+  locationFilter?: string;
+  responsibleFilter?: string;
+  sortBy?: "createdAt" | "user" | "location" | "responsible";
+  sortDir?: "asc" | "desc";
   mineOnlyByTab: MineOnlyByTab;
   scrollY: number | null;
   lastActiveTicketId: number | null;
@@ -245,7 +242,6 @@ function ResolvedTicketRatingStars({ ticketId, actorRole }: { ticketId: number; 
 
 export default function Tickets() {
   const { user } = useAuth();
-  const canSelectUf = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const canManageRole = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST || user?.role === UserRole.COORDINATOR || user?.role === UserRole.GESTOR;
   const canSeeNoCoordinatorFilter = user?.role === UserRole.ADMIN || user?.role === UserRole.ANALYST;
   const initialTypeTab = getInitialTicketTypeTab();
@@ -255,15 +251,6 @@ export default function Tickets() {
   const [filters, setFilters] = useState<TicketsFilters>(() => {
     const type = initialTypeTab === "RESOLVED" ? undefined : (initialTypeTab as TicketType);
     return { type };
-  });
-  const [userFilter, setUserFilter] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
-  const [responsibleFilter, setResponsibleFilter] = useState("");
-  const [sortBy, setSortBy] = useState<"createdAt" | "user" | "location" | "responsible">("createdAt");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(FILTERS_ACCORDION_KEY) === "1";
   });
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageModalTicketId, setImageModalTicketId] = useState<number | null>(null);
@@ -280,21 +267,8 @@ export default function Tickets() {
   const listTopRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollYRef = useRef<number | null>(null);
   const restoreInFlightRef = useRef<boolean>(false);
-  const municipalityValueRef = useRef<string | undefined>(undefined);
-  const [municipalities, setMunicipalities] = useState<string[]>([]);
-  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState(false);
 
   const activeMineOnly = mineOnlyByTab[typeTab] ?? true;
-
-  useEffect(() => {
-    municipalityValueRef.current = filters.municipality;
-  }, [filters.municipality]);
-
-  const municipalityUf = useMemo(() => {
-    if (!user) return "";
-    if (canSelectUf) return filters.uf ?? "";
-    return user.uf ?? "";
-  }, [user, canSelectUf, filters.uf]);
 
   useEffect(() => {
     if (typeTab !== "RESOLVED" && (filters.status === TicketStatus.RESOLVED || filters.status === TicketStatus.CLOSED)) {
@@ -317,53 +291,6 @@ export default function Tickets() {
       return next;
     });
   }, [canManageRole, activeMineOnly, canSeeNoCoordinatorFilter, noCoordinatorOnly]);
-
-  useEffect(() => {
-    if (!municipalityUf) {
-      setMunicipalities([]);
-      setFilters((f) => (f.municipality ? { ...f, municipality: undefined } : f));
-      return;
-    }
-
-    const cached = getCachedMunicipalities(municipalityUf);
-    if (cached.length > 0) {
-      setMunicipalities(cached);
-    }
-
-    if (typeof navigator !== "undefined" && !navigator.onLine && cached.length > 0) {
-      const current = municipalityValueRef.current;
-      if (current && !cached.includes(current)) {
-        setFilters((f) => ({ ...f, municipality: undefined }));
-      }
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingMunicipalities(true);
-
-    fetchMunicipalitiesByUf(municipalityUf)
-      .then((data) => {
-        if (cancelled) return;
-        setMunicipalities(data);
-        const current = municipalityValueRef.current;
-        if (current && !data.includes(current)) {
-          setFilters((f) => ({ ...f, municipality: undefined }));
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMunicipalities([]);
-        setFilters((f) => ({ ...f, municipality: undefined }));
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setIsLoadingMunicipalities(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [municipalityUf]);
 
   const listTicketsParams: ListTicketsParams = {
     status:
@@ -445,10 +372,10 @@ export default function Tickets() {
   // Filtros locais compartilhados pelas visões Normal (Cards) e Kanban.
   const applyClientFilters = useCallback(
     <T extends Parameters<typeof filterAndSortTickets>[0][number]>(list: T[]): T[] =>
-      filterAndSortTickets(list, { userFilter, locationFilter, responsibleFilter, sortBy, sortDir })
+      filterAndSortTickets(list, { sortBy: "createdAt", sortDir: "desc" })
         .filter((t) => matchesTicketQuickSearch(t as any, quickSearch))
         .filter((t) => emailFilter === "all" || hasTicketEmailSent(t as any) === (emailFilter === "sent")),
-    [userFilter, locationFilter, responsibleFilter, sortBy, sortDir, quickSearch, emailFilter],
+    [quickSearch, emailFilter],
   );
 
   const visibleTickets = useMemo(() => applyClientFilters(tickets ?? []), [tickets, applyClientFilters]);
@@ -476,8 +403,8 @@ export default function Tickets() {
 
   // A página pertence a uma combinação de aba/filtros/ordem/tamanho: qualquer mudança volta para a página 1.
   const pageSig = useMemo(
-    () => JSON.stringify([typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch.trim(), emailFilter]),
-    [typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, pageSize, quickSearch, emailFilter],
+    () => JSON.stringify([typeTab, filters, pageSize, quickSearch.trim(), emailFilter]),
+    [typeTab, filters, pageSize, quickSearch, emailFilter],
   );
   const pageInfo = getTicketsPageInfo(
     visibleTickets.length,
@@ -582,18 +509,13 @@ export default function Tickets() {
       actorUserId: user.id,
       typeTab,
       filters,
-      userFilter,
-      locationFilter,
-      responsibleFilter,
-      sortBy,
-      sortDir,
       mineOnlyByTab,
       scrollY: typeof window !== "undefined" ? window.scrollY : null,
       lastActiveTicketId,
       pageState: pageState.sig === pageSig ? pageState : undefined,
       savedAt: Date.now(),
     };
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, pageState, pageSig]);
+  }, [user, typeTab, filters, mineOnlyByTab, lastActiveTicketId, pageState, pageSig]);
 
   const saveNow = useCallback(() => {
     const next = buildPersisted();
@@ -604,12 +526,13 @@ export default function Tickets() {
   const applyPersisted = useCallback((state: TicketsListPersistedState | null) => {
     if (!state) return;
     setTypeTab(state.typeTab);
-    setFilters(state.filters);
-    setUserFilter(state.userFilter);
-    setLocationFilter(state.locationFilter);
-    setResponsibleFilter(state.responsibleFilter);
-    setSortBy(state.sortBy);
-    setSortDir(state.sortDir);
+    // Só restaura filtros que ainda têm controle na tela (status/UF/município saíram com o painel de filtros).
+    setFilters({
+      type: state.filters.type,
+      priority: state.filters.priority,
+      mine: state.filters.mine,
+      noCoordinator: state.filters.noCoordinator,
+    });
     setMineOnlyByTab(state.mineOnlyByTab ?? {
       ...buildDefaultMineOnlyByTab(user?.role),
     });
@@ -690,7 +613,7 @@ export default function Tickets() {
     if (!user) return;
     const id = setTimeout(() => saveNow(), 200);
     return () => clearTimeout(id);
-  }, [user, typeTab, filters, userFilter, locationFilter, responsibleFilter, sortBy, sortDir, mineOnlyByTab, lastActiveTicketId, pageState, saveNow]);
+  }, [user, typeTab, filters, mineOnlyByTab, lastActiveTicketId, pageState, saveNow]);
 
   return (
     <div className="space-y-6">
@@ -809,13 +732,13 @@ export default function Tickets() {
               <SelectItem value="not_sent">E-mail: Não enviado</SelectItem>
             </SelectContent>
           </Select>
-          <div className="relative sm:w-72">
+          <div className="relative sm:w-80">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               type="search"
               value={quickSearch}
               onChange={(e) => setQuickSearch(e.target.value.slice(0, 120))}
-              placeholder="Buscar por #ID, título, solicitante ou unidade…"
+              placeholder="Buscar por #ID, título, solicitante, responsável ou unidade, UF..."
               aria-label="Buscar chamados"
               className="h-9 pl-8"
             />
@@ -849,200 +772,6 @@ export default function Tickets() {
           </div>
         </div>
       ) : null}
-
-      <Card>
-        <CardContent className="p-4">
-          <Accordion
-            type="single"
-            collapsible
-            value={filtersAccordionOpen ? "filters" : ""}
-            onValueChange={(value) => {
-              const open = value === "filters";
-              setFiltersAccordionOpen(open);
-              if (typeof window !== "undefined") {
-                window.localStorage.setItem(FILTERS_ACCORDION_KEY, open ? "1" : "0");
-              }
-            }}
-            className="w-full"
-          >
-            <AccordionItem value="filters" className="border-b-0">
-              <AccordionTrigger
-                className="py-2 hover:no-underline"
-                aria-label={filtersAccordionOpen ? "Recolher filtros" : "Expandir filtros"}
-              >
-                <div className="text-left">
-                  <p className="text-sm font-semibold">Filtros de chamados</p>
-                  <p className="text-xs text-muted-foreground">Status, prioridade, UF, município, localização, responsável e ordenação</p>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="pt-2">
-                <div className="space-y-4">
-                  <div className={cn("grid grid-cols-1 gap-4", canSelectUf ? "md:grid-cols-4" : "md:grid-cols-3")}>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Status</label>
-                      <Select
-                        disabled={viewMode === "kanban"}
-                        value={filters.status || "all"}
-                        onValueChange={(v) => {
-                          if (v === "all") {
-                            setFilters((f) => ({ ...f, status: undefined }));
-                            return;
-                          }
-                          const nextStatus = v as TicketStatus;
-                          if ((nextStatus === TicketStatus.RESOLVED || nextStatus === TicketStatus.CLOSED) && typeTab !== "RESOLVED") {
-                            setTypeTab("RESOLVED");
-                            if (typeof window !== "undefined") {
-                              window.localStorage.setItem(TYPE_TAB_KEY, "RESOLVED");
-                            }
-                            setFilters((f) => ({ ...f, type: undefined, status: nextStatus }));
-                            return;
-                          }
-                          if ((nextStatus === TicketStatus.OPEN || nextStatus === TicketStatus.IN_PROGRESS || nextStatus === TicketStatus.AWAITING_CUSTOMER || nextStatus === TicketStatus.IN_DEVELOPMENT) && typeTab === "RESOLVED") {
-                            setFilters((f) => ({ ...f, status: undefined }));
-                            return;
-                          }
-                          setFilters((f) => ({ ...f, status: nextStatus }));
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={typeTab === "RESOLVED" ? "Todos (resolvidos/cancelados)" : "Abertos e em andamento"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">
-                            {typeTab === "RESOLVED" ? "Todos (resolvidos/cancelados)" : "Abertos e em andamento"}
-                          </SelectItem>
-                          {typeTab !== "RESOLVED" ? (
-                            <>
-                              <SelectItem value={TicketStatus.OPEN}>Aberto</SelectItem>
-                              <SelectItem value={TicketStatus.IN_PROGRESS}>Em Andamento</SelectItem>
-                              <SelectItem value={TicketStatus.AWAITING_CUSTOMER}>Aguardando Cliente</SelectItem>
-                              <SelectItem value={TicketStatus.IN_DEVELOPMENT}>Em Desenvolvimento</SelectItem>
-                              <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                              <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
-                            </>
-                          ) : (
-                            <>
-                              <SelectItem value={TicketStatus.RESOLVED}>Resolvido</SelectItem>
-                              <SelectItem value={TicketStatus.CLOSED}>Cancelado</SelectItem>
-                            </>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Prioridade</label>
-                      <Select
-                        value={filters.priority || "all"}
-                        onValueChange={(v) => setFilters(f => ({ ...f, priority: v === "all" ? undefined : v as TicketPriority }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Todas" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todas</SelectItem>
-                          <SelectItem value={TicketPriority.LOW}>Baixa</SelectItem>
-                          <SelectItem value={TicketPriority.MEDIUM}>Média</SelectItem>
-                          <SelectItem value={TicketPriority.HIGH}>Alta</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {canSelectUf ? (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">UF</label>
-                        <Select
-                          value={filters.uf || "all"}
-                          onValueChange={(v) => setFilters((f) => ({ ...f, uf: v === "all" ? undefined : v, municipality: undefined }))}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Todas as UFs" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Todas as UFs</SelectItem>
-                            {UFS.map(uf => (
-                              <SelectItem key={uf} value={uf}>{uf}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ) : null}
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-sm font-medium">Município</label>
-                        {filters.municipality ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => setFilters((f) => ({ ...f, municipality: undefined }))}
-                          >
-                            Limpar
-                          </Button>
-                        ) : null}
-                      </div>
-                      <MunicipalityCombobox
-                        uf={municipalityUf}
-                        value={filters.municipality ?? ""}
-                        options={municipalities}
-                        loading={isLoadingMunicipalities}
-                        disabled={!municipalityUf}
-                        onChange={(value) => setFilters((f) => ({ ...f, municipality: value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Filtrar por usuário</label>
-                      <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="Nome do solicitante" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Filtrar por localização</label>
-                      <Input value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} placeholder="UF ou Município" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Filtrar por responsável</label>
-                      <Input value={responsibleFilter} onChange={(e) => setResponsibleFilter(e.target.value)} placeholder="Nome do responsável" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Ordenar por</label>
-                      <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="createdAt">Data</SelectItem>
-                          <SelectItem value="user">Usuário</SelectItem>
-                          <SelectItem value="location">Localização</SelectItem>
-                          <SelectItem value="responsible">Responsável</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Ordem</label>
-                      <Select value={sortDir} onValueChange={(v) => setSortDir(v as any)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="asc">Crescente</SelectItem>
-                          <SelectItem value="desc">Decrescente</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        </CardContent>
-      </Card>
 
       {viewMode === "cards" ? (
       <div className="flex flex-wrap items-center gap-2">
