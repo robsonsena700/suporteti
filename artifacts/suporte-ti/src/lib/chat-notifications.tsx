@@ -34,6 +34,18 @@ const ChatNotificationContext = createContext<ChatNotificationContextType>({
 
 // ── LocalStorage helpers ──────────────────────────────────────────────────────
 
+// Chat em segundo plano SUSPENSO (avisos de novas mensagens, contador e stream em tempo real),
+// para reduzir requisições ao servidor até a melhoria do chat. Para reativar: build com
+// VITE_CHAT_BACKGROUND=1 ou, só no navegador atual, localStorage "ti_chat_background" = "1".
+export const CHAT_BACKGROUND_ENABLED: boolean = (() => {
+  if (import.meta.env.VITE_CHAT_BACKGROUND === "1") return true;
+  try {
+    return typeof window !== "undefined" && window.localStorage?.getItem("ti_chat_background") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 const KEY_GROUP = "ti_chat_group_last_id";
 const KEY_DM    = "ti_chat_dm_last_id";
 const KEY_DM_INBOX_CACHE = "ti_chat_dm_inbox_cache_v1";
@@ -108,7 +120,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   const initializedRef = useRef(false);
   const metricsRef = useRef({ groupPolls: 0, groupAvgMs: 0, dmPolls: 0, dmAvgMs: 0 });
   const streamMetricsRef = useRef({ events: 0, avgLatencyMs: 0 });
-  const enableStream = import.meta.env.PROD || localStorage.getItem("ti_chat_stream") === "1";
+  const enableStream = CHAT_BACKGROUND_ENABLED && (import.meta.env.PROD || localStorage.getItem("ti_chat_stream") === "1");
   const [streamConnected, setStreamConnected] = useState(false);
   const [realtimeStatus, setRealtimeStatus] = useState<"disabled" | "connecting" | "connected" | "reconnecting">(
     enableStream ? "connecting" : "disabled"
@@ -547,6 +559,7 @@ export function ChatNotificationProvider({ children }: { children: ReactNode }) 
   // ── Polling loop ──────────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (!CHAT_BACKGROUND_ENABLED) return;
     if (!token || !canAccessChat) return;
 
     const run = async (silent = false): Promise<boolean> => {

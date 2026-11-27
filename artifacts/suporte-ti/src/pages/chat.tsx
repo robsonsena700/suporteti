@@ -8,7 +8,7 @@ import {
 import type { EmojiClickData } from "emoji-picker-react";
 import { Suspense, lazy } from "react";
 import { useAuth } from "@/lib/auth";
-import { useChatNotifications } from "@/lib/chat-notifications";
+import { CHAT_BACKGROUND_ENABLED, useChatNotifications } from "@/lib/chat-notifications";
 import { customFetch } from "@workspace/api-client-react/custom-fetch";
 import { Button } from "@/components/ui/button";
 import { Send, Users, Smile, BellOff, Bell, X, Lock, ArrowLeft, Paperclip, Download, Trash2, FileText, FileImage, Music, Eye, EyeOff, Reply, Pencil } from "lucide-react";
@@ -933,7 +933,16 @@ export default function Chat() {
     const loop = async () => {
       if (stopped) return;
       const isHidden = document.visibilityState !== "visible";
-      const baseMs = realtimeStatus === "connected" ? 60_000 : (isHidden ? 10_000 : 2_000);
+      // Com o chat em segundo plano suspenso, a tela do chat atualiza a cada 10s (e espera se a aba estiver oculta).
+      if (!CHAT_BACKGROUND_ENABLED && isHidden && !first) {
+        pollingRef.current = setTimeout(loop, 10_000);
+        return;
+      }
+      const baseMs = realtimeStatus === "connected"
+        ? 60_000
+        : !CHAT_BACKGROUND_ENABLED
+          ? 10_000
+          : (isHidden ? 10_000 : 2_000);
 
       let ok = true;
       if (conversation.type === "group") {
